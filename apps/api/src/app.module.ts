@@ -6,6 +6,10 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { CompaniesModule } from './modules/companies/companies.module';
+import { CrawlModule } from './modules/crawl/crawl.module';
+import { InternalModule } from './modules/internal/internal.module';
+import { JobsModule } from './modules/jobs/jobs.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { ResumesModule } from './modules/resumes/resumes.module';
@@ -25,7 +29,11 @@ import { UsersModule } from './modules/users/users.module';
     AuthModule,
     UsersModule,
     ResumesModule,
-    // Phase 4+: JobsModule, CompaniesModule, MatchingModule, NotificationsModule
+    CompaniesModule,
+    JobsModule,
+    InternalModule,
+    CrawlModule,
+    // Phase 5+: MatchingModule, NotificationsModule
   ],
   controllers: [AppController],
   providers: [

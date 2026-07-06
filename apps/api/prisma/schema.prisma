@@ -243,6 +243,7 @@ model Company {
   atsProvider   AtsProvider  @default(UNKNOWN)
   atsIdentifier String? // e.g. Greenhouse board token, Lever site slug
   country       String?
+  city          String? // for city-based discovery (Indore/Pune/Bangalore...)
   industry      String?
   size          CompanySize?
   logoUrl       String?

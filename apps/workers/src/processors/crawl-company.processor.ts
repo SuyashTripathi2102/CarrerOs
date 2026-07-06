@@ -1,24 +1,44 @@
 import { Worker, Job } from 'bullmq';
 import { QueueNames } from '../queues/names';
 import { createRedisConnection } from '../queues/connection';
+import { ApiClient } from '../api-client';
+import { AtsAdapter } from '../adapters/types';
+import { greenhouseAdapter } from '../adapters/greenhouse';
+import { leverAdapter } from '../adapters/lever';
+import { ashbyAdapter } from '../adapters/ashby';
 
-interface CrawlCompanyJobData {
+export interface CrawlCompanyJobData {
   companyId: string;
-  atsProvider: 'greenhouse' | 'lever' | 'ashby' | 'workday' | 'unknown';
+  companyName: string;
+  atsProvider: string;
+  atsIdentifier: string;
 }
 
-/**
- * Phase 4 stub: dispatches to the Greenhouse/Lever/Ashby JSON-API fetchers
- * (implemented in this worker, since they're plain HTTP+JSON) or forwards to
- * the Python scraper queue for anti-bot/browser-automation targets.
- */
-export function startCrawlCompanyWorker(): Worker<CrawlCompanyJobData> {
+const ADAPTERS: Record<string, AtsAdapter> = {
+  GREENHOUSE: greenhouseAdapter,
+  LEVER: leverAdapter,
+  ASHBY: ashbyAdapter,
+  // WORKDAY / custom sites → Python scraper via SCRAPE_HARD_TARGET (Phase 4.5)
+};
+
+export function startCrawlCompanyWorker(api: ApiClient): Worker<CrawlCompanyJobData> {
   return new Worker<CrawlCompanyJobData>(
     QueueNames.CRAWL_COMPANY,
     async (job: Job<CrawlCompanyJobData>) => {
-      console.log(`[crawl-company] received job ${job.id} for company ${job.data.companyId}`);
-      // TODO Phase 4: branch on job.data.atsProvider, call the matching fetcher.
+      const { companyId, companyName, atsProvider, atsIdentifier } = job.data;
+      const adapter = ADAPTERS[atsProvider];
+      if (!adapter) throw new Error(`No adapter for ATS provider ${atsProvider}`);
+
+      const jobs = await adapter.fetchJobs(atsIdentifier);
+      const result = await api.syncCompanyJobs(companyId, adapter.source, jobs);
+      console.log(
+        `[crawl-company] ${companyName}: found=${result.found} new=${result.created} removed=${result.removed}`,
+      );
+      return result;
     },
-    { connection: createRedisConnection() },
+    {
+      connection: createRedisConnection(),
+      concurrency: 5, // parallel companies, but gentle on any single ATS host
+    },
   );
 }

@@ -5,7 +5,9 @@
  * Redis wire protocol as this Node `bullmq` package.
  */
 export const QueueNames = {
+  REFRESH_ALL: 'refresh-all', // repeatable 24h tick + manual trigger from the API
   CRAWL_COMPANY: 'crawl-company',
+  CRAWL_BOARD: 'crawl-board',
   SCRAPE_HARD_TARGET: 'scrape-hard-target',
   PARSE_RESUME: 'parse-resume',
   GENERATE_MATCHES: 'generate-matches',
