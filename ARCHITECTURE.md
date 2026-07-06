@@ -1,4 +1,4 @@
-# JobIntel — Architecture (Phase 1)
+# CareerOS — Architecture (Phase 1)
 
 AI-powered job search & career intelligence platform. This document covers the system design
 decided in Phase 1. Nothing here implements business logic yet — that starts in Phase 2 (Database)
@@ -92,7 +92,7 @@ multiple CI configs) only pays off at team scale.
 ## 3. Repo layout
 
 ```
-JobIntel/
+CareerOS/
   apps/
     web/          Next.js frontend
     api/           NestJS backend (owns Prisma schema + DB writes)
@@ -154,7 +154,7 @@ Awaiting approval to proceed to **Phase 3: Backend (auth, resume upload/parsing,
 Phase 1 scaffolding is complete and verified:
 - `apps/web` — Next.js app builds.
 - `apps/api` — NestJS app builds, boots, and serves `GET /api/health`; correctly imports
-  `@jobintel/shared`; correctly fails fast with a clear error when Postgres isn't reachable
+  `@careeros/shared`; correctly fails fast with a clear error when Postgres isn't reachable
   (expected — Docker isn't available in this sandbox, verify locally with `npm run docker:up`).
 - `apps/workers` — type-checks clean, BullMQ wiring against the exact `ioredis` version BullMQ
   itself depends on (avoids a duplicate-package type conflict).

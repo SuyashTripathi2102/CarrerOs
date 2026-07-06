@@ -2,7 +2,7 @@ from fastapi import FastAPI
 
 from app.config import settings
 
-app = FastAPI(title="JobIntel Scraper Service")
+app = FastAPI(title="CareerOS Scraper Service")
 
 
 @app.get("/health")

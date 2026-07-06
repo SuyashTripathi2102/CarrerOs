@@ -1,4 +1,4 @@
-import type { NormalizedJob } from '@jobintel/shared';
+import type { NormalizedJob } from '@careeros/shared';
 
 /** One adapter per ATS: fetch a company's board and normalize it. */
 export interface AtsAdapter {
@@ -6,7 +6,7 @@ export interface AtsAdapter {
   fetchJobs(identifier: string): Promise<NormalizedJob[]>;
 }
 
-const USER_AGENT = 'JobIntel/0.1 (personal job-search agent)';
+const USER_AGENT = 'CareerOS/0.1 (personal job-search agent)';
 
 export async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url, { headers: { 'user-agent': USER_AGENT, accept: 'application/json' } });

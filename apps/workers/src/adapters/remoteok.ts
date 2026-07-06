@@ -1,4 +1,4 @@
-import type { BoardJob } from '@jobintel/shared';
+import type { BoardJob } from '@careeros/shared';
 import { htmlToText } from './html';
 import { capDescription, fetchJson } from './types';
 

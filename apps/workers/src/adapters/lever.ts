@@ -1,4 +1,4 @@
-import type { NormalizedJob } from '@jobintel/shared';
+import type { NormalizedJob } from '@careeros/shared';
 import { AtsAdapter, capDescription, fetchJson, workModeFromText } from './types';
 
 interface LeverPosting {

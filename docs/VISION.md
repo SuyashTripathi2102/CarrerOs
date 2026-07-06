@@ -1,4 +1,4 @@
-# JobIntel — Product Vision
+# CareerOS — Product Vision
 
 *Captured 2026-07-06 from product direction discussion. This supersedes any earlier framing of
 the project as a "job scraper" or job board.*

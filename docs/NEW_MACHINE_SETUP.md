@@ -1,6 +1,6 @@
 # New Machine Setup
 
-Checklist for getting JobIntel running on a fresh Windows PC. (On macOS/Linux, skip the
+Checklist for getting CareerOS running on a fresh Windows PC. (On macOS/Linux, skip the
 WSL/winget specifics — install Node/Python/Docker natively.)
 
 ## 1. Install prerequisites
@@ -24,10 +24,10 @@ the tray is steady.
 ## 2. Clone and install
 
 ```bash
-git clone https://github.com/SuyashTripathi2102/JobIntel.git
-cd JobIntel
+git clone https://github.com/SuyashTripathi2102/CareerOS.git
+cd CareerOS
 npm install
-npm run build --workspace=@jobintel/shared   # api imports its built output
+npm run build --workspace=@careeros/shared   # api imports its built output
 ```
 
 ## 3. Environment files (NOT in git)

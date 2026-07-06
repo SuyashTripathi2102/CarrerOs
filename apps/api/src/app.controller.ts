@@ -1,5 +1,5 @@
 import { Controller, Get } from '@nestjs/common';
-import { WorkModeSchema } from '@jobintel/shared';
+import { WorkModeSchema } from '@careeros/shared';
 import { Public } from './common/decorators/public.decorator';
 import { AppService } from './app.service';
 

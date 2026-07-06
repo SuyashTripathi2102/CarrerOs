@@ -20,7 +20,7 @@ export class StorageService implements OnModuleInit {
   private readonly bucket: string;
 
   constructor(config: ConfigService) {
-    this.bucket = config.get<string>('S3_BUCKET', 'jobintel');
+    this.bucket = config.get<string>('S3_BUCKET', 'careeros');
     this.client = new S3Client({
       endpoint: config.get<string>('S3_ENDPOINT', 'http://localhost:9000'),
       region: config.get<string>('S3_REGION', 'us-east-1'),

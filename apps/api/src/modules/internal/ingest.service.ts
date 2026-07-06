@@ -3,7 +3,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { CrawlStatus, CrawlTier, JobStatus, Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import type { BoardJob, NormalizedJob } from '@jobintel/shared';
+import type { BoardJob, NormalizedJob } from '@careeros/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CompaniesService } from '../companies/companies.service';
 import { EMBED_JOBS_QUEUE } from './internal.constants';

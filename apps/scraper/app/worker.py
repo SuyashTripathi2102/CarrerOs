@@ -19,7 +19,7 @@ async def process(job, token):
 
 async def main() -> None:
     worker = Worker(SCRAPE_HARD_TARGET, process, {"connection": settings.redis_url})
-    print(f"JobIntel scraper worker listening on '{SCRAPE_HARD_TARGET}'")
+    print(f"CareerOS scraper worker listening on '{SCRAPE_HARD_TARGET}'")
     try:
         await asyncio.Event().wait()
     finally:

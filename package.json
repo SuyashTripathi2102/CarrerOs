@@ -1,5 +1,5 @@
 {
-  "name": "jobintel",
+  "name": "careeros",
   "private": true,
   "workspaces": [
     "apps/*",

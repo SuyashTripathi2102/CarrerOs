@@ -1,4 +1,4 @@
-import type { BoardJob, NormalizedJob } from '@jobintel/shared';
+import type { BoardJob, NormalizedJob } from '@careeros/shared';
 
 /**
  * The workers' only write path — everything goes through the API's internal

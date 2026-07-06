@@ -1,4 +1,4 @@
-# JobIntel
+# CareerOS
 
 AI-powered job search & career intelligence platform — automatically discovers jobs across
 company career pages and ATS systems, matches them against your resume, and tracks applications.
@@ -23,7 +23,7 @@ npm install
 npm run docker:up
 
 # build the shared package once before running api/web
-npm run build --workspace=@jobintel/shared
+npm run build --workspace=@careeros/shared
 
 # api
 cd apps/api && cp .env.example .env && npx prisma generate && npm run start:dev

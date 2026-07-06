@@ -8,7 +8,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { z } from 'zod';
-import { BoardJobSchema, NormalizedJobSchema } from '@jobintel/shared';
+import { BoardJobSchema, NormalizedJobSchema } from '@careeros/shared';
 import { Public } from '../../common/decorators/public.decorator';
 import { CompaniesService } from '../companies/companies.service';
 import { IngestService } from './ingest.service';

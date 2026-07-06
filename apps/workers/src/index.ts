@@ -14,7 +14,7 @@ async function main() {
   ];
   await ensureRefreshSchedule();
 
-  console.log(`JobIntel workers started (${workers.length} processors listening).`);
+  console.log(`CareerOS workers started (${workers.length} processors listening).`);
 
   const shutdown = async () => {
     await Promise.all(workers.map((w) => w.close()));

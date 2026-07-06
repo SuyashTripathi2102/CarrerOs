@@ -86,7 +86,7 @@ and a `/metrics` endpoint (Prometheus format) when we deploy — not before.
   above; the *laptop* won't. Realistic sequence: 1k monitored companies (free, this month) →
   10k (needs VPS ~$5-10/mo) → 100k (needs proxies + paid LLM budget). Scale is a budget
   decision, not a code decision.
-- **Renaming** — fine idea, low stakes. "JobIntel" already reads as "Job Intelligence."
+- **Renaming** — fine idea, low stakes. "CareerOS" already reads as "Job Intelligence."
   If renaming, do it now before more history accumulates.
 
 ## What stays (validated by living through it)
@@ -116,4 +116,4 @@ once their prerequisites (budget key; crawl history depth) exist.
 1. **Approve this roadmap reordering** (A → B → C before any dashboard work).
 2. **Budget**: $0 is workable for A-C at ~1k companies. ~$5-20/mo (VPS + paid Gemini tier or
    OpenAI $5) unlocks 10k companies + fast bulk AI. Places API only when we want city sweeps.
-3. **Rename or keep JobIntel** — if renaming, now.
+3. **Rename or keep CareerOS** — if renaming, now.
