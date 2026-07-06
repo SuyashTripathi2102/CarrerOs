@@ -229,10 +229,23 @@ export class OpportunityService {
     });
 
     const totalWeight = modules.reduce((s, m) => s + m.weight, 0);
-    const opportunityScore =
+    let opportunityScore =
       Math.round(
         (modules.reduce((s, m) => s + m.score * m.weight, 0) / totalWeight) * 10,
       ) / 10;
+
+    // Verification gate: never silently recommend a company we barely know.
+    // The 5%-weight quality module can't express "we have no idea who this
+    // is" — so low confidence dampens the whole score AND flags it visibly.
+    if (ctx.company.confidence < 40) {
+      opportunityScore = Math.round(opportunityScore * 0.85 * 10) / 10;
+      modules.push({
+        module: 'verification',
+        score: ctx.company.confidence,
+        weight: 0, // informational — the dampening already applied
+        reason: `⚠ company not yet verified (confidence ${Math.round(ctx.company.confidence)}/100) — score reduced`,
+      });
+    }
 
     const contentHash = createHash('sha256')
       .update(`${ctx.job.title}|${ctx.job.salaryMin}|${ctx.job.salaryMax}`)
