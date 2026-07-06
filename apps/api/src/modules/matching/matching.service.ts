@@ -135,6 +135,83 @@ export class MatchingService {
     return { rescored: matches.length, notified };
   }
 
+  /**
+   * "Why didn't I get notified about this job?" — reconstructs the exact
+   * decision path from stored data: similarity gate, scoring, threshold,
+   * board-copy hold, notification memory. Trust through explainability.
+   */
+  async explainNotification(userId: string, jobId: string, minScore: number) {
+    const job = await this.prisma.job.findUnique({
+      where: { id: jobId },
+      include: {
+        company: { select: { name: true, atsIdentifier: true, confidence: true } },
+        embedding: { select: { id: true } },
+      },
+    });
+    if (!job) throw new BadRequestException('Unknown job');
+
+    const match = await this.prisma.jobMatch.findUnique({
+      where: { userId_jobId: { userId, jobId } },
+    });
+
+    const verdict = (reason: string, detail: Record<string, unknown> = {}) => ({
+      job: { title: job.title, company: job.company.name },
+      notified: !!match?.notifiedAt,
+      reason,
+      ...detail,
+    });
+
+    if (match?.notifiedAt) return verdict('You were notified.', { at: match.notifiedAt });
+
+    if (!match) {
+      if (!job.embedding) return verdict('Job is not embedded yet — pipeline still processing.');
+      let resume;
+      try {
+        resume = await this.getPrimaryResumeContext(userId);
+      } catch {
+        return verdict('Your primary resume is not parsed yet.');
+      }
+      const [sim] = await this.prisma.$queryRaw<{ similarity: number }[]>`
+        SELECT 1 - (je.vector <=> re.vector) AS similarity
+        FROM job_embeddings je
+        CROSS JOIN (SELECT vector FROM resume_embeddings WHERE "resumeVersionId" = ${resume.resumeVersionId}) re
+        WHERE je."jobId" = ${jobId}
+      `;
+      const similarity = Math.round((sim?.similarity ?? 0) * 100) / 100;
+      return similarity <= MIN_SIMILARITY
+        ? verdict(
+            `Below the similarity gate: ${similarity} vs ${MIN_SIMILARITY} required — not close enough to your resume to spend scoring on.`,
+            { similarity },
+          )
+        : verdict(
+            `Similar enough (${similarity}) but not yet deep-scored — it wasn't in the top candidates of the last run.`,
+            { similarity },
+          );
+    }
+
+    if (job.externalId.startsWith('remoteok-') && job.company.atsIdentifier) {
+      return verdict(
+        'Board copy held — this company is directly monitored; the official posting notifies instead.',
+      );
+    }
+
+    if ((match.opportunityScore ?? 0) < minScore) {
+      return verdict(
+        `Opportunity score ${match.opportunityScore} is below your threshold ${minScore}.`,
+        {
+          opportunityScore: match.opportunityScore,
+          threshold: minScore,
+          breakdown: match.scoreBreakdown,
+        },
+      );
+    }
+
+    return verdict(
+      'Qualifies but not yet delivered — it will notify on the next scoring pass.',
+      { opportunityScore: match.opportunityScore },
+    );
+  }
+
   private async scoreAndUpsert(
     userId: string,
     resume: { resumeVersionId: string; parsed: ParsedResume },

@@ -1,55 +1,91 @@
 # CareerOS
 
-AI-powered job search & career intelligence platform — automatically discovers jobs across
-company career pages and ATS systems, matches them against your resume, and tracks applications.
+**A personal AI recruiter.** CareerOS continuously discovers companies across the internet,
+monitors their career pages around the clock, scores every new opportunity against your resume
+with explainable reasoning, and notifies you within minutes of a matching job going live —
+so you never miss an opportunity.
 
-See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the full system design, tech-stack rationale, and
-phase roadmap. Built in phases (Architecture → Database → Backend → Crawler → AI → Dashboard →
-Testing → Deployment); each phase is reviewed before the next starts. Currently: **Phase 1 done,
-awaiting approval for Phase 2**.
+> Not a job board. Job boards wait for you to search. CareerOS hunts.
 
-## Prerequisites
+## What it does today
 
-- Node.js 22+
-- Python 3.10+
-- Docker Desktop (for local Postgres/Redis/MinIO)
+- **Company Discovery Engine** — grows its own company database: directory seeds (YC),
+  board flywheel, career-page probing, ATS-token guessing verified against live ATS APIs.
+  Every discovered company converts toward *permanently monitored* (current conversion: 40%,
+  quality seeds 50%).
+- **7 ATS integrations** via official JSON APIs: Greenhouse, Lever, Ashby, Workable,
+  SmartRecruiters, Recruitee, Breezy — tiered monitoring (30min/4h/24h) with removed-job
+  detection and full history.
+- **Resume intelligence** — structured parsing (with a multimodal fallback for PDFs whose text
+  layer is broken), canonical skill graph, semantic embeddings.
+- **Two-stage AI matching** — pgvector similarity across the whole corpus, LLM deep-scoring of
+  top candidates, honest reasoning ("major seniority mismatch" included).
+- **Opportunity Score** — 8 explainable modules (resume fit, freshness, experience, remote/
+  salary preference, company quality, hiring velocity, skill gap) with verification gating.
+- **Notifications with memory** — Telegram/in-app, official apply links only, never the same
+  job twice unless it materially improves, and `GET /matches/why/:jobId` explains any decision.
+- **Company intelligence** — tech stack, role mix, seniority profile, salary medians, hiring
+  velocity/trend, derived from its own job corpus.
 
-## Setup
+## Architecture
+
+```mermaid
+flowchart LR
+  subgraph Discovery["Company Discovery Engine"]
+    SEEDS[Directory seeds<br/>YC, boards] --> PROBE[Career-page prober<br/>+ ATS token guessing]
+    PROBE -->|MONITORED| COMPANIES[(Companies<br/>+ confidence)]
+  end
+
+  subgraph Crawl["Tiered Crawling (15-min scheduler)"]
+    COMPANIES --> ADAPTERS[7 ATS adapters<br/>official JSON APIs]
+    ADAPTERS -->|batched upsert<br/>+ removed detection| JOBS[(Jobs + history)]
+  end
+
+  subgraph Intelligence["AI Pipeline"]
+    JOBS -->|embed at ingest| VEC[(pgvector)]
+    RESUME[Resume<br/>parsed + embedded] --> MATCH[Two-stage matching<br/>similarity → LLM]
+    VEC --> MATCH
+    MATCH --> OPP[Opportunity Score<br/>8 explainable modules]
+    JOBS -.->|weekly derivation| INTEL[(Company<br/>intelligence)]
+    INTEL --> OPP
+  end
+
+  OPP -->|"≥ threshold + memory gate"| NOTIFY[Notifications<br/>Telegram / in-app]
+
+  style NOTIFY fill:#2563eb,color:#fff
+```
+
+Three deployable units (modular monolith — see [ADR-1](docs/DECISIONS.md)): **API** (NestJS —
+owns the schema, runs AI processors), **workers** (Node — crawling, discovery, scheduling),
+**scraper** (Python — hard targets, Phase D). Postgres+pgvector, Redis+BullMQ, MinIO.
+
+## Documentation
+
+| Doc | What |
+|---|---|
+| [docs/DECISIONS.md](docs/DECISIONS.md) | Architecture Decision Records (10 ADRs) |
+| [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) | Bottleneck audit + roadmap rationale |
+| [docs/SCALE_100K.md](docs/SCALE_100K.md) | "What breaks first at 100k users?" |
+| [docs/VISION.md](docs/VISION.md) | Product vision & feature map |
+| [docs/PHASE4_CRAWLER.md](docs/PHASE4_CRAWLER.md) | Discovery/crawl design |
+| [docs/PROJECT_LOG.md](docs/PROJECT_LOG.md) | Full build journal, bugs and all |
+| [docs/DEPLOY.md](docs/DEPLOY.md) | VPS deployment runbook |
+| [docs/NEW_MACHINE_SETUP.md](docs/NEW_MACHINE_SETUP.md) | Dev environment setup |
+
+## Quick start (development)
 
 ```bash
 npm install
-
-# start local infra (Postgres+pgvector, Redis, MinIO)
-npm run docker:up
-
-# build the shared package once before running api/web
+npm run docker:up                                # Postgres+pgvector, Redis, MinIO
 npm run build --workspace=@careeros/shared
-
-# api
-cd apps/api && cp .env.example .env && npx prisma generate && npm run start:dev
-
-# web
-cd apps/web && npm run dev
-
-# workers
-cd apps/workers && cp .env.example .env && npm run dev
-
-# scraper (Python)
-cd apps/scraper
-python -m venv .venv
-./.venv/Scripts/activate   # or source .venv/bin/activate on macOS/Linux
-pip install -r requirements.txt
-cp .env.example .env
-python -m app.worker        # BullMQ consumer
-uvicorn app.main:app --reload --port 8000   # health/ops endpoints
+cd apps/api && cp .env.example .env              # fill in GEMINI_API_KEY
+npx prisma migrate deploy && npm run start:dev   # API :3001
+cd ../workers && cp .env.example .env && npm run dev
 ```
 
-## Monorepo layout
+Production: see [docs/DEPLOY.md](docs/DEPLOY.md) — `compose.prod.yml` runs the whole stack.
 
-| Path | What |
-|---|---|
-| `apps/web` | Next.js frontend |
-| `apps/api` | NestJS backend — owns the Prisma schema and all DB writes |
-| `apps/workers` | Node BullMQ processors — orchestration + Greenhouse/Lever/Ashby JSON-API crawlers |
-| `apps/scraper` | Python FastAPI + Playwright — JS-heavy/anti-bot career pages |
-| `packages/shared` | Cross-cutting Zod schemas/types shared by `web` and `api` |
+## Numbers (one laptop, free tier, first week)
+
+160 monitored companies · 4,500+ active jobs · 40% discovery→monitored conversion ·
+27 unit tests · CI with Docker builds · $0 spent.

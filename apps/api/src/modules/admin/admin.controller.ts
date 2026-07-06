@@ -90,8 +90,36 @@ export class AdminController {
       runs24h.find((r) => r.status === CrawlStatus.SUCCEEDED)?._count._all ?? 0;
     const totalRuns = runs24h.reduce((s, r) => s + r._count._all, 0);
 
+    // Observability v1: derived from timestamps we already store — no metrics
+    // infrastructure needed until real Prometheus arrives with multi-box deploy.
+    const [derived] = await this.prisma.$queryRaw<
+      {
+        avg_crawl_seconds: number | null;
+        avg_notify_latency_minutes: number | null;
+        matches_today: bigint;
+      }[]
+    >`
+      SELECT
+        (SELECT avg(EXTRACT(EPOCH FROM ("finishedAt" - "startedAt")))
+           FROM crawl_runs
+          WHERE "startedAt" >= ${dayAgo} AND "finishedAt" IS NOT NULL) AS avg_crawl_seconds,
+        (SELECT avg(EXTRACT(EPOCH FROM (m."notifiedAt" - j."firstSeenAt")) / 60)
+           FROM job_matches m JOIN jobs j ON j.id = m."jobId"
+          WHERE m."notifiedAt" >= ${dayAgo}) AS avg_notify_latency_minutes,
+        (SELECT count(*) FROM job_matches WHERE "createdAt" >= ${dayAgo}) AS matches_today
+    `;
+
     return {
       timestamp: new Date().toISOString(),
+      metrics24h: {
+        avgCrawlSeconds:
+          derived.avg_crawl_seconds != null ? Math.round(derived.avg_crawl_seconds * 10) / 10 : null,
+        avgJobToNotificationMinutes:
+          derived.avg_notify_latency_minutes != null
+            ? Math.round(derived.avg_notify_latency_minutes)
+            : null,
+        matchesCreated: Number(derived.matches_today),
+      },
       companies: Object.fromEntries(
         companiesByStage.map((r) => [r.discoveryStage, r._count._all]),
       ),
