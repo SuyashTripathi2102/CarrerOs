@@ -1,0 +1,28 @@
+node_modules/
+.next/
+dist/
+build/
+out/
+.turbo/
+.env
+.env.local
+.env.*.local
+*.log
+npm-debug.log*
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Docker volumes
+docker-data/

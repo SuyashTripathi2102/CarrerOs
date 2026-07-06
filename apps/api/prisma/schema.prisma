@@ -1,0 +1,406 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums — keep in sync with packages/shared/src/enums.ts (the API validates
+// requests against the shared Zod schemas; these are the DB-level mirror).
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum WorkMode {
+  REMOTE
+  HYBRID
+  ONSITE
+}
+
+enum VisaSponsorship {
+  REQUIRED
+  NOT_REQUIRED
+  OPEN_TO_EITHER
+}
+
+enum CompanySize {
+  SEED_STARTUP
+  EARLY_STAGE
+  GROWTH
+  MID_SIZE
+  ENTERPRISE
+}
+
+enum ApplicationStatus {
+  SAVED
+  APPLIED
+  OA
+  INTERVIEW
+  OFFER
+  REJECTED
+  ACCEPTED
+  WITHDRAWN
+}
+
+enum AtsProvider {
+  GREENHOUSE
+  LEVER
+  ASHBY
+  WORKDAY
+  SMARTRECRUITERS
+  RECRUITEE
+  TEAMTAILOR
+  OTHER
+  UNKNOWN
+}
+
+enum JobStatus {
+  ACTIVE
+  REMOVED // disappeared from the source on a later crawl
+  EXPIRED // source marked it closed
+}
+
+enum CrawlStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+  PARTIAL // finished but some pages/endpoints errored
+}
+
+enum NotificationType {
+  NEW_MATCHES
+  DAILY_DIGEST
+  WEEKLY_REPORT
+  SYSTEM
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Identity & preferences
+// ─────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  passwordHash    String? // null for OAuth-only accounts
+  name            String?
+  role            Role      @default(USER)
+  emailVerifiedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  preference    UserPreference?
+  refreshTokens RefreshToken[]
+  resumes       Resume[]
+  matches       JobMatch[]
+  applications  Application[]
+  notifications Notification[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique // store a hash, never the raw token
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model UserPreference {
+  id               String           @id @default(cuid())
+  userId           String           @unique
+  preferredRoles   String[]         @default([])
+  techStack        String[]         @default([])
+  minSalary        Int?
+  salaryCurrency   String? // ISO 4217, e.g. "INR", "USD"
+  countries        String[]         @default([])
+  cities           String[]         @default([])
+  workModes        WorkMode[]       @default([])
+  noticePeriodDays Int?
+  visaSponsorship  VisaSponsorship?
+  companySizes     CompanySize[]    @default([])
+  industries       String[]         @default([])
+  updatedAt        DateTime         @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Resumes — a Resume is the logical document ("Backend resume"), each upload
+// creates a new immutable ResumeVersion. Parsing output and embeddings hang
+// off the version, so history/comparison across versions comes for free.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Resume {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String   @default("My Resume")
+  isPrimary Boolean  @default(false) // the one used for matching by default
+  createdAt DateTime @default(now())
+
+  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  versions ResumeVersion[]
+
+  @@index([userId])
+  @@map("resumes")
+}
+
+model ResumeVersion {
+  id            String   @id @default(cuid())
+  resumeId      String
+  versionNumber Int
+  fileKey       String // object key in S3/MinIO — never store the file in the DB
+  parsedJson    Json? // structured extraction: experience, education, projects, ...
+  atsScore      Int? // 0–100, filled by the analysis worker
+  createdAt     DateTime @default(now())
+
+  resume    Resume           @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+  skills    ResumeSkill[]
+  embedding ResumeEmbedding?
+  matches   JobMatch[]
+
+  @@unique([resumeId, versionNumber])
+  @@map("resume_versions")
+}
+
+model ResumeEmbedding {
+  id              String                      @id @default(cuid())
+  resumeVersionId String                      @unique
+  model           String // embedding model id, e.g. "text-embedding-3-small"
+  vector          Unsupported("vector(1536)")
+  createdAt       DateTime                    @default(now())
+
+  resumeVersion ResumeVersion @relation(fields: [resumeVersionId], references: [id], onDelete: Cascade)
+
+  @@map("resume_embeddings")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Skills — canonical vocabulary. Skill-gap analysis = JobSkill minus
+// ResumeSkill via joins, not string matching.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Skill {
+  id       String  @id @default(cuid())
+  name     String  @unique // normalized lowercase, e.g. "react", "postgresql"
+  category String? // "language" | "framework" | "database" | "cloud" | ...
+
+  resumeSkills ResumeSkill[]
+  jobSkills    JobSkill[]
+
+  @@map("skills")
+}
+
+model ResumeSkill {
+  resumeVersionId String
+  skillId         String
+  yearsOfUse      Float?
+
+  resumeVersion ResumeVersion @relation(fields: [resumeVersionId], references: [id], onDelete: Cascade)
+  skill         Skill         @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@id([resumeVersionId, skillId])
+  @@map("resume_skills")
+}
+
+model JobSkill {
+  jobId    String
+  skillId  String
+  required Boolean @default(true) // required vs nice-to-have
+
+  job   Job   @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@id([jobId, skillId])
+  @@map("job_skills")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Companies & jobs
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Company {
+  id            String       @id @default(cuid())
+  name          String
+  website       String?      @unique
+  careerPageUrl String?
+  atsProvider   AtsProvider  @default(UNKNOWN)
+  atsIdentifier String? // e.g. Greenhouse board token, Lever site slug
+  country       String?
+  industry      String?
+  size          CompanySize?
+  logoUrl       String?
+  linkedinUrl   String?
+  githubOrg     String?
+  description   String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  jobs      Job[]
+  crawlRuns CrawlRun[]
+
+  // One company per ATS board — prevents two rows crawling the same source.
+  @@unique([atsProvider, atsIdentifier])
+  @@index([name])
+  @@map("companies")
+}
+
+model Job {
+  id          String    @id @default(cuid())
+  companyId   String
+  externalId  String // stable id from the source (ATS job id or canonical URL)
+  title       String
+  description String
+  location    String?
+  country     String?
+  workMode    WorkMode?
+  salaryMin   Int?
+  salaryMax   Int?
+  currency    String?
+  seniority   String? // free-form until Phase 5 normalizes it
+  url         String
+  postedAt    DateTime?
+  firstSeenAt DateTime  @default(now())
+  lastSeenAt  DateTime  @default(now()) // crawler bumps this every run it still sees the job
+  status      JobStatus @default(ACTIVE)
+  raw         Json? // original source payload, for reprocessing without recrawling
+
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  skills       JobSkill[]
+  embedding    JobEmbedding?
+  matches      JobMatch[]
+  applications Application[]
+
+  // Dedupe guarantee: a recrawl updates the existing row instead of inserting.
+  @@unique([companyId, externalId])
+  @@index([status, firstSeenAt])
+  @@index([title])
+  @@index([country, workMode])
+  @@map("jobs")
+}
+
+model JobEmbedding {
+  id        String                      @id @default(cuid())
+  jobId     String                      @unique
+  model     String
+  vector    Unsupported("vector(1536)")
+  createdAt DateTime                    @default(now())
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@map("job_embeddings")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Matching & tracking
+// ─────────────────────────────────────────────────────────────────────────────
+
+model JobMatch {
+  id              String    @id @default(cuid())
+  userId          String
+  jobId           String
+  resumeVersionId String // which resume version produced these scores
+  overallScore    Float // 0–100
+  technicalScore  Float
+  experienceScore Float
+  missingSkills   String[]  @default([])
+  reasoning       String? // LLM explanation shown in the dashboard
+  notifiedAt      DateTime? // set when the user was told — "notify once" guard
+  createdAt       DateTime  @default(now())
+
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job           Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  resumeVersion ResumeVersion @relation(fields: [resumeVersionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, jobId]) // re-matching updates, never duplicates
+  @@index([userId, overallScore])
+  @@map("job_matches")
+}
+
+model Application {
+  id        String            @id @default(cuid())
+  userId    String
+  jobId     String
+  status    ApplicationStatus @default(SAVED)
+  notes     String?
+  appliedAt DateTime?
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  user   User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job    Job                @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  events ApplicationEvent[]
+
+  @@unique([userId, jobId])
+  @@index([userId, status])
+  @@map("applications")
+}
+
+// Append-only status timeline — the tracker's history view reads this directly.
+model ApplicationEvent {
+  id            String             @id @default(cuid())
+  applicationId String
+  fromStatus    ApplicationStatus?
+  toStatus      ApplicationStatus
+  note          String?
+  createdAt     DateTime           @default(now())
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId, createdAt])
+  @@map("application_events")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Notifications & crawler observability
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  payload   Json // e.g. { matchIds: [...] } — rendered by the frontend
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@map("notifications")
+}
+
+// One row per crawl attempt per company — the admin panel's data source.
+model CrawlRun {
+  id          String      @id @default(cuid())
+  companyId   String?
+  source      String // "greenhouse" | "lever" | "scraper:playwright" | ...
+  status      CrawlStatus @default(RUNNING)
+  startedAt   DateTime    @default(now())
+  finishedAt  DateTime?
+  jobsFound   Int         @default(0)
+  jobsNew     Int         @default(0)
+  jobsRemoved Int         @default(0)
+  error       String?
+
+  company Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, startedAt])
+  @@index([status, startedAt])
+  @@map("crawl_runs")
+}
