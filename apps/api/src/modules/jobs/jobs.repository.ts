@@ -7,7 +7,22 @@ import { ListJobsDto } from './dto/list-jobs.dto';
 export class JobsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  list(filters: ListJobsDto) {
+  async list(filters: ListJobsDto) {
+    // Search goes through the GIN-indexed tsvector column (websearch syntax:
+    // quoted phrases, OR, -exclusions), then IDs constrain the Prisma query —
+    // ILIKE-over-description died in the Phase A review at ~100k jobs.
+    let searchIds: string[] | undefined;
+    if (filters.search) {
+      const rows = await this.prisma.$queryRaw<{ id: string }[]>`
+        SELECT id FROM jobs
+        WHERE search @@ websearch_to_tsquery('english', ${filters.search})
+        ORDER BY ts_rank(search, websearch_to_tsquery('english', ${filters.search})) DESC
+        LIMIT 2000
+      `;
+      searchIds = rows.map((r) => r.id);
+      if (searchIds.length === 0) return [[], 0] as const;
+    }
+
     const where: Prisma.JobWhereInput = {
       status: filters.status,
       companyId: filters.companyId,
@@ -15,14 +30,7 @@ export class JobsRepository {
         ? { equals: filters.country, mode: 'insensitive' }
         : undefined,
       workMode: filters.workMode,
-      ...(filters.search
-        ? {
-            OR: [
-              { title: { contains: filters.search, mode: 'insensitive' } },
-              { description: { contains: filters.search, mode: 'insensitive' } },
-            ],
-          }
-        : {}),
+      ...(searchIds ? { id: { in: searchIds } } : {}),
     };
 
     return this.prisma.$transaction([

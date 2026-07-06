@@ -125,6 +125,15 @@ export class MatchingService {
     return { resumeVersionId: version.id, parsed: structured };
   }
 
+  /** Embed specific jobs (embed-at-ingest path — called by EmbedProcessor). */
+  async embedJobsByIds(jobIds: string[]): Promise<number> {
+    const missing = await this.prisma.job.findMany({
+      where: { id: { in: jobIds }, embedding: null },
+      select: { id: true, title: true, description: true, location: true },
+    });
+    return this.embedJobs(missing);
+  }
+
   /**
    * Embed ACTIVE jobs that don't have vectors yet, persisting after every
    * chunk — a crash or rate-limit failure mid-backfill loses at most one
@@ -135,6 +144,12 @@ export class MatchingService {
       where: { status: 'ACTIVE', embedding: null },
       select: { id: true, title: true, description: true, location: true },
     });
+    return this.embedJobs(missing);
+  }
+
+  private async embedJobs(
+    missing: { id: string; title: string; description: string; location: string | null }[],
+  ): Promise<number> {
     if (missing.length === 0) return 0;
 
     const CHUNK = 20;

@@ -80,6 +80,26 @@ tighter for followed companies). Dashboard answers: who hired today, who started
 week, trending skills, hiring by city, best-matching companies, roles opened in last 24h,
 companies that ignored my applications.
 
+## Additions agreed 2026-07-06 (post architecture review)
+
+- **Roadmap order is A → B → B.5 → C** (see ARCHITECTURE_REVIEW.md): data-platform hardening →
+  Company Discovery Engine → **Company Intelligence Layer** (rich per-company metadata:
+  locations, hiring history/frequency, tech stack, engineering blog, funding, open source,
+  interview difficulty) → incremental matching + real-time notifications. Referrals and
+  dashboard deliberately postponed until the data engine is mature.
+- **Opportunity Score** replaces plain match %: combines resume fit, hiring freshness (posted
+  20 min ago ≫ 45 days ago), experience fit, remote/salary preference fit, company response
+  signals, referral availability → one actionable 0-100 number with visible sub-factors.
+- **Learning Intelligence**: analyze the live job corpus ("of 2,500 backend jobs this month:
+  docker 68%, redis 61%, aws 58%...") and quantify: "learning Docker + Redis raises your match
+  rate from 74% → 89%." Live hiring demand, not generic advice. Builds after C (needs corpus +
+  matching history).
+- **Browser extension** (later): on any job page — detect company, show match score, missing
+  skills, right resume version, one-click save to tracker.
+- **Three deployable units, no microservices** (frontend, API, workers) — modular monolith,
+  scale 1k → 100k companies via infrastructure (VPS, proxies, paid LLM), never via rewrite.
+  Budget constraint: $0-10/month initially.
+
 ## Honest constraints (agreed)
 
 - LinkedIn/Indeed: never scraped; covered via their official alert emails + the fact that most

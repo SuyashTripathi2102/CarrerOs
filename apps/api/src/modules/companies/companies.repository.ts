@@ -48,10 +48,18 @@ export class CompaniesRepository {
     ]);
   }
 
-  /** Companies the 24h refresh should crawl: supported ATS + identifier present. */
+  /**
+   * Companies due for a crawl right now: supported ATS + identifier present +
+   * nextCrawlAt has passed. The scheduler ticks every 15 min; each company's
+   * cadence comes from its crawlTier (bumped after every sync).
+   */
   findCrawlable(): Promise<Company[]> {
     return this.prisma.company.findMany({
-      where: { atsProvider: { in: CRAWLABLE }, atsIdentifier: { not: null } },
+      where: {
+        atsProvider: { in: CRAWLABLE },
+        atsIdentifier: { not: null },
+        nextCrawlAt: { lte: new Date() },
+      },
     });
   }
 
