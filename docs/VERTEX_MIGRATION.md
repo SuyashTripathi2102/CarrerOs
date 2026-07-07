@@ -124,6 +124,17 @@ Baseline to beat (Developer API, measured 2026-07-07): embeddings batched 20/cal
 at ~15s pacing (free-tier pacing — paid Vertex needs no pacing, so expect embeds
 to finish dramatically faster end-to-end); generate calls ~2–6s.
 
+## Model availability on Vertex (probed live 2026-07-08)
+
+| Location | gemini-3.5-flash | gemini-embedding-2 | gemini-embedding-001 |
+|---|---|---|---|
+| `global` | ✅ | ❌ 404 | ✅ (1536 dims OK) |
+| `us-central1` | ❌ 404 | ❌ 404 | ✅ |
+
+→ Production runs `GOOGLE_CLOUD_LOCATION=global` + `VERTEX_EMBEDDING_MODEL=gemini-embedding-001`.
+The `gemini-embedding-2` name exists only on the Developer API; `text-embedding-005`
+rejects 1536 output dims. Different embedding model = full re-embed mandatory (§3).
+
 ## Notes / gotchas
 
 - `VERTEX_EMBED_BATCH_SIZE` defaults to **1** — gemini-embedding models on

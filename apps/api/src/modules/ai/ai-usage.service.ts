@@ -9,6 +9,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 const PRICE_PER_MTOK: Record<string, { input: number; output: number }> = {
   'gemini-3.5-flash': { input: 1.5, output: 9.0 },
   'gemini-embedding-2': { input: 0.2, output: 0 },
+  'gemini-embedding-001': { input: 0.15, output: 0 }, // Vertex embedding model
 };
 
 export interface AiCallRecord {
