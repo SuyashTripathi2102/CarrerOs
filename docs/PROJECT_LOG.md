@@ -467,3 +467,38 @@ change-password endpoint (Suyash's password transited chat during guided setup).
 Process rule (from the project brief): **each phase needs explicit approval before the next one
 starts.** Claude acts as technical co-founder — explains the "why" before implementing, challenges
 assumptions, prefers long-term maintainability over quick hacks.
+
+---
+
+## 2026-07-07 — New machine setup (laptop swap)
+
+Old laptop returned; its `D:\Work` folder was carried over on an external Seagate disk (mounts
+as `D:` on the new PC). What was recovered from it:
+
+- **`D:\Work\JobIntel`** — the old laptop's working copy (same HEAD `7227f50`, clean, nothing
+  unpushed). Its `apps/api/.env` and `apps/workers/.env` were the carried secrets; restored
+  into the new clone. `apps/scraper/.env` recreated from example with the shared
+  `INTERNAL_API_TOKEN`.
+- **`D:\Work\AmayaLife`** — interview-prep repo with *unpushed* local notes; copied to
+  `C:\Work\AmayaLife` so it doesn't live only on the external disk.
+- The `d--AmayaLife` folder Suyash dropped into the clone was old session *scratchpads*
+  (temp files, screenshots) — no transcripts, nothing needed; the repo docs are the memory.
+
+**Repo location on this PC: `C:\Work\CareerOS`.** Deliberately NOT the OneDrive Desktop
+(sync churn + locked-file errors on node_modules/Prisma engines) and NOT the external `D:`
+(unplug it and the dev stack dies). Same reasoning as old laptop's plain-drive layout.
+
+Machine setup performed: Node v24 was preinstalled; installed Python 3.12, WSL2 2.7.10 and
+Docker Desktop via winget (elevated). npm install + `@careeros/shared` build verified.
+**Reboot required** before Docker works (VirtualMachinePlatform).
+
+Gotchas / follow-ups:
+
+1. **SSH keys don't transfer.** New keypair generated on this PC
+   (`~/.ssh/id_ed25519.pub`, comment `suyash-new-laptop-2026-07`); public key must be added
+   to `root@139.59.15.220:~/.ssh/authorized_keys` (DigitalOcean console or password login)
+   before server ops work from here.
+2. Prod verified healthy from this machine via `http://139.59.15.220:3001/api/health`
+   (public endpoint) — VPS ran autonomously through the entire laptop swap, as designed.
+3. GitHub repo was renamed from JobIntel but to the misspelled **"CarrerOs"** — rename to
+   "CareerOS" still pending (old URLs redirect, so it's safe to do anytime).
