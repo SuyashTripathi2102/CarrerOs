@@ -22,6 +22,8 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/packages/shared ./packages/shared
 COPY --from=builder /app/apps/workers/dist ./apps/workers/dist
+# npm nests exact-pinned deps (ioredis) under the workspace, not the root.
+COPY --from=builder /app/apps/workers/node_modules ./apps/workers/node_modules
 COPY --from=builder /app/apps/workers/package.json ./apps/workers/package.json
 
 WORKDIR /app/apps/workers
