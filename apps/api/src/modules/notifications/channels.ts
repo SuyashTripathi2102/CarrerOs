@@ -5,7 +5,18 @@ import { ConfigService } from '@nestjs/config';
 export interface NotificationChannel {
   readonly name: string;
   isConfigured(): boolean;
-  send(text: string): Promise<void>;
+  send(text: string, opts?: SendOptions): Promise<void>;
+}
+
+export interface InlineButton {
+  text: string;
+  url: string;
+}
+
+export interface SendOptions {
+  /** Rows of URL buttons (Telegram inline keyboard). Callback buttons need
+   *  bot update polling — Phase D-4; URL buttons work with fire-and-forget. */
+  buttons?: InlineButton[][];
 }
 
 /**
@@ -30,7 +41,7 @@ export class TelegramChannel implements NotificationChannel {
     return !!this.token && !!this.chatId;
   }
 
-  async send(text: string): Promise<void> {
+  async send(text: string, opts?: SendOptions): Promise<void> {
     const res = await fetch(`https://api.telegram.org/bot${this.token}/sendMessage`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -39,6 +50,9 @@ export class TelegramChannel implements NotificationChannel {
         text,
         parse_mode: 'HTML',
         link_preview_options: { is_disabled: true },
+        ...(opts?.buttons?.length
+          ? { reply_markup: { inline_keyboard: opts.buttons } }
+          : {}),
       }),
     });
     if (!res.ok) {

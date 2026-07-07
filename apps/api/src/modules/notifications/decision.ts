@@ -1,0 +1,101 @@
+import type { ScoreModule } from '../opportunity/opportunity.service';
+
+/**
+ * The decision layer (ROADMAP Phase D-1): turn scores into a verdict a human
+ * can act on in under 10 seconds. Rule-based v1 — no LLM call, no invented
+ * probabilities; every reason traces to a stored score. Honest bands until
+ * the applications tracker provides real outcome data (Phase F).
+ */
+
+export interface DecisionInput {
+  opportunityScore: number;
+  /** LLM resume-match percentage (JobMatch.overallScore). */
+  resumeMatch: number;
+  missingSkills: string[];
+  modules: ScoreModule[];
+}
+
+export interface Decision {
+  verdict: 'APPLY' | 'CONSIDER' | 'SKIP';
+  /** e.g. "🟢 82/100 · HIGH PRIORITY" */
+  banner: string;
+  /** e.g. "✅ APPLY" */
+  action: string;
+  reasons: string[];
+}
+
+const LEARNABLE_GAP = 3; // ≤ this many missing skills reads as "learnable"
+
+export function decide(input: DecisionInput): Decision {
+  const score = Math.round(input.opportunityScore);
+  const mod = (name: string) => input.modules.find((m) => m.module === name);
+
+  const experience = mod('experienceFit');
+  const freshness = mod('freshness');
+  const company = mod('companyQuality');
+
+  const reasons: string[] = [];
+  const blockers: string[] = [];
+
+  if (experience && experience.score >= 70) reasons.push('experience level fits');
+  if (experience && experience.score < 35) blockers.push('seniority mismatch');
+  if (input.resumeMatch >= 70) reasons.push(`strong resume match (${Math.round(input.resumeMatch)}%)`);
+  if (freshness && freshness.score >= 80) reasons.push('freshly posted — early applicant advantage');
+  if (company && company.score >= 70) reasons.push('solid company signals');
+
+  if (input.missingSkills.length === 0) {
+    reasons.push('no skill gaps detected');
+  } else if (input.missingSkills.length <= LEARNABLE_GAP) {
+    reasons.push(`missing only ${input.missingSkills.join(', ')} — learnable`);
+  } else {
+    blockers.push(`${input.missingSkills.length} skill gaps (${input.missingSkills.slice(0, 4).join(', ')}…)`);
+  }
+
+  let verdict: Decision['verdict'];
+  if (score >= 75 && blockers.length === 0) verdict = 'APPLY';
+  else if (score >= 60) verdict = 'CONSIDER';
+  else verdict = 'SKIP';
+  // A strong score with a hard blocker is still worth a human look — downgrade,
+  // never silently drop.
+  if (verdict === 'APPLY' && blockers.length > 0) verdict = 'CONSIDER';
+
+  const tier =
+    score >= 75
+      ? { emoji: '🟢', label: 'HIGH PRIORITY' }
+      : score >= 60
+        ? { emoji: '🟡', label: 'WORTH A LOOK' }
+        : { emoji: '🔴', label: 'LOW PRIORITY' };
+
+  const action =
+    verdict === 'APPLY' ? '✅ APPLY' : verdict === 'CONSIDER' ? '🤔 CONSIDER' : '❌ SKIP';
+
+  return {
+    verdict,
+    banner: `${tier.emoji} ${score}/100 · ${tier.label}`,
+    action,
+    reasons: [...reasons, ...blockers.map((b) => `⚠ ${b}`)],
+  };
+}
+
+/** 🔥 today · 🟡 this week · ⚪ older — humans parse symbols faster than dates. */
+export function freshnessLine(postedAt: Date | null, firstSeenAt: Date): string {
+  const since = postedAt ?? firstSeenAt;
+  const days = Math.floor((Date.now() - since.getTime()) / 86_400_000);
+  if (days <= 0) return '🔥 Posted today';
+  if (days === 1) return '🔥 Posted yesterday';
+  if (days <= 7) return `🟡 Posted ${days} days ago`;
+  return `⚪ Posted ${days} days ago`;
+}
+
+/** Listed salary or an honest "Not listed" — never estimated (ROADMAP principle). */
+export function salaryLine(
+  min: number | null,
+  max: number | null,
+  currency: string | null,
+): string {
+  if (min == null && max == null) return '💰 Salary not listed';
+  const cur = currency ?? '';
+  const fmt = (n: number) => n.toLocaleString('en-IN');
+  if (min != null && max != null) return `💰 ${cur} ${fmt(min)}–${fmt(max)}`.trim();
+  return `💰 ${cur} ${fmt((min ?? max) as number)}${min != null ? '+' : ''}`.trim();
+}

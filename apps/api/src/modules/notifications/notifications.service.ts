@@ -4,7 +4,8 @@ import { NotificationType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { jobMatchesCountries } from '../matching/location-filter';
 import type { ScoreModule } from '../opportunity/opportunity.service';
-import { TelegramChannel } from './channels';
+import { InlineButton, TelegramChannel } from './channels';
+import { decide, freshnessLine, salaryLine } from './decision';
 
 const RENOTIFY_SCORE_DELTA = 5; // re-notify only if the opportunity improved this much
 
@@ -80,12 +81,29 @@ export class NotificationsService {
       if (!improved) return false; // memory holds — stay silent
     }
 
-    const text = this.formatMatch(match);
-    await this.deliver(match.user.id, text, {
-      matchId: match.id,
-      jobId: match.jobId,
-      opportunityScore: match.opportunityScore,
+    // Twin-posting hint: same company re-lists the same role (onsite/remote
+    // variants). Without this, two identical scores look like a bug
+    // (2026-07-08, the Brigit "66 × 2" confusion).
+    const titleRoot = match.job.title.split(',')[0].trim();
+    const twinCount = await this.prisma.job.count({
+      where: {
+        companyId: match.job.companyId,
+        status: 'ACTIVE',
+        title: { startsWith: titleRoot },
+      },
     });
+
+    const text = this.formatMatch(match, twinCount);
+    await this.deliver(
+      match.user.id,
+      text,
+      {
+        matchId: match.id,
+        jobId: match.jobId,
+        opportunityScore: match.opportunityScore,
+      },
+      this.buildButtons(match.job),
+    );
 
     await this.prisma.jobMatch.update({
       where: { id: match.id },
@@ -100,46 +118,95 @@ export class NotificationsService {
     return true;
   }
 
-  /** Actionable format: score + category, why, and the OFFICIAL apply link. */
-  private formatMatch(match: {
-    opportunityScore: number | null;
-    scoreBreakdown: unknown;
-    reasoning: string | null;
-    job: {
-      title: string;
-      url: string;
-      externalId: string;
-      location: string | null;
-      company: {
-        name: string;
-        atsProvider: string;
-        atsIdentifier: string | null;
-        careerPageUrl: string | null;
+  /**
+   * Decision-first format (ROADMAP Phase D-1): verdict + why in <10 seconds.
+   * The job is evidence; the decision is the product.
+   */
+  private formatMatch(
+    match: {
+      opportunityScore: number | null;
+      overallScore: number;
+      missingSkills: string[];
+      scoreBreakdown: unknown;
+      reasoning: string | null;
+      job: {
+        title: string;
+        url: string;
+        externalId: string;
+        location: string | null;
+        postedAt: Date | null;
+        firstSeenAt: Date;
+        salaryMin: number | null;
+        salaryMax: number | null;
+        currency: string | null;
+        company: {
+          name: string;
+          atsProvider: string;
+          atsIdentifier: string | null;
+          careerPageUrl: string | null;
+        };
       };
-    };
-  }): string {
-    const score = Math.round(match.opportunityScore ?? 0);
-    const flame = score >= 90 ? '🔥' : score >= 80 ? '⭐' : '💼';
-    const label = score >= 85 ? 'Excellent' : score >= 70 ? 'High' : score >= 55 ? 'Medium' : 'Low';
+    },
+    twinCount = 1,
+  ): string {
     const modules = Array.isArray(match.scoreBreakdown)
       ? (match.scoreBreakdown as ScoreModule[])
       : ((match.scoreBreakdown as { modules?: ScoreModule[] })?.modules ?? []);
-    const reasons = modules
-      .map((m) => `${m.score >= 65 ? '✔' : '✖'} ${m.reason}`)
-      .join('\n');
 
-    const apply = this.officialApplyLine(match.job);
+    const decision = decide({
+      opportunityScore: match.opportunityScore ?? 0,
+      resumeMatch: match.overallScore,
+      missingSkills: match.missingSkills,
+      modules,
+    });
 
-    return [
-      `${flame} <b>Opportunity ${score} · ${label}</b>`,
+    const lines: string[] = [
+      `<b>${decision.banner}</b>`,
       ``,
       `<b>${escapeHtml(match.job.title)}</b>`,
-      `${escapeHtml(match.job.company.name)}${match.job.location ? ' · ' + escapeHtml(match.job.location) : ''}`,
+      `${escapeHtml(match.job.company.name)}${match.job.location ? ' · 📍 ' + escapeHtml(match.job.location) : ''}`,
+      `${freshnessLine(match.job.postedAt, match.job.firstSeenAt)} · ${salaryLine(match.job.salaryMin, match.job.salaryMax, match.job.currency)}`,
       ``,
-      reasons,
-      ``,
-      apply,
-    ].join('\n');
+      `🎯 Resume match: <b>${Math.round(match.overallScore)}%</b>`,
+    ];
+
+    if (match.missingSkills.length > 0) {
+      lines.push(`❌ Missing: ${escapeHtml(match.missingSkills.join(', '))}`);
+    }
+
+    lines.push(``, `<b>${decision.action}</b>`);
+    for (const reason of decision.reasons) lines.push(`• ${escapeHtml(reason)}`);
+
+    if (match.reasoning) {
+      lines.push(``, `<i>${escapeHtml(truncate(match.reasoning, 220))}</i>`);
+    }
+
+    if (twinCount > 1) {
+      lines.push(``, `ℹ️ ${twinCount} postings of this role at ${escapeHtml(match.job.company.name)}`);
+    }
+
+    lines.push(``, this.officialApplyLine(match.job));
+    return lines.join('\n');
+  }
+
+  /** URL buttons (callback buttons need bot polling — Phase D-4). */
+  private buildButtons(job: {
+    url: string;
+    externalId: string;
+    company: { atsProvider: string; atsIdentifier: string | null; careerPageUrl: string | null };
+  }) {
+    const isBoardCopy = job.externalId.startsWith('remoteok-');
+    const applyUrl = isBoardCopy
+      ? (boardRootUrl(job.company.atsProvider, job.company.atsIdentifier) ??
+        job.company.careerPageUrl ??
+        job.url)
+      : job.url;
+
+    const rows = [[{ text: '🚀 Apply', url: applyUrl }]];
+    if (job.company.careerPageUrl && job.company.careerPageUrl !== applyUrl) {
+      rows.push([{ text: '🏢 All openings', url: job.company.careerPageUrl }]);
+    }
+    return rows;
   }
 
   /**
@@ -170,6 +237,7 @@ export class NotificationsService {
     userId: string,
     text: string,
     payload: Record<string, unknown>,
+    buttons?: InlineButton[][],
   ): Promise<void> {
     // Always recorded in-app; pushed to any configured channel.
     await this.prisma.notification.create({
@@ -182,7 +250,7 @@ export class NotificationsService {
 
     if (this.telegram.isConfigured()) {
       try {
-        await this.telegram.send(text);
+        await this.telegram.send(text, { buttons });
       } catch (err) {
         this.logger.error(`telegram delivery failed: ${err instanceof Error ? err.message : err}`);
       }
@@ -194,6 +262,10 @@ export class NotificationsService {
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function truncate(s: string, max: number): string {
+  return s.length <= max ? s : `${s.slice(0, max - 1).trimEnd()}…`;
 }
 
 /** Public board roots per ATS — official landing pages for a company's jobs. */
