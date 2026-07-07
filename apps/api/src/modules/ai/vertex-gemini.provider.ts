@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { AiCallKind } from '@prisma/client';
 import { GoogleAuth } from 'google-auth-library';
 import { AiUsageService } from './ai-usage.service';
+import { parseModelJson } from './json.util';
 import { EmbeddingProvider, FilePart, GenerateOptions, LlmProvider } from './llm.provider';
 import { QuotaExhaustedError } from './gemini.provider';
 
@@ -58,11 +59,7 @@ export class VertexGeminiProvider implements LlmProvider, EmbeddingProvider {
 
   async generateJson<T>(prompt: string, opts?: GenerateOptions): Promise<T> {
     const text = await this.generate(prompt, opts, true);
-    try {
-      return JSON.parse(text) as T;
-    } catch {
-      throw new Error(`Model returned invalid JSON: ${text.slice(0, 200)}`);
-    }
+    return parseModelJson<T>(text);
   }
 
   async embed(texts: string[]): Promise<number[][]> {
@@ -132,11 +129,15 @@ export class VertexGeminiProvider implements LlmProvider, EmbeddingProvider {
     const startedAt = Date.now();
     try {
       const res = await this.request<{
-        candidates?: { content?: { parts?: { text?: string }[] } }[];
+        candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[];
         usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
       }>(this.modelUrl(this.textModel, 'generateContent'), body);
 
-      const text = res.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
+      const text =
+        res.candidates?.[0]?.content?.parts
+          ?.filter((p) => !p.thought)
+          .map((p) => p.text ?? '')
+          .join('') ?? '';
       if (!text) throw new Error('Vertex returned an empty response');
 
       this.usage.record({

@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AiCallKind } from '@prisma/client';
 import { AiUsageService } from './ai-usage.service';
+import { parseModelJson } from './json.util';
 import { EmbeddingProvider, FilePart, GenerateOptions, LlmProvider } from './llm.provider';
 
 const BASE = 'https://generativelanguage.googleapis.com/v1beta';
@@ -52,11 +53,7 @@ export class GeminiProvider implements LlmProvider, EmbeddingProvider {
 
   async generateJson<T>(prompt: string, opts?: GenerateOptions): Promise<T> {
     const text = await this.generate(prompt, opts, true);
-    try {
-      return JSON.parse(text) as T;
-    } catch {
-      throw new Error(`Model returned invalid JSON: ${text.slice(0, 200)}`);
-    }
+    return parseModelJson<T>(text);
   }
 
   async embed(texts: string[]): Promise<number[][]> {
@@ -135,11 +132,15 @@ export class GeminiProvider implements LlmProvider, EmbeddingProvider {
     const startedAt = Date.now();
     try {
       const res = await this.request<{
-        candidates?: { content?: { parts?: { text?: string }[] } }[];
+        candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[];
         usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
       }>(`${BASE}/models/${this.textModel}:generateContent`, body);
 
-      const text = res.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
+      const text =
+        res.candidates?.[0]?.content?.parts
+          ?.filter((p) => !p.thought)
+          .map((p) => p.text ?? '')
+          .join('') ?? '';
       if (!text) throw new Error('Gemini returned an empty response');
 
       this.usage.record({
