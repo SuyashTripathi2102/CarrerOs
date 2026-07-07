@@ -27,3 +27,6 @@ Thumbs.db
 # Docker volumes
 docker-data/
 .env.prod
+
+# Vertex service-account keys (mounted into api container, never committed)
+secrets/

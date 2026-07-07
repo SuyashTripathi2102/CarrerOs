@@ -73,30 +73,39 @@ export class AiUsageService {
 
   private async aggregateSince(since: Date) {
     const rows = await this.prisma.aiUsage.groupBy({
-      by: ['kind', 'model'],
+      by: ['kind', 'provider', 'model'],
       where: { createdAt: { gte: since } },
       _count: { _all: true },
       _sum: { items: true, inputTokens: true, outputTokens: true, costUsd: true },
+      _avg: { latencyMs: true },
     });
 
     const byKind = rows.map((r) => ({
       kind: r.kind,
+      provider: r.provider,
       model: r.model,
       calls: r._count._all,
       items: r._sum.items ?? 0,
       inputTokens: r._sum.inputTokens ?? 0,
       outputTokens: r._sum.outputTokens ?? 0,
+      avgLatencyMs: Math.round(r._avg.latencyMs ?? 0),
       estCostUsd: r._sum.costUsd ? Number(r._sum.costUsd) : 0,
     }));
 
-    const errors = await this.prisma.aiUsage.count({
+    const errorRows = await this.prisma.aiUsage.groupBy({
+      by: ['errorCode'],
       where: { createdAt: { gte: since }, ok: false },
+      _count: { _all: true },
     });
+    const errorsByCode = Object.fromEntries(
+      errorRows.map((r) => [r.errorCode ?? 'unknown', r._count._all]),
+    );
 
     return {
       since: since.toISOString(),
       calls: byKind.reduce((n, r) => n + r.calls, 0),
-      errors,
+      errors: errorRows.reduce((n, r) => n + r._count._all, 0),
+      errorsByCode,
       estCostUsd: Number(byKind.reduce((n, r) => n + r.estCostUsd, 0).toFixed(4)),
       byKind,
     };

@@ -599,3 +599,38 @@ returns aggregates. Failure-path recording + breaker get their first real exerci
 prod after the next deploy. Deliberately NOT built (YAGNI until a second provider or real
 volume exists): provider factory with 6 vendor plugins, priority queue tiers, prompt
 versioning.
+
+---
+
+## 2026-07-08 — Vertex AI migration (code complete, awaiting GCP credentials)
+
+Approved plan: move AI calls from Gemini **Developer API** (prepaid-only since Mar 2026,
+trial credits excluded) to **Vertex AI** (bills to Google Cloud → Suyash's ₹28,321 trial
+credits apply; identical models + per-token prices). Full runbook incl. GCP setup,
+re-embed, validation, rollback, benchmarks: **docs/VERTEX_MIGRATION.md**.
+
+Implemented:
+
+1. **`VertexGeminiProvider`** (`modules/ai/vertex-gemini.provider.ts`) — implements both
+   `LlmProvider` + `EmbeddingProvider`. Service-account OAuth2 via `google-auth-library`
+   (new api dep); regional endpoint from `GOOGLE_CLOUD_PROJECT`/`GOOGLE_CLOUD_LOCATION`;
+   embeddings via `:predict` (`VERTEX_EMBED_BATCH_SIZE` default 1 — gemini-embedding
+   models cap instances/request low on Vertex); same quota circuit + ai_usage recording
+   as the Developer-API provider (records as provider "vertex").
+2. **Both providers stay selectable**: `AI_PROVIDER=gemini|vertex` (or per-workload
+   `LLM_PROVIDER`/`EMBEDDING_PROVIDER`). Verified locally: boots + reports correctly
+   under both. **Prod default remains `gemini` — flipping is an .env.prod change.**
+   Gotcha fixed: compose `${VAR:-}` yields empty strings, which ConfigService returns
+   instead of defaults → provider selection uses `||` fall-through, not config defaults.
+3. **`EmbeddingProvider.embeddingModelId`** — inserts now stamp the provider's actual
+   model instead of hardcoded `'gemini-embedding-2'` strings (matching + resumes).
+4. **Dashboard**: `GET /api/ai/usage` now reports active providers/models, per-row
+   avgLatencyMs, and an errorsByCode breakdown (per today/month). Credits balance is
+   not queryable via API — Console → Billing → Credits.
+5. compose.prod.yml: vertex envs passed through + `./secrets:/secrets:ro` mount
+   (gitignored) for the SA key. Backward compatible when unset.
+
+**Blocked on Suyash (VERTEX_MIGRATION.md §1):** GCP project linked to the credit-holding
+billing account, Vertex AI API enabled, service account (`roles/aiplatform.user`), JSON
+key → `/root/careeros/secrets/vertex-sa.json` (chmod 600). Then §2 flip + §3 re-embed
+(backup→wipe→backfill→validate→drop, ~$0.55 against credits) + §6 benchmark via ai_usage.

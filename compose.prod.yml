@@ -90,14 +90,25 @@ services:
       JWT_ACCESS_EXPIRES_IN: 15m
       REFRESH_TOKEN_TTL_DAYS: 7
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?set in .env.prod}
-      AI_PROVIDER: gemini
+      # "gemini" = Developer API (prepaid) | "vertex" = Vertex AI (Cloud billing,
+      # trial credits). Flip in .env.prod; see docs/VERTEX_MIGRATION.md.
+      AI_PROVIDER: ${AI_PROVIDER:-gemini}
+      LLM_PROVIDER: ${LLM_PROVIDER:-}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:?set in .env.prod}
       GEMINI_TEXT_MODEL: ${GEMINI_TEXT_MODEL:-gemini-3.5-flash}
       GEMINI_EMBEDDING_MODEL: ${GEMINI_EMBEDDING_MODEL:-gemini-embedding-2}
+      # Vertex (used only when a provider is "vertex") — key file is mounted below
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
+      GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-us-central1}
+      GOOGLE_APPLICATION_CREDENTIALS: /secrets/vertex-sa.json
       EMBEDDING_DIMS: 1536
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       NOTIFY_MIN_SCORE: ${NOTIFY_MIN_SCORE:-70}
+    volumes:
+      # chmod 600, NOT in git. Harmless empty dir mount until the key exists.
+      - ./secrets:/secrets:ro
     ports:
       - "3001:3001"
     mem_limit: 768m

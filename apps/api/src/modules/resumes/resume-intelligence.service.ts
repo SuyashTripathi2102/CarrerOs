@@ -124,9 +124,9 @@ export class ResumeIntelligenceService {
     // Prisma can't write Unsupported("vector") columns — raw SQL by design.
     await this.prisma.$executeRaw`
       INSERT INTO resume_embeddings (id, "resumeVersionId", model, vector, "createdAt")
-      VALUES (${randomUUID()}, ${resumeVersionId}, 'gemini-embedding-2', ${literal}::vector, now())
+      VALUES (${randomUUID()}, ${resumeVersionId}, ${this.embedder.embeddingModelId}, ${literal}::vector, now())
       ON CONFLICT ("resumeVersionId")
-      DO UPDATE SET vector = ${literal}::vector, model = 'gemini-embedding-2', "createdAt" = now()
+      DO UPDATE SET vector = ${literal}::vector, model = ${this.embedder.embeddingModelId}, "createdAt" = now()
     `;
   }
 }

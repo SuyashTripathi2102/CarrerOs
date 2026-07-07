@@ -32,6 +32,12 @@ export interface LlmProvider {
 }
 
 export interface EmbeddingProvider {
+  /**
+   * Model identifier persisted alongside each vector — vectors from different
+   * models live in incompatible spaces, so rows must say which produced them.
+   */
+  readonly embeddingModelId: string;
+
   /** Batch embeddings — dimensionality fixed by EMBEDDING_DIMS (pgvector schema). */
   embed(texts: string[]): Promise<number[][]>;
 }

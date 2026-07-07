@@ -335,7 +335,7 @@ export class MatchingService {
         const literal = `[${vectors[k].join(',')}]`;
         await this.prisma.$executeRaw`
           INSERT INTO job_embeddings (id, "jobId", model, vector, "createdAt")
-          VALUES (${randomUUID()}, ${chunk[k].id}, 'gemini-embedding-2', ${literal}::vector, now())
+          VALUES (${randomUUID()}, ${chunk[k].id}, ${this.embedder.embeddingModelId}, ${literal}::vector, now())
           ON CONFLICT ("jobId") DO NOTHING
         `;
       }

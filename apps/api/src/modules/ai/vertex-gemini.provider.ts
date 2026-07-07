@@ -1,48 +1,53 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AiCallKind } from '@prisma/client';
+import { GoogleAuth } from 'google-auth-library';
 import { AiUsageService } from './ai-usage.service';
 import { EmbeddingProvider, FilePart, GenerateOptions, LlmProvider } from './llm.provider';
+import { QuotaExhaustedError } from './gemini.provider';
 
-const BASE = 'https://generativelanguage.googleapis.com/v1beta';
-// API allows 100/call, but the free tier's tokens-per-minute cap makes big
-// batches 429 — smaller batches with pacing finish faster than retry loops.
-// Free-tier embedding quota counts each batch ITEM as a request (~100/min):
-// 20 items per call, one call every ~15s ≈ 80 items/min — safely under the cap.
-const EMBED_BATCH_SIZE = 20;
-const EMBED_BATCH_DELAY_MS = 15_000;
+// Vertex bills to Google Cloud (trial credits apply), unlike the Developer
+// API (generativelanguage.googleapis.com) whose paid tier is prepaid-only.
+// Same models, same token prices, different endpoint + auth.
 const MAX_RETRIES = 4;
 
-/** Thrown without an HTTP call while the quota circuit is open. */
-export class QuotaExhaustedError extends Error {
-  constructor(retryAfterMs: number) {
-    super(`Gemini quota circuit open — retrying after ${Math.ceil(retryAfterMs / 1000)}s`);
-    this.name = 'QuotaExhaustedError';
-  }
-}
-
 @Injectable()
-export class GeminiProvider implements LlmProvider, EmbeddingProvider {
-  private readonly logger = new Logger(GeminiProvider.name);
-  private readonly key: string;
+export class VertexGeminiProvider implements LlmProvider, EmbeddingProvider {
+  private readonly logger = new Logger(VertexGeminiProvider.name);
+  private readonly auth = new GoogleAuth({
+    scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+  });
+
+  private readonly project: string;
+  private readonly location: string;
   private readonly textModel: string;
   readonly embeddingModelId: string;
   private readonly embeddingDims: number;
+  private readonly embedBatchSize: number;
   private readonly quotaCooldownMs: number;
 
-  // Circuit breaker: when the daily quota is exhausted, every call 429s until
-  // Google's midnight-Pacific reset. Without this, queued jobs hammer the API
-  // in retry loops for hours (2026-07-07 incident: 8h of continuous 429s).
   private circuitOpenUntil = 0;
 
   constructor(
     config: ConfigService,
     private readonly usage: AiUsageService,
   ) {
-    this.key = config.getOrThrow<string>('GEMINI_API_KEY');
-    this.textModel = config.get<string>('GEMINI_TEXT_MODEL', 'gemini-3.5-flash');
-    this.embeddingModelId = config.get<string>('GEMINI_EMBEDDING_MODEL', 'gemini-embedding-2');
+    // getOrThrow would break boot when vertex isn't selected — the module
+    // factory instantiates this class eagerly, so validate lazily instead.
+    this.project = config.get<string>('GOOGLE_CLOUD_PROJECT', '');
+    this.location = config.get<string>('GOOGLE_CLOUD_LOCATION', 'us-central1');
+    this.textModel = config.get<string>(
+      'VERTEX_TEXT_MODEL',
+      config.get<string>('GEMINI_TEXT_MODEL', 'gemini-3.5-flash'),
+    );
+    this.embeddingModelId = config.get<string>(
+      'VERTEX_EMBEDDING_MODEL',
+      config.get<string>('GEMINI_EMBEDDING_MODEL', 'gemini-embedding-2'),
+    );
     this.embeddingDims = Number(config.get('EMBEDDING_DIMS', 1536));
+    // gemini-embedding models on Vertex historically cap instances-per-call
+    // low; 1 is always safe, raise via env once the quota page confirms more.
+    this.embedBatchSize = Number(config.get('VERTEX_EMBED_BATCH_SIZE', 1));
     this.quotaCooldownMs = Number(config.get('AI_QUOTA_COOLDOWN_MS', 10 * 60_000));
   }
 
@@ -63,34 +68,25 @@ export class GeminiProvider implements LlmProvider, EmbeddingProvider {
     const startedAt = Date.now();
     const out: number[][] = [];
     try {
-      for (let i = 0; i < texts.length; i += EMBED_BATCH_SIZE) {
-        const batch = texts.slice(i, i + EMBED_BATCH_SIZE);
+      for (let i = 0; i < texts.length; i += this.embedBatchSize) {
+        const batch = texts.slice(i, i + this.embedBatchSize);
         const body = {
-          requests: batch.map((text) => ({
-            model: `models/${this.embeddingModelId}`,
-            content: { parts: [{ text }] },
-            outputDimensionality: this.embeddingDims,
+          instances: batch.map((text) => ({
+            content: text,
+            task_type: 'SEMANTIC_SIMILARITY',
           })),
+          parameters: { outputDimensionality: this.embeddingDims },
         };
-        const res = await this.request<{ embeddings: { values: number[] }[] }>(
-          `${BASE}/models/${this.embeddingModelId}:batchEmbedContents`,
-          body,
-        );
-        out.push(...res.embeddings.map((e) => e.values));
-
-        if (i + EMBED_BATCH_SIZE < texts.length) {
-          if ((i / EMBED_BATCH_SIZE) % 10 === 9) {
-            this.logger.log(`Embedding progress: ${out.length}/${texts.length}`);
-          }
-          await new Promise((r) => setTimeout(r, EMBED_BATCH_DELAY_MS));
-        }
+        const res = await this.request<{
+          predictions: { embeddings: { values: number[] } }[];
+        }>(this.modelUrl(this.embeddingModelId, 'predict'), body);
+        out.push(...res.predictions.map((p) => p.embeddings.values));
       }
       this.usage.record({
         kind: AiCallKind.EMBED,
-        provider: 'gemini',
+        provider: 'vertex',
         model: this.embeddingModelId,
         items: texts.length,
-        // batchEmbedContents returns no usage metadata — ~4 chars/token estimate
         inputTokens: Math.ceil(texts.reduce((n, t) => n + t.length, 0) / 4),
         ok: true,
         latencyMs: Date.now() - startedAt,
@@ -99,7 +95,7 @@ export class GeminiProvider implements LlmProvider, EmbeddingProvider {
     } catch (err) {
       this.usage.record({
         kind: AiCallKind.EMBED,
-        provider: 'gemini',
+        provider: 'vertex',
         model: this.embeddingModelId,
         items: texts.length,
         ok: false,
@@ -137,14 +133,14 @@ export class GeminiProvider implements LlmProvider, EmbeddingProvider {
       const res = await this.request<{
         candidates?: { content?: { parts?: { text?: string }[] } }[];
         usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
-      }>(`${BASE}/models/${this.textModel}:generateContent`, body);
+      }>(this.modelUrl(this.textModel, 'generateContent'), body);
 
       const text = res.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
-      if (!text) throw new Error('Gemini returned an empty response');
+      if (!text) throw new Error('Vertex returned an empty response');
 
       this.usage.record({
         kind: AiCallKind.GENERATE,
-        provider: 'gemini',
+        provider: 'vertex',
         model: this.textModel,
         items: 1,
         inputTokens: res.usageMetadata?.promptTokenCount,
@@ -156,7 +152,7 @@ export class GeminiProvider implements LlmProvider, EmbeddingProvider {
     } catch (err) {
       this.usage.record({
         kind: AiCallKind.GENERATE,
-        provider: 'gemini',
+        provider: 'vertex',
         model: this.textModel,
         items: 1,
         ok: false,
@@ -167,15 +163,33 @@ export class GeminiProvider implements LlmProvider, EmbeddingProvider {
     }
   }
 
-  /** POST with retry on 429/5xx — free-tier rate limits are expected, not fatal. */
+  private modelUrl(model: string, verb: 'generateContent' | 'predict'): string {
+    if (!this.project) {
+      throw new Error(
+        'GOOGLE_CLOUD_PROJECT is not set — required when an AI provider is "vertex"',
+      );
+    }
+    const host =
+      this.location === 'global'
+        ? 'aiplatform.googleapis.com'
+        : `${this.location}-aiplatform.googleapis.com`;
+    return `https://${host}/v1/projects/${this.project}/locations/${this.location}/publishers/google/models/${model}:${verb}`;
+  }
+
+  /** POST with SA-token auth + retry on 429/5xx + quota circuit (see GeminiProvider). */
   private async request<T>(url: string, body: unknown): Promise<T> {
     const wait = this.circuitOpenUntil - Date.now();
     if (wait > 0) throw new QuotaExhaustedError(wait);
 
+    const token = await this.auth.getAccessToken();
+
     for (let attempt = 1; ; attempt++) {
-      const res = await fetch(`${url}?key=${this.key}`, {
+      const res = await fetch(url, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+        },
         body: JSON.stringify(body),
       });
 
@@ -187,19 +201,16 @@ export class GeminiProvider implements LlmProvider, EmbeddingProvider {
       const retryable = res.status === 429 || res.status >= 500;
       const text = await res.text().catch(() => '');
       if (!retryable || attempt >= MAX_RETRIES) {
-        // Retries exhausted on 429 = quota is gone, not a blip. Open the
-        // circuit so queued work fails fast instead of hammering for hours;
-        // BullMQ backoff re-tries after the cooldown.
         if (res.status === 429) {
           this.circuitOpenUntil = Date.now() + this.quotaCooldownMs;
           this.logger.error(
-            `Gemini quota exhausted — circuit open for ${this.quotaCooldownMs / 60_000}min`,
+            `Vertex quota exhausted — circuit open for ${this.quotaCooldownMs / 60_000}min`,
           );
         }
-        throw new Error(`Gemini ${res.status}: ${text.slice(0, 300)}`);
+        throw new Error(`Vertex ${res.status}: ${text.slice(0, 300)}`);
       }
       const delayMs = Math.min(60_000, 5_000 * 2 ** (attempt - 1));
-      this.logger.warn(`Gemini ${res.status}, retry ${attempt}/${MAX_RETRIES} in ${delayMs}ms`);
+      this.logger.warn(`Vertex ${res.status}, retry ${attempt}/${MAX_RETRIES} in ${delayMs}ms`);
       await new Promise((r) => setTimeout(r, delayMs));
     }
   }
@@ -208,6 +219,6 @@ export class GeminiProvider implements LlmProvider, EmbeddingProvider {
 function errorCode(err: unknown): string {
   if (err instanceof QuotaExhaustedError) return 'quota_circuit_open';
   const msg = err instanceof Error ? err.message : String(err);
-  const status = /Gemini (\d{3})/.exec(msg)?.[1];
+  const status = /Vertex (\d{3})/.exec(msg)?.[1];
   return status ? `http_${status}` : 'error';
 }
