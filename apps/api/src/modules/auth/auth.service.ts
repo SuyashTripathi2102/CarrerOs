@@ -56,6 +56,26 @@ export class AuthService {
   }
 
   /**
+   * Verify current → rehash → revoke every session. Revoking all refresh
+   * tokens is the point: a password change must lock out whoever else may
+   * hold a session (the old password transited chat during the VPS deploy).
+   */
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<void> {
+    const user = await this.users.findById(userId);
+    if (!user?.passwordHash) throw new UnauthorizedException('Invalid credentials');
+
+    const valid = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!valid) throw new UnauthorizedException('Invalid credentials');
+
+    await this.users.updatePasswordHash(userId, await bcrypt.hash(newPassword, BCRYPT_ROUNDS));
+    await this.refreshTokens.revokeAllForUser(userId);
+  }
+
+  /**
    * Rotation: every refresh consumes the presented token and issues a new pair.
    * Presenting an already-revoked token is treated as theft — all of that
    * user's sessions are revoked.
