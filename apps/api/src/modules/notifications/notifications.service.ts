@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NotificationType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { jobMatchesCountries } from '../matching/location-filter';
 import type { ScoreModule } from '../opportunity/opportunity.service';
 import { TelegramChannel } from './channels';
 
@@ -43,11 +44,21 @@ export class NotificationsService {
             },
           },
         },
-        user: { select: { id: true } },
+        user: { select: { id: true, preference: { select: { countries: true } } } },
       },
     });
     if (!match || match.opportunityScore == null) return false;
     if (match.opportunityScore < this.minScore) return false;
+
+    // Preferred-countries gate (defense in depth — matching also filters, but
+    // pre-existing matches and rescore sweeps must respect it too).
+    const countries = match.user.preference?.countries ?? [];
+    if (!jobMatchesCountries(countries, match.job)) {
+      this.logger.log(
+        `holding notification for ${match.job.company.name} — outside preferred countries [${countries.join(',')}]`,
+      );
+      return false;
+    }
 
     // Board copy of a directly-crawled company? Hold — the official posting
     // (with the real apply link + full description) arrives within the

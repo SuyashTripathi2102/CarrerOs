@@ -1,6 +1,7 @@
 import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
+import { countrySql } from './location-filter';
 import { EMBEDDING_PROVIDER, LLM_PROVIDER } from '../ai/llm.provider';
 import type { EmbeddingProvider, LlmProvider } from '../ai/llm.provider';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -40,6 +41,7 @@ export class MatchingService {
    */
   async generateForUser(userId: string): Promise<{ matched: number; scanned: number }> {
     const resume = await this.getPrimaryResumeContext(userId);
+    const countries = await this.preferredCountries(userId);
 
     // Backfill is best-effort: chunks persist as they finish, so if quota
     // runs dry we score with what's embedded and complete coverage next run.
@@ -52,7 +54,7 @@ export class MatchingService {
       );
     }
 
-    const candidates = await this.similarJobs(resume.resumeVersionId, SIMILARITY_TOP_K);
+    const candidates = await this.similarJobs(resume.resumeVersionId, SIMILARITY_TOP_K, countries);
     this.logger.log(`Prefilter: ${candidates.length} candidates by cosine similarity`);
 
     const toScore = candidates.slice(0, LLM_SCORE_TOP_N);
@@ -90,6 +92,7 @@ export class MatchingService {
         continue; // resume not parsed yet
       }
 
+      const countries = await this.preferredCountries(user.id);
       const candidates = await this.prisma.$queryRaw<
         { id: string; title: string; description: string; similarity: number }[]
       >`
@@ -100,6 +103,7 @@ export class MatchingService {
         CROSS JOIN (SELECT vector FROM resume_embeddings WHERE "resumeVersionId" = ${resume.resumeVersionId}) re
         WHERE j.id = ANY(${jobIds})
           AND 1 - (je.vector <=> re.vector) > ${MIN_SIMILARITY}
+          AND ${countrySql(countries)}
         ORDER BY je.vector <=> re.vector
         LIMIT 10
       `;
@@ -347,9 +351,19 @@ export class MatchingService {
     return missing.length;
   }
 
+  /** Preferred countries from user preferences — [] means no restriction. */
+  private async preferredCountries(userId: string): Promise<string[]> {
+    const prefs = await this.prisma.userPreference.findUnique({
+      where: { userId },
+      select: { countries: true },
+    });
+    return prefs?.countries ?? [];
+  }
+
   private async similarJobs(
     resumeVersionId: string,
     limit: number,
+    countries: string[] = [],
   ): Promise<{ id: string; title: string; description: string; similarity: number }[]> {
     return this.prisma.$queryRaw`
       SELECT j.id, j.title, j.description,
@@ -357,6 +371,7 @@ export class MatchingService {
       FROM job_embeddings je
       JOIN jobs j ON j.id = je."jobId" AND j.status = 'ACTIVE'
       CROSS JOIN (SELECT vector FROM resume_embeddings WHERE "resumeVersionId" = ${resumeVersionId}) re
+      WHERE ${countrySql(countries)}
       ORDER BY je.vector <=> re.vector
       LIMIT ${limit}
     `;
