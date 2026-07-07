@@ -75,6 +75,9 @@ export class CompaniesService {
       careerPageUrl: input.atsHintUrl ?? undefined,
       atsProvider: detected?.identifier ? detected.provider : AtsProvider.UNKNOWN,
       atsIdentifier: detected?.identifier ?? undefined,
+      // Without this, board-discovered companies group as "manual" in funnel
+      // stats — the flywheel's biggest channel was invisible in its own metrics.
+      discoverySource: 'board',
     });
   }
 
