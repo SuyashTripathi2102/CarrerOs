@@ -46,7 +46,9 @@ export function startCrawlCompanyWorker(api: ApiClient): Worker<CrawlCompanyJobD
     },
     {
       connection: createRedisConnection(),
-      concurrency: 5, // parallel companies, but gentle on any single ATS host
+      // Parallel companies, but gentle on any single ATS host. Tuned down via
+      // env on small boxes (prod: 2 on the 1-vCPU droplet).
+      concurrency: Number(process.env.CRAWL_CONCURRENCY ?? 5),
     },
   );
 }

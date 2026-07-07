@@ -1,18 +1,40 @@
 # Production stack: infra + app services, one box, docker compose.
+# Tuned for a 2GB/1vCPU server (DigitalOcean basic droplet):
+#   - per-service memory limits sum to ~1.6GB, leaving OS headroom
+#   - Postgres flags sized for a 2GB shared box
+#   - Redis capped with noeviction (REQUIRED for BullMQ — eviction corrupts queues)
+#   - Node heaps capped so pathological payloads fail fast instead of OOMing the box
+#   - json-file log rotation on every service
+#
 #   cp .env.prod.example .env.prod   # fill in real secrets first
 #   docker compose -f compose.prod.yml --env-file .env.prod up -d --build
 name: careeros-prod
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
 
 services:
   postgres:
     image: pgvector/pgvector:pg17
     restart: unless-stopped
+    command: >
+      postgres
+      -c shared_buffers=256MB
+      -c effective_cache_size=768MB
+      -c work_mem=8MB
+      -c maintenance_work_mem=64MB
+      -c max_connections=30
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-careeros}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env.prod}
       POSTGRES_DB: ${POSTGRES_DB:-careeros}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    mem_limit: 512m
+    logging: *logging
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-careeros}"]
       interval: 10s
@@ -22,8 +44,12 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    # noeviction is mandatory for BullMQ; AOF so queue state survives restarts.
+    command: redis-server --maxmemory 192mb --maxmemory-policy noeviction --appendonly yes
     volumes:
       - redis_data:/data
+    mem_limit: 256m
+    logging: *logging
 
   minio:
     image: minio/minio:latest
@@ -34,6 +60,8 @@ services:
       MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?set in .env.prod}
     volumes:
       - minio_data:/data
+    mem_limit: 256m
+    logging: *logging
 
   api:
     build:
@@ -48,7 +76,8 @@ services:
       minio:
         condition: service_started
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-careeros}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-careeros}?schema=public
+      NODE_OPTIONS: --max-old-space-size=512
+      DATABASE_URL: postgresql://${POSTGRES_USER:-careeros}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-careeros}?schema=public&connection_limit=8
       REDIS_URL: redis://redis:6379
       S3_ENDPOINT: http://minio:9000
       S3_REGION: us-east-1
@@ -71,6 +100,8 @@ services:
       NOTIFY_MIN_SCORE: ${NOTIFY_MIN_SCORE:-70}
     ports:
       - "3001:3001"
+    mem_limit: 768m
+    logging: *logging
 
   workers:
     build:
@@ -81,9 +112,15 @@ services:
       - api
       - redis
     environment:
+      NODE_OPTIONS: --max-old-space-size=384
       REDIS_URL: redis://redis:6379
       API_URL: http://api:3001/api
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+      # 1 vCPU: modest parallelism beats thrash. Raise on a bigger box.
+      CRAWL_CONCURRENCY: 2
+      DISCOVERY_CONCURRENCY: 2
+    mem_limit: 512m
+    logging: *logging
 
   # Python scraper joins in Phase D (Workday/custom-page targets).
   # scraper:

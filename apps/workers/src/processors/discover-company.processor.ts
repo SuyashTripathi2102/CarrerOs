@@ -25,7 +25,8 @@ export function startDiscoverCompanyWorker(api: ApiClient): Worker<DiscoverCompa
     },
     {
       connection: createRedisConnection(),
-      concurrency: 3, // politeness: ≤3 companies probed in parallel
+      // Politeness cap on parallel probes; tuned via env on small boxes.
+      concurrency: Number(process.env.DISCOVERY_CONCURRENCY ?? 3),
     },
   );
 }
