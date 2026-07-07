@@ -502,3 +502,70 @@ Gotchas / follow-ups:
    (public endpoint) — VPS ran autonomously through the entire laptop swap, as designed.
 3. GitHub repo was renamed from JobIntel but to the misspelled **"CarrerOs"** — rename to
    "CareerOS" still pending (old URLs redirect, so it's safe to do anytime).
+
+---
+
+## 2026-07-07/08 — Production incident: silent notifications + AI layer hardening
+
+### Incident: no Telegram notifications after ~2:40pm IST
+
+Root cause was **two compounding issues, neither a delivery failure** (test send verified
+the channel live):
+
+1. **Gemini free-tier daily quota exhausted at 3:16pm IST.** Initial ingest ballooned to
+   5,276 jobs / 492 companies; embedding stopped at exactly 999 jobs (≈ the ~1,000/day
+   free-tier cap) and every AI call 429'd in retry loops for 8+ hours. 4,277 jobs sat
+   unembedded → unmatched → unnotifiable.
+2. **Nothing scored ≥ 70 anyway.** Best of the 58 scored matches was 66 vs
+   NOTIFY_MIN_SCORE=70. Partly honest gaps (Java/GCP roles), partly a handicapped input:
+   the prod resume was vision-parsed to only 15 skills — **JavaScript, TypeScript,
+   MongoDB, Next.js, Docker all missing** — so resumeFit (weight 35) was systematically
+   depressed. **Suyash: re-export the resume as a text-based PDF (Google Docs, not
+   Canva) and upload as a new version.**
+
+Also corrected a wrong assumption from the handoff brief: the droplet itself was created
+2026-07-07 ~11am IST and the whole deploy ran 1:23–2:38pm IST from the old laptop. The
+"notifications until 2pm" were the deploy-time burst; prod never sent a real match
+notification (notifications table was empty).
+
+Ops changes applied on prod (via SSH from new machine):
+
+- `NOTIFY_MIN_SCORE` 70 → **60** (temporary, to see near-miss matches while scoring is
+  tuned; raise back later).
+- **Deleted rogue account** `suyashtripathi2102@gmail.com` — the first deploy-time
+  registration curl ran with the placeholder unreplaced, creating a real account with
+  literal password `YOUR_PASSWORD_HERE` on the public API.
+- Scrubbed the real password from `/root/.bash_history` (change-password endpoint remains
+  Phase D item #5).
+- **Suyash: enable billing on the Google AI project** (aistudio.google.com) — free tier
+  cannot sustain this scale; paid tier clears the backlog in under an hour for a few
+  dollars a month. Provider comparison done: OpenAI is ~10× cheaper on embeddings
+  ($0.02/M vs $0.20/M) and ~2× on scoring, but migration costs a re-embed + provider
+  class — revisit with real usage data, not tonight. Anthropic sells no embeddings API,
+  so Claude-only is impossible for this system.
+
+### AI layer hardening (pre-Phase-D, per external architecture review)
+
+The review asked for provider-agnostic interfaces + env switching + caching — most of
+which already existed (LlmProvider interface, AI_PROVIDER factory, DB-level embedding
+caching). Implemented the genuinely missing parts:
+
+1. **Split `EmbeddingProvider` from `LlmProvider`** (`modules/ai/llm.provider.ts`) with
+   independent DI tokens. New optional envs `LLM_PROVIDER` / `EMBEDDING_PROVIDER`, both
+   falling back to `AI_PROVIDER` — the two workloads have separate vendor markets, so
+   they must be swappable separately (e.g. OpenAI embeddings + Gemini scoring later).
+2. **AI usage accounting**: `ai_usage` table (migration
+   `20260707183248_add_ai_usage_tracking`) — one row per call: kind, model, items,
+   tokens, estimated cost (static price table; vendor invoice is authoritative), ok/error,
+   latency. `GET /api/ai/usage` (JWT) returns today + month aggregates. No more guessing
+   what CareerOS costs to run.
+3. **Quota circuit breaker** in GeminiProvider: when 429 retries exhaust, the circuit
+   opens for `AI_QUOTA_COOLDOWN_MS` (default 10 min) and calls fail fast with
+   `QuotaExhaustedError` instead of hammering a dead quota for hours (yesterday's exact
+   failure mode). BullMQ backoff naturally re-tries after cooldown.
+
+E2E-verified locally: migration applied, API boots with new DI wiring, `/api/ai/usage`
+returns aggregates. Failure-path recording + breaker get their first real exercise on
+prod after the next deploy. Deliberately NOT built (YAGNI until a second provider or real
+volume exists): provider factory with 6 vendor plugins, priority queue tiers, prompt
+versioning.

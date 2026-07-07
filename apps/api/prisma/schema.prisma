@@ -496,3 +496,33 @@ model CrawlRun {
   @@index([status, startedAt])
   @@map("crawl_runs")
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AI usage accounting — one row per provider call (or batched embed call).
+// costUsd is an estimate from a static price table; the vendor invoice is
+// authoritative. Feeds GET /ai/usage so running costs are visible, not guessed.
+
+enum AiCallKind {
+  EMBED
+  GENERATE
+}
+
+model AiUsage {
+  id           String     @id @default(cuid())
+  kind         AiCallKind
+  provider     String // "gemini" | "openai" | ...
+  model        String
+  items        Int        @default(1) // texts embedded, or 1 per generate call
+  inputTokens  Int?
+  outputTokens Int?
+  costUsd      Decimal?   @db.Decimal(10, 6)
+  ok           Boolean
+  errorCode    String? // "http_429" | "quota_circuit_open" | ...
+  latencyMs    Int
+
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([kind, createdAt])
+  @@map("ai_usage")
+}

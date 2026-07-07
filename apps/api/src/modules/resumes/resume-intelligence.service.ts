@@ -2,8 +2,8 @@ import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
-import { LLM_PROVIDER } from '../ai/llm.provider';
-import type { LlmProvider } from '../ai/llm.provider';
+import { EMBEDDING_PROVIDER, LLM_PROVIDER } from '../ai/llm.provider';
+import type { EmbeddingProvider, LlmProvider } from '../ai/llm.provider';
 
 export interface ParsedResume {
   fullName: string | null;
@@ -39,6 +39,7 @@ export class ResumeIntelligenceService {
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     @Inject(LLM_PROVIDER) private readonly llm: LlmProvider,
+    @Inject(EMBEDDING_PROVIDER) private readonly embedder: EmbeddingProvider,
   ) {}
 
   /**
@@ -118,7 +119,7 @@ export class ResumeIntelligenceService {
   }
 
   private async storeEmbedding(resumeVersionId: string, summary: string): Promise<void> {
-    const [vector] = await this.llm.embed([summary]);
+    const [vector] = await this.embedder.embed([summary]);
     const literal = `[${vector.join(',')}]`;
     // Prisma can't write Unsupported("vector") columns — raw SQL by design.
     await this.prisma.$executeRaw`

@@ -1,8 +1,8 @@
 import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
-import { LLM_PROVIDER } from '../ai/llm.provider';
-import type { LlmProvider } from '../ai/llm.provider';
+import { EMBEDDING_PROVIDER, LLM_PROVIDER } from '../ai/llm.provider';
+import type { EmbeddingProvider, LlmProvider } from '../ai/llm.provider';
 import { NotificationsService } from '../notifications/notifications.service';
 import { OpportunityService } from '../opportunity/opportunity.service';
 import type { ParsedResume } from '../resumes/resume-intelligence.service';
@@ -28,6 +28,7 @@ export class MatchingService {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(LLM_PROVIDER) private readonly llm: LlmProvider,
+    @Inject(EMBEDDING_PROVIDER) private readonly embedder: EmbeddingProvider,
     private readonly opportunity: OpportunityService,
     private readonly notifications: NotificationsService,
   ) {}
@@ -328,7 +329,7 @@ export class MatchingService {
       const texts = chunk.map((j) =>
         `${j.title}\n${j.location ?? ''}\n${j.description.slice(0, 2_000)}`.trim(),
       );
-      const vectors = await this.llm.embed(texts);
+      const vectors = await this.embedder.embed(texts);
 
       for (let k = 0; k < chunk.length; k++) {
         const literal = `[${vectors[k].join(',')}]`;
