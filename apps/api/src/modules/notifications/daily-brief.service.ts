@@ -45,7 +45,8 @@ export class DailyBriefService {
     return { sent };
   }
 
-  private async compose(userId: string, name: string | null): Promise<string> {
+  /** Structured brief — consumed by the Telegram formatter AND the dashboard. */
+  async data(userId: string) {
     const dayAgo = new Date(Date.now() - 24 * 3_600_000);
     const weekAgo = new Date(Date.now() - 7 * 86_400_000);
 
@@ -99,11 +100,26 @@ export class DailyBriefService {
         `,
       ]);
 
+    return {
+      newJobs24h,
+      indiaNew24h: Number(indiaNew24h[0]?.n ?? 0),
+      recommended24h,
+      mustApply: mustApply.map((j) => ({ ...j, score: Number(j.score) })),
+      worthALook: worthALook.map((j) => ({ ...j, score: Number(j.score) })),
+      trending: trending.map((t) => ({ company: t.company, newJobs7d: Number(t.n) })),
+      missingSkills: skills.map((s) => ({ skill: s.skill, count: Number(s.n) })),
+    };
+  }
+
+  private async compose(userId: string, name: string | null): Promise<string> {
+    const { newJobs24h, indiaNew24h, recommended24h, mustApply, worthALook, trending, missingSkills } =
+      await this.data(userId);
+
     const lines: string[] = [
       `☀️ <b>Daily Brief — ${new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}</b>`,
       `Good morning${name ? ` ${escapeHtml(name.split(' ')[0])}` : ''} 👋`,
       ``,
-      `📥 New jobs (24h): <b>${newJobs24h}</b> · 🇮🇳 India: <b>${Number(indiaNew24h[0]?.n ?? 0)}</b>`,
+      `📥 New jobs (24h): <b>${newJobs24h}</b> · 🇮🇳 India: <b>${indiaNew24h}</b>`,
       `🎯 Recommended for you (24h): <b>${recommended24h}</b>`,
     ];
 
@@ -134,12 +150,12 @@ export class DailyBriefService {
     if (trending.length > 0) {
       lines.push(
         ``,
-        `📈 <b>Hiring this week:</b> ${trending.map((t) => `${escapeHtml(t.company)} (+${Number(t.n)})`).join(', ')}`,
+        `📈 <b>Hiring this week:</b> ${trending.map((t) => `${escapeHtml(t.company)} (+${t.newJobs7d})`).join(', ')}`,
       );
     }
-    if (skills.length > 0) {
+    if (missingSkills.length > 0) {
       lines.push(
-        `🧩 <b>Top missing skills:</b> ${skills.map((s) => `${escapeHtml(s.skill)} (${Number(s.n)})`).join(', ')}`,
+        `🧩 <b>Top missing skills:</b> ${missingSkills.map((s) => `${escapeHtml(s.skill)} (${s.count})`).join(', ')}`,
       );
     }
 

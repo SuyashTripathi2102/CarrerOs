@@ -1,65 +1,226 @@
-import Image from "next/image";
+'use client';
 
-export default function Home() {
+import { useEffect, useState } from 'react';
+import { apiGet, logout } from '../lib/api';
+
+interface BriefJob {
+  score: number;
+  title: string;
+  company: string;
+  location: string | null;
+  workMode: string | null;
+  url?: string;
+}
+
+interface Dashboard {
+  brief: {
+    newJobs24h: number;
+    indiaNew24h: number;
+    recommended24h: number;
+    mustApply: BriefJob[];
+    worthALook: BriefJob[];
+    trending: { company: string; newJobs7d: number }[];
+    missingSkills: { skill: string; count: number }[];
+  };
+  funnel: {
+    crawled: number;
+    matched: number;
+    recommended: number;
+    notified: number;
+    applied: number;
+  };
+}
+
+/** Score badge: tier semantics (status colors), number always visible. */
+function ScoreBadge({ score }: { score: number }) {
+  const tier =
+    score >= 75
+      ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
+      : score >= 60
+        ? 'bg-amber-950 text-amber-300 border-amber-800'
+        : 'bg-red-950 text-red-300 border-red-800';
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <span
+      className={`inline-flex h-9 w-12 items-center justify-center rounded-lg border text-sm font-semibold ${tier}`}
+    >
+      {score}
+    </span>
+  );
+}
+
+function locationLine(j: BriefJob): string {
+  const parts = [j.location, j.workMode?.toLowerCase()].filter(Boolean);
+  return parts.join(' · ');
+}
+
+function Tile({ label, value, hint }: { label: string; value: number; hint?: string }) {
+  return (
+    <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+      <div className="text-3xl font-semibold tabular-nums tracking-tight">
+        {value.toLocaleString()}
+      </div>
+      <div className="mt-1 text-xs uppercase tracking-wide text-neutral-400">{label}</div>
+      {hint && <div className="text-[11px] text-neutral-500">{hint}</div>}
+    </div>
+  );
+}
+
+function JobCard({ job, highlight }: { job: BriefJob; highlight: boolean }) {
+  return (
+    <div
+      className={`flex items-center gap-4 rounded-xl border p-4 ${
+        highlight ? 'border-emerald-900 bg-neutral-900' : 'border-neutral-800 bg-neutral-900/60'
+      }`}
+    >
+      <ScoreBadge score={job.score} />
+      <div className="min-w-0 flex-1">
+        <div className="truncate font-medium text-neutral-100">{job.title}</div>
+        <div className="truncate text-sm text-neutral-400">
+          {job.company}
+          {locationLine(job) ? ` · ${locationLine(job)}` : ''}
+        </div>
+      </div>
+      {job.url && (
+        <a
+          href={job.url}
+          target="_blank"
+          rel="noreferrer"
+          className="shrink-0 rounded-lg bg-neutral-100 px-3 py-1.5 text-sm font-medium text-neutral-950 hover:bg-white"
+        >
+          Apply
+        </a>
+      )}
+    </div>
+  );
+}
+
+export default function MissionControl() {
+  const [data, setData] = useState<Dashboard | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    apiGet<Dashboard>('/dashboard')
+      .then(setData)
+      .catch((e) => setError(String(e)));
+  }, []);
+
+  if (error)
+    return (
+      <Shell>
+        <p className="text-red-400">{error}</p>
+      </Shell>
+    );
+  if (!data)
+    return (
+      <Shell>
+        <p className="text-neutral-400">Loading your day…</p>
+      </Shell>
+    );
+
+  const { brief, funnel } = data;
+  const today = new Date().toLocaleDateString('en-IN', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  });
+
+  return (
+    <Shell>
+      <header className="flex items-baseline justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Mission Control</h1>
+          <p className="text-sm text-neutral-400">{today}</p>
+        </div>
+        <button onClick={logout} className="text-sm text-neutral-500 hover:text-neutral-300">
+          Sign out
+        </button>
+      </header>
+
+      {/* North-star funnel */}
+      <section className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <Tile label="Jobs watched" value={funnel.crawled} />
+        <Tile label="Matched to you" value={funnel.matched} />
+        <Tile label="Recommended" value={funnel.recommended} />
+        <Tile label="Notified" value={funnel.notified} />
+        <Tile label="Applied" value={funnel.applied} hint="the number that matters" />
+      </section>
+
+      {/* Today */}
+      <section className="mt-8">
+        <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-400">
+          Today — {brief.newJobs24h} new jobs · {brief.indiaNew24h} in India ·{' '}
+          {brief.recommended24h} recommended
+        </h2>
+
+        <h3 className="mt-5 flex items-center gap-2 text-lg font-semibold">
+          🔥 Apply today
+          <span className="text-sm font-normal text-neutral-500">fresh, high-scoring</span>
+        </h3>
+        <div className="mt-3 space-y-2">
+          {brief.mustApply.length === 0 && (
+            <p className="rounded-xl border border-neutral-800 bg-neutral-900/60 p-4 text-sm text-neutral-400">
+              Nothing clears the bar today — it stays high on purpose.
+            </p>
+          )}
+          {brief.mustApply.map((j, i) => (
+            <JobCard key={i} job={j} highlight />
+          ))}
+        </div>
+
+        {brief.worthALook.length > 0 && (
+          <>
+            <h3 className="mt-6 text-lg font-semibold">👀 Worth a look</h3>
+            <div className="mt-3 space-y-2">
+              {brief.worthALook.map((j, i) => (
+                <JobCard key={i} job={j} highlight={false} />
+              ))}
+            </div>
+          </>
+        )}
+      </section>
+
+      {/* Market signals */}
+      <section className="mt-8 grid gap-4 sm:grid-cols-2">
+        <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+          <h3 className="text-sm font-medium uppercase tracking-wide text-neutral-400">
+            Hiring this week
+          </h3>
+          <ul className="mt-3 space-y-2">
+            {brief.trending.map((t) => (
+              <li key={t.company} className="flex items-baseline justify-between text-sm">
+                <span className="text-neutral-200">{t.company}</span>
+                <span className="tabular-nums text-neutral-400">+{t.newJobs7d} roles</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+          <h3 className="text-sm font-medium uppercase tracking-wide text-neutral-400">
+            Top missing skills
+          </h3>
+          <ul className="mt-3 flex flex-wrap gap-2">
+            {brief.missingSkills.map((s) => (
+              <li
+                key={s.skill}
+                className="rounded-full border border-neutral-700 bg-neutral-950 px-3 py-1 text-sm text-neutral-300"
+              >
+                {s.skill} <span className="text-neutral-500">×{s.count}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 text-[11px] text-neutral-500">
+            Appearing most across your matches — learning these lifts every score.
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+      </section>
+    </Shell>
+  );
+}
+
+function Shell({ children }: { children: React.ReactNode }) {
+  return (
+    <main className="min-h-screen bg-neutral-950 px-4 py-8 text-neutral-100">
+      <div className="mx-auto w-full max-w-3xl">{children}</div>
+    </main>
   );
 }

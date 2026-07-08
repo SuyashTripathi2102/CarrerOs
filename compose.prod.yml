@@ -118,6 +118,21 @@ services:
     mem_limit: 768m
     logging: *logging
 
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # Baked into the client bundle at build time.
+        NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://139.59.15.220:3001/api}
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+    mem_limit: 256m
+    logging: *logging
+
   workers:
     build:
       context: .
