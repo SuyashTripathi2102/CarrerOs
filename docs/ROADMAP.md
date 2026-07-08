@@ -24,18 +24,24 @@ drive the roadmap. **4 perfect notifications beat 48 mediocre ones** — quality
 per recommendation over crawler breadth. Enough supply exists once India
 sources convert; the crawler expands only when quality features starve for data.
 
+**THE North Star Metric: Qualified Opportunities Applied** — a high-quality
+recommendation that the user actually applied to, tracked in-system. Jobs
+crawled / companies found are engineering metrics; they never appear as
+success numbers again. Success = interviews generated.
+
 | Release | Contents | Status |
 |---|---|---|
 | v0.1 | crawler, ATS flywheel, matching, Telegram | ✅ shipped |
 | v0.2 | Vertex, India-first, decision engine, context-aware freshness, usage ledger | ✅ shipped 2026-07-08 |
-| v0.3 | **Dashboard (command center)**, company reports + timeline, referral discovery, application tracker | next |
+| v0.3 | **⭐ Daily Brief** (the morning homepage: must-apply-today, new-companies-hiring, applications-waiting, top missing skill, trending companies) · **Dashboard as Mission Control** — every screen answers "what should I do next?" · **Company Reports** (hiring score/velocity by function, locations, tech stack, difficulty, referral candidates — the research assistant) · **Referral discovery** (public sources; likely the killer feature: best person → reason → draft message) · **Intelligent tracker** (status flow + follow-up intelligence: "no response in 7d — send follow-up?", drafted) · **Dream-company watchlist** (instant-notify tier, bypasses digest) | next |
 | v0.4 | resume tailoring, cover letters, interview prep, application strategy | |
-| v1.0 | learning engine, skill intelligence, browser extension, analytics | |
+| v1.0 | learning engine, **resume heatmap** (skill % vs market + "+X% if learned"), browser extension, analytics; auto-apply ONLY after decision→tailor→referral→report chain is proven (intelligence before automation, or it's spam) | |
 
-**North-star metrics (v0.3 dashboard must show the funnel):**
+Fix queued for v0.3: `recentJobs14d` uses firstSeenAt, so a company's first
+crawl looks like a hiring spree — switch to postedAt when available.
+
+**Funnel the dashboard must show:**
 `crawled → matched → recommended → high-priority → applied → interviews → offers`
-plus notifications sent/acted-on, top missing skill, companies hiring
-aggressively. Measure "jobs worth applying", not "jobs crawled".
 
 **Validation protocol:** Suyash uses CareerOS as his ONLY job-search tool for
 7–10 days — morning dashboard review, apply to high-priority, track every
