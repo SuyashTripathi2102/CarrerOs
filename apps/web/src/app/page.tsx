@@ -169,7 +169,7 @@ export default function MissionControl() {
 
         {brief.worthALook.length > 0 && (
           <>
-            <h3 className="mt-6 text-lg font-semibold">👀 Worth a look</h3>
+            <h3 className="mt-6 text-lg font-semibold">🟡 Consider</h3>
             <div className="mt-3 space-y-2">
               {brief.worthALook.map((j, i) => (
                 <JobCard key={i} job={j} highlight={false} />
@@ -196,20 +196,18 @@ export default function MissionControl() {
         </div>
         <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
           <h3 className="text-sm font-medium uppercase tracking-wide text-neutral-400">
-            Top missing skills
+            Learn next
           </h3>
-          <ul className="mt-3 flex flex-wrap gap-2">
+          <ul className="mt-3 space-y-2">
             {brief.missingSkills.map((s) => (
-              <li
-                key={s.skill}
-                className="rounded-full border border-neutral-700 bg-neutral-950 px-3 py-1 text-sm text-neutral-300"
-              >
-                {s.skill} <span className="text-neutral-500">×{s.count}</span>
+              <li key={s.skill} className="flex items-baseline justify-between text-sm">
+                <span className="text-neutral-200">Learn {s.skill}</span>
+                <span className="tabular-nums text-neutral-400">unlocks {s.count} matches</span>
               </li>
             ))}
           </ul>
           <p className="mt-3 text-[11px] text-neutral-500">
-            Appearing most across your matches — learning these lifts every score.
+            The skills blocking the most of your current matches.
           </p>
         </div>
       </section>

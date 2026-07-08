@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { locationTags } from '../matching/location-filter';
 import { TelegramChannel } from './channels';
@@ -15,7 +16,13 @@ export class DailyBriefService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly telegram: TelegramChannel,
-  ) {}
+    config: ConfigService,
+  ) {
+    // The dashboard shares the CORS origin — one env, one truth.
+    this.dashboardUrl = config.get<string>('CORS_ORIGIN') || null;
+  }
+
+  private readonly dashboardUrl: string | null;
 
   /** Compose + send the brief for every user with a parsed primary resume. */
   async sendAll(): Promise<{ sent: number }> {
@@ -31,7 +38,11 @@ export class DailyBriefService {
       try {
         const text = await this.compose(user.id, user.name);
         if (this.telegram.isConfigured()) {
-          await this.telegram.send(text);
+          await this.telegram.send(text, {
+            buttons: this.dashboardUrl?.startsWith('http')
+              ? [[{ text: '📊 Open Mission Control', url: this.dashboardUrl }]]
+              : undefined,
+          });
           sent++;
         } else {
           this.logger.log(`[daily-brief]\n${text.replace(/<[^>]+>/g, '')}`);
@@ -74,10 +85,10 @@ export class DailyBriefService {
           ORDER BY m."opportunityScore" DESC LIMIT 3
         `,
         this.prisma.$queryRaw<
-          { score: number; title: string; company: string; location: string | null; workMode: string | null }[]
+          { score: number; title: string; company: string; location: string | null; workMode: string | null; url: string }[]
         >`
           SELECT round(m."opportunityScore") AS score, j.title, c.name AS company,
-                 j.location, j."workMode"::text AS "workMode"
+                 j.location, j."workMode"::text AS "workMode", j.url
           FROM job_matches m
           JOIN jobs j ON j.id = m."jobId" AND j.status = 'ACTIVE'
           JOIN companies c ON c.id = j."companyId"
@@ -134,7 +145,7 @@ export class DailyBriefService {
     }
 
     if (worthALook.length > 0) {
-      lines.push(``, `👀 <b>Worth a look</b>`);
+      lines.push(``, `🟡 <b>Consider</b>`);
       for (const j of worthALook) {
         const tags = locationTags(j.location, j.workMode);
         lines.push(
@@ -155,7 +166,7 @@ export class DailyBriefService {
     }
     if (missingSkills.length > 0) {
       lines.push(
-        `🧩 <b>Top missing skills:</b> ${missingSkills.map((s) => `${escapeHtml(s.skill)} (${s.count})`).join(', ')}`,
+        `🧩 <b>Learn next:</b> ${missingSkills.map((s) => `${escapeHtml(s.skill)} → unlocks ${s.count} matches`).join(' · ')}`,
       );
     }
 

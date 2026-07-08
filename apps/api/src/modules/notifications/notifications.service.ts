@@ -6,7 +6,7 @@ import { jobMatchesCountries, locationTags } from '../matching/location-filter';
 import { companyTier, isEvergreen } from '../opportunity/company-tier';
 import type { ScoreModule } from '../opportunity/opportunity.service';
 import { InlineButton, TelegramChannel } from './channels';
-import { decide, freshnessLine, salaryLine } from './decision';
+import { decide, Decision, freshnessLine, salaryLine } from './decision';
 
 const RENOTIFY_SCORE_DELTA = 5; // re-notify only if the opportunity improved this much
 
@@ -119,7 +119,28 @@ export class NotificationsService {
       },
     });
 
-    const text = this.formatMatch(match, twinCount, { evergreen, activelyHiring });
+    // The decision gate: SKIP verdicts never reach the phone — "ignore 615,
+    // apply to these 8" is the product. The match stays visible in-app.
+    const modules = Array.isArray(match.scoreBreakdown)
+      ? (match.scoreBreakdown as unknown as ScoreModule[])
+      : ((match.scoreBreakdown as { modules?: ScoreModule[] })?.modules ?? []);
+    const decision = decide({
+      opportunityScore: match.opportunityScore ?? 0,
+      resumeMatch: match.overallScore,
+      missingSkills: match.missingSkills,
+      modules,
+      ageDays,
+      evergreen,
+      activelyHiring,
+    });
+    if (decision.verdict === 'SKIP') {
+      this.logger.log(
+        `holding notification for "${match.job.title}" — verdict SKIP (${decision.reasons.at(-1) ?? 'low fit'})`,
+      );
+      return false;
+    }
+
+    const text = this.formatMatch(match, twinCount, decision);
     await this.deliver(
       match.user.id,
       text,
@@ -175,25 +196,10 @@ export class NotificationsService {
       };
     },
     twinCount = 1,
-    context: { evergreen?: boolean; activelyHiring?: boolean } = {},
+    decision: Decision,
   ): string {
-    const modules = Array.isArray(match.scoreBreakdown)
-      ? (match.scoreBreakdown as ScoreModule[])
-      : ((match.scoreBreakdown as { modules?: ScoreModule[] })?.modules ?? []);
-
-    const decision = decide({
-      opportunityScore: match.opportunityScore ?? 0,
-      resumeMatch: match.overallScore,
-      missingSkills: match.missingSkills,
-      modules,
-      ageDays:
-        (Date.now() - (match.job.postedAt ?? match.job.firstSeenAt).getTime()) / 86_400_000,
-      evergreen: context.evergreen,
-      activelyHiring: context.activelyHiring,
-    });
-
     const lines: string[] = [
-      `<b>${decision.banner}</b>`,
+      `<b>${decision.action} · ${decision.banner}</b>`,
       ``,
       `<b>${escapeHtml(match.job.title)}</b>`,
       `${escapeHtml(match.job.company.name)}${(() => {
@@ -209,7 +215,7 @@ export class NotificationsService {
       lines.push(`❌ Missing: ${escapeHtml(match.missingSkills.join(', '))}`);
     }
 
-    lines.push(``, `<b>${decision.action}</b>`);
+    lines.push(``, `<b>Why:</b>`);
     for (const reason of decision.reasons) lines.push(`• ${escapeHtml(reason)}`);
 
     if (match.reasoning) {

@@ -57,6 +57,14 @@ export function decide(input: DecisionInput): Decision {
     blockers.push(`${input.missingSkills.length} skill gaps (${input.missingSkills.slice(0, 4).join(', ')}…)`);
   }
 
+  // Core-stack mismatch: below-half resume match AND a wall of missing skills
+  // is a different profession, not a stretch (2026-07-08 review: a React
+  // Native role at 45% match with 7 gaps must not cost the user ten seconds).
+  const coreMismatch = input.resumeMatch < 50 && input.missingSkills.length >= 5;
+  if (coreMismatch) {
+    blockers.push(`core stack mismatch — ${Math.round(input.resumeMatch)}% match, different specialization`);
+  }
+
   // Staleness interprets the age instead of just displaying it (2026-07-08
   // feedback: a 70d-old posting must never read as high priority) — but a
   // recruiter reads age in CONTEXT: Google leaves strategic roles open for
@@ -89,20 +97,16 @@ export function decide(input: DecisionInput): Decision {
   // never silently drop.
   if (verdict === 'APPLY' && blockers.length > 0) verdict = 'CONSIDER';
   if (age > 60 && !stillHiring) verdict = 'SKIP';
+  if (coreMismatch) verdict = 'SKIP';
 
-  const tier =
-    score >= 75
-      ? { emoji: '🟢', label: 'HIGH PRIORITY' }
-      : score >= 60
-        ? { emoji: '🟡', label: 'WORTH A LOOK' }
-        : { emoji: '🔴', label: 'LOW PRIORITY' };
-
+  const tierEmoji = score >= 75 ? '🟢' : score >= 60 ? '🟡' : '🔴';
   const action =
     verdict === 'APPLY' ? '✅ APPLY' : verdict === 'CONSIDER' ? '🤔 CONSIDER' : '❌ SKIP';
 
   return {
     verdict,
-    banner: `${tier.emoji} ${score}/100 · ${tier.label}`,
+    // Decision first, evidence second — the score justifies, it doesn't lead.
+    banner: `${tierEmoji} ${score}/100`,
     action,
     reasons: [...reasons, ...blockers.map((b) => `⚠ ${b}`)],
   };
