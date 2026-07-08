@@ -23,7 +23,10 @@ export class NotificationsService {
   ) {
     this.minScore = Number(config.get('NOTIFY_MIN_SCORE', 70));
     this.maxAgeDays = Number(config.get('NOTIFY_MAX_AGE_DAYS')) || 30;
+    this.dashboardUrl = config.get<string>('CORS_ORIGIN') || null;
   }
+
+  private readonly dashboardUrl: string | null;
 
   /**
    * Notification gate + memory (the "don't spam me" contract):
@@ -232,6 +235,7 @@ export class NotificationsService {
 
   /** URL buttons (callback buttons need bot polling — Phase D-4). */
   private buildButtons(job: {
+    id: string;
     url: string;
     externalId: string;
     company: { atsProvider: string; atsIdentifier: string | null; careerPageUrl: string | null };
@@ -244,6 +248,10 @@ export class NotificationsService {
       : job.url;
 
     const rows = [[{ text: '🚀 Apply', url: applyUrl }]];
+    // "Read more": full description + why + track-application, on the dashboard.
+    if (this.dashboardUrl?.startsWith('http')) {
+      rows[0].push({ text: '📄 Details', url: `${this.dashboardUrl}/jobs/${job.id}` });
+    }
     if (job.company.careerPageUrl && job.company.careerPageUrl !== applyUrl) {
       rows.push([{ text: '🏢 All openings', url: job.company.careerPageUrl }]);
     }

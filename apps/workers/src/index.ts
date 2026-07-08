@@ -12,6 +12,10 @@ import {
   ensureDailyBriefSchedule,
   startDailyBriefWorker,
 } from './processors/daily-brief.processor';
+import {
+  ensurePlacesDiscoverySchedule,
+  startPlacesDiscoveryWorker,
+} from './processors/places-discovery.processor';
 
 async function main() {
   const api = new ApiClient();
@@ -24,9 +28,11 @@ async function main() {
     startDiscoverCompanyWorker(api),
     startSeedImportWorker(api),
     startDailyBriefWorker(api),
+    startPlacesDiscoveryWorker(api),
   ];
   await ensureRefreshSchedule();
   await ensureDailyBriefSchedule();
+  await ensurePlacesDiscoverySchedule();
 
   console.log(`CareerOS workers started (${workers.length} processors listening).`);
 

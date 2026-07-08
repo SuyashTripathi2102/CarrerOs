@@ -16,6 +16,7 @@ export const QueueNames = {
   GENERATE_MATCHES: 'generate-matches',
   SEND_NOTIFICATION: 'send-notification',
   DAILY_BRIEF: 'daily-brief', // repeatable 8AM IST — morning summary via API
+  PLACES_DISCOVERY: 'places-discovery', // weekly city-based company discovery (Places API)
 } as const;
 
 export type QueueName = (typeof QueueNames)[keyof typeof QueueNames];

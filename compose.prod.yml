@@ -145,6 +145,8 @@ services:
       NODE_OPTIONS: --max-old-space-size=384
       REDIS_URL: redis://redis:6379
       API_URL: http://api:3001/api
+      # City-based company discovery via Places API (optional — skips if unset)
+      PLACES_API_KEY: ${PLACES_API_KEY:-}
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
       # 1 vCPU: modest parallelism beats thrash. Raise on a bigger box.
       CRAWL_CONCURRENCY: 2

@@ -91,7 +91,13 @@ function JobCard({ job, highlight }: { job: BriefJob; highlight: boolean }) {
     >
       <ScoreBadge score={job.score} />
       <div className="min-w-0 flex-1">
-        <div className="truncate font-medium text-neutral-100">{job.title}</div>
+        {job.jobId ? (
+          <a href={`/jobs/${job.jobId}`} className="block truncate font-medium text-neutral-100 hover:underline">
+            {job.title}
+          </a>
+        ) : (
+          <div className="truncate font-medium text-neutral-100">{job.title}</div>
+        )}
         <div className="truncate text-sm text-neutral-400">
           {job.company}
           {locationLine(job) ? ` · ${locationLine(job)}` : ''}
