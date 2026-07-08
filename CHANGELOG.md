@@ -10,6 +10,12 @@ what changed in the code (that's git log). Newest first.
   scores), what's worth a look, which companies are hiring hardest this week,
   and your top missing skills. Medium-priority matches now live here instead
   of pinging your phone.
+- **The Applied number is real now — application tracker shipped.** Hit
+  "I applied" on any job card; track SAVED → APPLIED → OA → INTERVIEW →
+  OFFER on the new Applications page (with interview-rate stats, honestly
+  hidden until 5+ applications). The Daily Brief nudges you about
+  applications waiting 7+ days with no response. Every application records
+  which resume version was used — the foundation for outcome learning.
 - **CareerOS has a face: the Mission Control dashboard** at
   http://139.59.15.220:3000 — the first deployed web UI. Sign in and see the
   north-star funnel (jobs watched → matched → recommended → notified →

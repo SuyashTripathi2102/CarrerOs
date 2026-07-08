@@ -23,14 +23,19 @@ export function logout(): void {
   window.location.href = '/login';
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
+async function apiRequest<T>(method: string, path: string, body?: unknown): Promise<T> {
   const token = getToken();
   if (!token) {
     window.location.href = '/login';
     throw new Error('Not authenticated');
   }
   const res = await fetch(`${BASE}${path}`, {
-    headers: { authorization: `Bearer ${token}` },
+    method,
+    headers: {
+      authorization: `Bearer ${token}`,
+      ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
+    },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
   if (res.status === 401) {
     logout();
@@ -38,4 +43,16 @@ export async function apiGet<T>(path: string): Promise<T> {
   }
   if (!res.ok) throw new Error(`API ${res.status}`);
   return (await res.json()) as T;
+}
+
+export function apiGet<T>(path: string): Promise<T> {
+  return apiRequest<T>('GET', path);
+}
+
+export function apiPost<T>(path: string, body: unknown): Promise<T> {
+  return apiRequest<T>('POST', path, body);
+}
+
+export function apiPatch<T>(path: string, body: unknown): Promise<T> {
+  return apiRequest<T>('PATCH', path, body);
 }

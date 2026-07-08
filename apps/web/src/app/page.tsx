@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { apiGet, logout } from '../lib/api';
+import { apiGet, apiPost, logout } from '../lib/api';
 
 interface BriefJob {
+  jobId?: string;
   score: number;
   title: string;
   company: string;
@@ -66,6 +67,22 @@ function Tile({ label, value, hint }: { label: string; value: number; hint?: str
 }
 
 function JobCard({ job, highlight }: { job: BriefJob; highlight: boolean }) {
+  const [tracked, setTracked] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function markApplied() {
+    if (!job.jobId || tracked || busy) return;
+    setBusy(true);
+    try {
+      await apiPost('/applications', { jobId: job.jobId });
+      setTracked(true);
+    } catch {
+      // leave the button; user can retry
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div
       className={`flex items-center gap-4 rounded-xl border p-4 ${
@@ -80,6 +97,20 @@ function JobCard({ job, highlight }: { job: BriefJob; highlight: boolean }) {
           {locationLine(job) ? ` · ${locationLine(job)}` : ''}
         </div>
       </div>
+      {job.jobId && (
+        <button
+          onClick={markApplied}
+          disabled={tracked || busy}
+          className={`shrink-0 rounded-lg border px-3 py-1.5 text-sm font-medium ${
+            tracked
+              ? 'border-emerald-800 bg-emerald-950 text-emerald-300'
+              : 'border-neutral-700 text-neutral-300 hover:border-neutral-500'
+          }`}
+          title="Track that you applied — feeds the Applied funnel + follow-up nudges"
+        >
+          {tracked ? '✓ Tracked' : busy ? '…' : 'I applied'}
+        </button>
+      )}
       {job.url && (
         <a
           href={job.url}
@@ -131,9 +162,14 @@ export default function MissionControl() {
           <h1 className="text-2xl font-semibold tracking-tight">Mission Control</h1>
           <p className="text-sm text-neutral-400">{today}</p>
         </div>
-        <button onClick={logout} className="text-sm text-neutral-500 hover:text-neutral-300">
-          Sign out
-        </button>
+        <nav className="flex items-center gap-4">
+          <a href="/applications" className="text-sm text-neutral-400 hover:text-neutral-200">
+            Applications
+          </a>
+          <button onClick={logout} className="text-sm text-neutral-500 hover:text-neutral-300">
+            Sign out
+          </button>
+        </nav>
       </header>
 
       {/* North-star funnel */}

@@ -73,9 +73,9 @@ export class DailyBriefService {
           where: { userId, createdAt: { gte: dayAgo }, opportunityScore: { gte: 60 } },
         }),
         this.prisma.$queryRaw<
-          { score: number; title: string; company: string; location: string | null; workMode: string | null; url: string }[]
+          { jobId: string; score: number; title: string; company: string; location: string | null; workMode: string | null; url: string }[]
         >`
-          SELECT round(m."opportunityScore") AS score, j.title, c.name AS company,
+          SELECT j.id AS "jobId", round(m."opportunityScore") AS score, j.title, c.name AS company,
                  j.location, j."workMode"::text AS "workMode", j.url
           FROM job_matches m
           JOIN jobs j ON j.id = m."jobId" AND j.status = 'ACTIVE'
@@ -85,9 +85,9 @@ export class DailyBriefService {
           ORDER BY m."opportunityScore" DESC LIMIT 3
         `,
         this.prisma.$queryRaw<
-          { score: number; title: string; company: string; location: string | null; workMode: string | null; url: string }[]
+          { jobId: string; score: number; title: string; company: string; location: string | null; workMode: string | null; url: string }[]
         >`
-          SELECT round(m."opportunityScore") AS score, j.title, c.name AS company,
+          SELECT j.id AS "jobId", round(m."opportunityScore") AS score, j.title, c.name AS company,
                  j.location, j."workMode"::text AS "workMode", j.url
           FROM job_matches m
           JOIN jobs j ON j.id = m."jobId" AND j.status = 'ACTIVE'
@@ -111,6 +111,21 @@ export class DailyBriefService {
         `,
       ]);
 
+    // Follow-up intelligence v1: applications sitting in APPLIED for 7+ days.
+    const followUps = await this.prisma.application.findMany({
+      where: {
+        userId,
+        status: 'APPLIED',
+        appliedAt: { lte: new Date(Date.now() - 7 * 86_400_000) },
+      },
+      orderBy: { appliedAt: 'asc' },
+      take: 3,
+      select: {
+        appliedAt: true,
+        job: { select: { title: true, company: { select: { name: true } } } },
+      },
+    });
+
     return {
       newJobs24h,
       indiaNew24h: Number(indiaNew24h[0]?.n ?? 0),
@@ -119,12 +134,25 @@ export class DailyBriefService {
       worthALook: worthALook.map((j) => ({ ...j, score: Number(j.score) })),
       trending: trending.map((t) => ({ company: t.company, newJobs7d: Number(t.n) })),
       missingSkills: skills.map((s) => ({ skill: s.skill, count: Number(s.n) })),
+      followUps: followUps.map((f) => ({
+        title: f.job.title,
+        company: f.job.company.name,
+        daysWaiting: Math.floor((Date.now() - (f.appliedAt?.getTime() ?? Date.now())) / 86_400_000),
+      })),
     };
   }
 
   private async compose(userId: string, name: string | null): Promise<string> {
-    const { newJobs24h, indiaNew24h, recommended24h, mustApply, worthALook, trending, missingSkills } =
-      await this.data(userId);
+    const {
+      newJobs24h,
+      indiaNew24h,
+      recommended24h,
+      mustApply,
+      worthALook,
+      trending,
+      missingSkills,
+      followUps,
+    } = await this.data(userId);
 
     const lines: string[] = [
       `☀️ <b>Daily Brief — ${new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}</b>`,
@@ -156,6 +184,15 @@ export class DailyBriefService {
 
     if (mustApply.length === 0 && worthALook.length === 0) {
       lines.push(``, `No qualified opportunities today — the bar stays high on purpose.`);
+    }
+
+    if (followUps.length > 0) {
+      lines.push(``, `📬 <b>Follow up</b> — no response yet:`);
+      for (const f of followUps) {
+        lines.push(
+          `• ${escapeHtml(f.title)} — ${escapeHtml(f.company)} · applied ${f.daysWaiting}d ago`,
+        );
+      }
     }
 
     if (trending.length > 0) {
