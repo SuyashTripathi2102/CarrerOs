@@ -40,6 +40,23 @@ success numbers again. Success = interviews generated.
 Fix queued for v0.3: `recentJobs14d` uses firstSeenAt, so a company's first
 crawl looks like a hiring spree — switch to postedAt when available.
 
+**2026-07-09 review additions (build order for next sessions):**
+1. **Indian ATS adapters** — Darwinbox, Zoho Recruit, Keka, freshteam (public
+   career boards, same pattern as Lever/Workable). Expected to ~double Indian
+   supply. Instahyre/portals stay excluded unless a public feed provably exists.
+2. **Contact subsystem is classify-and-rank, not collect** (D-3 spec upgrade):
+   role classification (recruiter/EM/HRBP/founder/TA) + best-contact
+   recommendation with reason, from public sources only.
+3. **ATS Resume Validator** — score any uploaded resume: text extractable,
+   reading order, headings, sections, keyword coverage → "ATS Score 97/100".
+   We already own the parsing machinery; genuinely differentiating feature
+   (born from the Canva-PDF incident).
+4. **Daily rhythm** — evening "you didn't apply to these N" nudge, weekly
+   report, quiet hours, dream-company instant tier (watchlist).
+5. Dashboard nav growth: Jobs / Companies / Applications / Analytics / Settings.
+6. Rejected (no-fabrication principle): competition estimates and funding data
+   without a real source — parked until the learning engine can back them.
+
 **Funnel the dashboard must show:**
 `crawled → matched → recommended → high-priority → applied → interviews → offers`
 
