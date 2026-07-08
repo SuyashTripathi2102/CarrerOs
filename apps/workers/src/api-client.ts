@@ -24,6 +24,10 @@ export class ApiClient {
     return this.request('GET', '/internal/companies/due');
   }
 
+  triggerDailyBrief(): Promise<{ sent: number }> {
+    return this.request('POST', '/internal/daily-brief');
+  }
+
   syncCompanyJobs(companyId: string, source: string, jobs: NormalizedJob[]): Promise<SyncResult> {
     return this.request('POST', `/internal/companies/${companyId}/jobs/sync`, { source, jobs });
   }

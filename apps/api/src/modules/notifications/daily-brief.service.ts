@@ -1,0 +1,152 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { PrismaService } from '../../prisma/prisma.service';
+import { locationTags } from '../matching/location-filter';
+import { TelegramChannel } from './channels';
+
+/**
+ * ⭐ Daily Brief (ROADMAP v0.3): the morning answer to "what should I do
+ * next?". Ships on Telegram first — the same queries become the dashboard
+ * API. Medium-priority matches live here instead of interrupting the phone.
+ */
+@Injectable()
+export class DailyBriefService {
+  private readonly logger = new Logger(DailyBriefService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly telegram: TelegramChannel,
+  ) {}
+
+  /** Compose + send the brief for every user with a parsed primary resume. */
+  async sendAll(): Promise<{ sent: number }> {
+    const users = await this.prisma.user.findMany({
+      where: {
+        resumes: { some: { isPrimary: true, versions: { some: { embedding: { isNot: null } } } } },
+      },
+      select: { id: true, name: true },
+    });
+
+    let sent = 0;
+    for (const user of users) {
+      try {
+        const text = await this.compose(user.id, user.name);
+        if (this.telegram.isConfigured()) {
+          await this.telegram.send(text);
+          sent++;
+        } else {
+          this.logger.log(`[daily-brief]\n${text.replace(/<[^>]+>/g, '')}`);
+        }
+      } catch (err) {
+        this.logger.error(
+          `daily brief failed for ${user.id}: ${err instanceof Error ? err.message : err}`,
+        );
+      }
+    }
+    return { sent };
+  }
+
+  private async compose(userId: string, name: string | null): Promise<string> {
+    const dayAgo = new Date(Date.now() - 24 * 3_600_000);
+    const weekAgo = new Date(Date.now() - 7 * 86_400_000);
+
+    const [newJobs24h, indiaNew24h, recommended24h, mustApply, worthALook, trending, skills] =
+      await Promise.all([
+        this.prisma.job.count({ where: { firstSeenAt: { gte: dayAgo } } }),
+        this.prisma.$queryRaw<[{ n: bigint }]>`
+          SELECT count(*) AS n FROM jobs j
+          WHERE j."firstSeenAt" >= ${dayAgo}
+            AND (j.country = 'IN' OR j.location ~* 'india|bengaluru|bangalore|mumbai|pune|delhi|hyderabad|chennai|noida|gurgaon|gurugram|indore|kolkata')
+        `,
+        this.prisma.jobMatch.count({
+          where: { userId, createdAt: { gte: dayAgo }, opportunityScore: { gte: 60 } },
+        }),
+        this.prisma.$queryRaw<
+          { score: number; title: string; company: string; location: string | null; workMode: string | null; url: string }[]
+        >`
+          SELECT round(m."opportunityScore") AS score, j.title, c.name AS company,
+                 j.location, j."workMode"::text AS "workMode", j.url
+          FROM job_matches m
+          JOIN jobs j ON j.id = m."jobId" AND j.status = 'ACTIVE'
+          JOIN companies c ON c.id = j."companyId"
+          WHERE m."userId" = ${userId} AND m."opportunityScore" >= 75
+            AND COALESCE(j."postedAt", j."firstSeenAt") >= ${weekAgo}
+          ORDER BY m."opportunityScore" DESC LIMIT 3
+        `,
+        this.prisma.$queryRaw<
+          { score: number; title: string; company: string; location: string | null; workMode: string | null }[]
+        >`
+          SELECT round(m."opportunityScore") AS score, j.title, c.name AS company,
+                 j.location, j."workMode"::text AS "workMode"
+          FROM job_matches m
+          JOIN jobs j ON j.id = m."jobId" AND j.status = 'ACTIVE'
+          JOIN companies c ON c.id = j."companyId"
+          WHERE m."userId" = ${userId}
+            AND m."opportunityScore" >= 60 AND m."opportunityScore" < 75
+            AND COALESCE(j."postedAt", j."firstSeenAt") >= ${new Date(Date.now() - 30 * 86_400_000)}
+          ORDER BY m."opportunityScore" DESC LIMIT 3
+        `,
+        this.prisma.$queryRaw<{ company: string; n: bigint }[]>`
+          SELECT c.name AS company, count(*) AS n
+          FROM jobs j JOIN companies c ON c.id = j."companyId"
+          WHERE j."firstSeenAt" >= ${weekAgo}
+          GROUP BY c.name ORDER BY n DESC LIMIT 3
+        `,
+        this.prisma.$queryRaw<{ skill: string; n: bigint }[]>`
+          SELECT skill, count(*) AS n
+          FROM job_matches m, unnest(m."missingSkills") AS skill
+          WHERE m."userId" = ${userId} AND m."createdAt" >= ${weekAgo}
+          GROUP BY skill ORDER BY n DESC LIMIT 3
+        `,
+      ]);
+
+    const lines: string[] = [
+      `☀️ <b>Daily Brief — ${new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}</b>`,
+      `Good morning${name ? ` ${escapeHtml(name.split(' ')[0])}` : ''} 👋`,
+      ``,
+      `📥 New jobs (24h): <b>${newJobs24h}</b> · 🇮🇳 India: <b>${Number(indiaNew24h[0]?.n ?? 0)}</b>`,
+      `🎯 Recommended for you (24h): <b>${recommended24h}</b>`,
+    ];
+
+    if (mustApply.length > 0) {
+      lines.push(``, `🔥 <b>Apply today</b>`);
+      mustApply.forEach((j, i) => {
+        const tags = locationTags(j.location, j.workMode);
+        lines.push(
+          `${i + 1}. 🟢 ${j.score} · <b>${escapeHtml(j.title)}</b> — ${escapeHtml(j.company)}${tags ? ' · ' + escapeHtml(tags) : ''}`,
+        );
+      });
+    }
+
+    if (worthALook.length > 0) {
+      lines.push(``, `👀 <b>Worth a look</b>`);
+      for (const j of worthALook) {
+        const tags = locationTags(j.location, j.workMode);
+        lines.push(
+          `• 🟡 ${j.score} · ${escapeHtml(j.title)} — ${escapeHtml(j.company)}${tags ? ' · ' + escapeHtml(tags) : ''}`,
+        );
+      }
+    }
+
+    if (mustApply.length === 0 && worthALook.length === 0) {
+      lines.push(``, `No qualified opportunities today — the bar stays high on purpose.`);
+    }
+
+    if (trending.length > 0) {
+      lines.push(
+        ``,
+        `📈 <b>Hiring this week:</b> ${trending.map((t) => `${escapeHtml(t.company)} (+${Number(t.n)})`).join(', ')}`,
+      );
+    }
+    if (skills.length > 0) {
+      lines.push(
+        `🧩 <b>Top missing skills:</b> ${skills.map((s) => `${escapeHtml(s.skill)} (${Number(s.n)})`).join(', ')}`,
+      );
+    }
+
+    return lines.join('\n');
+  }
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}

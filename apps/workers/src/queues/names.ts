@@ -15,6 +15,7 @@ export const QueueNames = {
   PARSE_RESUME: 'parse-resume',
   GENERATE_MATCHES: 'generate-matches',
   SEND_NOTIFICATION: 'send-notification',
+  DAILY_BRIEF: 'daily-brief', // repeatable 8AM IST — morning summary via API
 } as const;
 
 export type QueueName = (typeof QueueNames)[keyof typeof QueueNames];

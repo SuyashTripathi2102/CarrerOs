@@ -3,6 +3,14 @@
 User-perspective changes per release — what got better for the job hunt, not
 what changed in the code (that's git log). Newest first.
 
+## v0.3 (in progress) · "Mission Control"
+
+- **⭐ Daily Brief at 8:00 AM IST**: every morning Telegram opens with your
+  day — new jobs found (total + India), what to apply to today (top fresh
+  scores), what's worth a look, which companies are hiring hardest this week,
+  and your top missing skills. Medium-priority matches now live here instead
+  of pinging your phone.
+
 ## v0.2 — 2026-07-08 · "The recruiter learns judgment"
 
 - **Notifications now decide, not just inform**: every alert leads with
