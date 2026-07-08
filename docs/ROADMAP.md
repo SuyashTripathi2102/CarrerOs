@@ -17,6 +17,31 @@ Every opportunity CareerOS surfaces must answer:
 
 The JOB is evidence. The OPPORTUNITY — with a decision attached — is the product.
 
+## Releases, not phases (adopted 2026-07-08)
+
+Ship usable improvements, validate by USING the product, let real job hunting
+drive the roadmap. **4 perfect notifications beat 48 mediocre ones** — quality
+per recommendation over crawler breadth. Enough supply exists once India
+sources convert; the crawler expands only when quality features starve for data.
+
+| Release | Contents | Status |
+|---|---|---|
+| v0.1 | crawler, ATS flywheel, matching, Telegram | ✅ shipped |
+| v0.2 | Vertex, India-first, decision engine, context-aware freshness, usage ledger | ✅ shipped 2026-07-08 |
+| v0.3 | **Dashboard (command center)**, company reports + timeline, referral discovery, application tracker | next |
+| v0.4 | resume tailoring, cover letters, interview prep, application strategy | |
+| v1.0 | learning engine, skill intelligence, browser extension, analytics | |
+
+**North-star metrics (v0.3 dashboard must show the funnel):**
+`crawled → matched → recommended → high-priority → applied → interviews → offers`
+plus notifications sent/acted-on, top missing skill, companies hiring
+aggressively. Measure "jobs worth applying", not "jobs crawled".
+
+**Validation protocol:** Suyash uses CareerOS as his ONLY job-search tool for
+7–10 days — morning dashboard review, apply to high-priority, track every
+application in-system, note every point of confusion. Daily friction beats
+feature brainstorms.
+
 ## Non-negotiable principles
 
 - **Decisions over information.** A notification must be actionable in <10s.
