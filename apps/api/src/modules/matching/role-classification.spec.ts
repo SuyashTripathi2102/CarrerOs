@@ -1,9 +1,11 @@
 import {
   actionFor,
+  canonicalTech,
   DEFAULT_ROLE_PROFILE,
   eligibility,
   experienceVerdict,
   roleRelevance,
+  specializationBreakdown,
   targetFit,
   type JobClassification,
   type RoleProfile,
@@ -418,6 +420,87 @@ describe('rejection reasons are never collapsed', () => {
   });
 });
 
+describe('technology names are not substrings of one another', () => {
+  // "JavaScript".includes("java") === true. That one character sequence
+  // silently zeroed the stack fit of every JavaScript role in production.
+  it.each([
+    ['JavaScript', 'javascript'],
+    ['Java', 'java'],
+    ['Core Java', 'java'],
+    ['Spring Boot', 'java'],
+    ['TypeScript', 'typescript'],
+    ['React', 'react'],
+    ['React.js', 'react'],
+    ['React Native', 'react-native'],
+    ['Node.js', 'node'],
+    ['NodeJS', 'node'],
+    ['Express.js', 'express'],
+    ['C', 'c'],
+    ['C++', 'cpp'],
+    ['C#', 'csharp'],
+    ['CSS3', 'css'],
+    ['.NET', 'dotnet'],
+    ['Go', 'go'],
+    ['Golang', 'go'],
+    ['SQL', 'sql'],
+    ['MySQL', 'mysql'],
+    ['PostgreSQL', 'postgres'],
+    ['MongoDB', 'mongodb'],
+    ['ES6+', 'javascript'],
+    ['REST APIs', 'rest'],
+  ])('canonicalTech(%s) === %s', (raw, expected) => {
+    expect(canonicalTech(raw)).toBe(expected);
+  });
+
+  it('never conflates the colliding pairs', () => {
+    expect(canonicalTech('Java')).not.toBe(canonicalTech('JavaScript'));
+    expect(canonicalTech('React')).not.toBe(canonicalTech('React Native'));
+    expect(canonicalTech('C')).not.toBe(canonicalTech('C++'));
+    expect(canonicalTech('C')).not.toBe(canonicalTech('C#'));
+    expect(canonicalTech('C')).not.toBe(canonicalTech('CSS3'));
+    expect(canonicalTech('SQL')).not.toBe(canonicalTech('MySQL'));
+    expect(canonicalTech('SQL')).not.toBe(canonicalTech('PostgreSQL'));
+  });
+
+  it('ignores ordinary English that happens to contain a technology name', () => {
+    expect(canonicalTech('go to market strategy')).toBeNull();
+    expect(canonicalTech('express delivery logistics')).toBeNull();
+    expect(canonicalTech('internet research')).toBeNull();
+    expect(canonicalTech('customer success')).toBeNull();
+  });
+
+  it('React earns partial credit toward React Native, never full credit', () => {
+    const rn = classification({ requiredSkills: ['React Native'], specialization: [] });
+    const b = specializationBreakdown(rn, ['React.js', 'JavaScript']);
+    expect(b.partial).toEqual(['React Native']);
+    expect(b.strong).toEqual([]);
+    expect(b.fit).toBe(50);
+  });
+});
+
+describe('specializationFit shows its working', () => {
+  // The real AbhiBus JD, and Suyash's real confirmed skills.
+  const abhibusJd = classification({
+    roleFamily: 'FULL_STACK',
+    requiredSkills: ['React.js', 'Node.js', 'JavaScript', 'HTML5', 'CSS3', 'MySQL', 'MongoDB', 'Cassandra'],
+    specialization: [],
+  });
+  const myStack = ['JavaScript', 'Node.js', 'Express.js', 'React.js', 'REST APIs', 'MySQL', 'HTML5', 'CSS3', 'AWS'];
+
+  it('names what earned the score and what cost it', () => {
+    const b = specializationBreakdown(abhibusJd, myStack);
+    expect(b.strong).toEqual(['React.js', 'Node.js', 'JavaScript', 'HTML5', 'CSS3', 'MySQL']);
+    expect(b.partial).toEqual(['MongoDB']); // MySQL transfers, partially
+    expect(b.missing).toEqual(['Cassandra']);
+    expect(b.fit).toBe(81); // (6 + 0.5) / 8
+  });
+
+  it('returns null, not zero, when the JD names no technologies', () => {
+    const vague = classification({ requiredSkills: [], specialization: [] });
+    expect(specializationBreakdown(vague, myStack).fit).toBeNull();
+  });
+});
+
 describe('the four dimensions must not be blended', () => {
   // Real production classifications, 2026-07-10.
   const abhibus = classification({
@@ -453,8 +536,9 @@ describe('the four dimensions must not be blended', () => {
   it('React Native is 100% software and NOT 100% my role', () => {
     const e = eligibility(reactNative, SUYASH);
     expect(e.developmentConfidence).toBe(100);
-    // "React Native" must not count as "React".
-    expect(e.specializationFit).toBeLessThanOrEqual(50);
+    // React earns partial credit toward React Native, never full credit; XCode
+    // and Gradle are missing outright.
+    expect(e.specializationFit).toBeLessThan(60);
     // A neutrally-titled SDE role whose required stack is React Native is mobile.
     expect(e.fit).toBe('ADJACENT');
     expect(e.targetRoleFit).toBeLessThan(100);

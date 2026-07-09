@@ -96,6 +96,8 @@ export interface RoleProfile {
   adjacentFamilies: RoleFamily[];
   excludedFamilies: RoleFamily[];
   yearsExperience: number;
+  /** From the user's CONFIRMED resume profile — not a hardcoded guess. */
+  skills?: string[];
 }
 
 /**
@@ -109,37 +111,26 @@ const CATCH_ALL_FAMILIES: RoleFamily[] = [
   'WEB_SOFTWARE_ENGINEERING',
 ];
 
-/** Suyash's stack, matched against a JD's stated requirements. */
+/**
+ * Fallback stack, used only when the active resume has no confirmed skills.
+ * The real list comes from the user's reviewed profile.
+ */
 const USER_STACK = [
-  'node', 'express', 'react', 'javascript', 'typescript', 'es6',
-  'rest', 'api', 'mysql', 'mongodb', 'html', 'css', 'socket.io', 'jwt',
-  'aws', 'nginx', 'pm2', 'git', 'redis', 'postgres',
+  'JavaScript', 'Node.js', 'Express.js', 'React.js', 'REST APIs', 'Socket.io',
+  'MySQL', 'JWT', 'OAuth', 'AWS', 'Nginx', 'PM2', 'Git', 'HTML5', 'CSS3',
 ];
 
 /**
- * Technologies that read as "your stack" by substring but are a different
- * discipline: "React Native" contains "react", "Java" contains nothing of
- * yours yet sits next to "JavaScript" in a list.
+ * Canonical technologies that identify a whole discipline, not a transferable
+ * tool. Their presence in the REQUIRED stack means a neutrally-titled
+ * "Software Engineer" role belongs to mobile, ML, or systems — adjacent, not
+ * target.
  */
-const FOREIGN_STACK = [
-  'react native', 'android', 'ios', 'xcode', 'gradle', 'swift', 'kotlin',
-  'java', 'spring', 'hibernate', 'j2ee', 'python', 'django', 'flask',
-  'golang', 'rust', 'kafka', 'spark', 'hadoop', 'kubernetes', 'terraform',
-  'llm', 'openai', 'anthropic', 'langchain', 'pytorch', 'tensorflow',
-  'power bi', 'tableau', 'sap', 'salesforce', 'cassandra',
-];
-
-/**
- * Technologies that identify a whole discipline, not a transferable tool. Their
- * presence in the REQUIRED stack means a neutrally-titled "Software Engineer"
- * role belongs to mobile, ML, or systems — adjacent, not target.
- */
-const DISCIPLINE_MARKERS = [
-  'react native', 'android', 'ios', 'swift', 'kotlin', 'flutter',
-  'java', 'spring', 'j2ee', 'python', 'django', 'golang', 'rust', 'scala', 'c++',
-  'llm', 'llms', 'openai', 'anthropic', 'pytorch', 'tensorflow', 'langchain',
-  'kafka', 'spark', 'hadoop', 'power bi', 'tableau', 'sap', 'salesforce',
-];
+const DISCIPLINE_MARKERS = new Set([
+  'react-native', 'android', 'ios', 'swift', 'kotlin', 'flutter',
+  'java', 'python', 'go', 'rust', 'scala', 'cpp', 'csharp', 'dotnet', 'php', 'ruby',
+  'llm', 'ml', 'kafka', 'spark', 'hadoop', 'powerbi', 'tableau', 'sap', 'salesforce',
+]);
 
 export const DEFAULT_ROLE_PROFILE: Omit<RoleProfile, 'yearsExperience'> = {
   targetFamilies: [
@@ -187,37 +178,151 @@ const ADJACENT_MIN_CONFIDENCE = 80;
 const REVIEW_MIN_CONFIDENCE = 50;
 const BUILDS_SOFTWARE: CodingIntensity[] = ['PRIMARY', 'SUBSTANTIAL'];
 
-const normalize = (s: string) => s.toLowerCase().trim();
+/**
+ * Technology names are not substrings of one another, no matter what
+ * `String.includes` thinks. "JavaScript".includes("java") is true, and that one
+ * character sequence silently zeroed the stack fit of every JavaScript role
+ * until 2026-07-10.
+ *
+ * Every skill is reduced to a canonical token and compared by EQUALITY. No
+ * substring matching anywhere: "react" never matches "react native", "c" never
+ * matches "c++" or "css", "go" never matches "mongodb".
+ */
+const TECH_ALIASES: Record<string, string> = {
+  // JavaScript family
+  js: 'javascript', javascript: 'javascript', 'java script': 'javascript',
+  ecmascript: 'javascript', es6: 'javascript', 'es6+': 'javascript', es2015: 'javascript',
+  ts: 'typescript', typescript: 'typescript',
+  node: 'node', nodejs: 'node', 'node.js': 'node', 'node js': 'node',
+  express: 'express', expressjs: 'express', 'express.js': 'express', 'express js': 'express',
+  react: 'react', reactjs: 'react', 'react.js': 'react', 'react js': 'react',
+  'react native': 'react-native', 'react-native': 'react-native', reactnative: 'react-native',
+  nextjs: 'nextjs', 'next.js': 'nextjs',
+  // Other languages that collide by substring
+  java: 'java', 'core java': 'java', j2ee: 'java', spring: 'java', 'spring boot': 'java',
+  hibernate: 'java', kotlin: 'kotlin', swift: 'swift',
+  c: 'c', 'c++': 'cpp', cpp: 'cpp', 'c#': 'csharp', csharp: 'csharp',
+  '.net': 'dotnet', dotnet: 'dotnet', 'asp.net': 'dotnet',
+  go: 'go', golang: 'go', rust: 'rust', scala: 'scala',
+  python: 'python', django: 'python', flask: 'python', fastapi: 'python',
+  php: 'php', ruby: 'ruby', rails: 'ruby',
+  // Data stores — "sql" alone is not MySQL
+  sql: 'sql', mysql: 'mysql', postgres: 'postgres', postgresql: 'postgres',
+  mongodb: 'mongodb', mongo: 'mongodb', redis: 'redis', cassandra: 'cassandra',
+  elasticsearch: 'elasticsearch', aerospike: 'aerospike', dynamodb: 'dynamodb',
+  // Web / API
+  html: 'html', html5: 'html', css: 'css', css3: 'css', sass: 'css',
+  rest: 'rest', 'rest api': 'rest', 'rest apis': 'rest', 'restful api': 'rest',
+  'restful apis': 'rest', api: 'rest', apis: 'rest',
+  graphql: 'graphql', 'socket.io': 'socketio', socketio: 'socketio', websockets: 'socketio',
+  jwt: 'jwt', oauth: 'oauth', 'oauth 2.0': 'oauth',
+  // Infra
+  aws: 'aws', ec2: 'aws', azure: 'azure', gcp: 'gcp', 'google cloud': 'gcp',
+  docker: 'docker', kubernetes: 'kubernetes', k8s: 'kubernetes',
+  nginx: 'nginx', pm2: 'pm2', terraform: 'terraform', jenkins: 'jenkins',
+  git: 'git', linux: 'linux',
+  // Mobile / ML / data — discipline markers
+  android: 'android', ios: 'ios', xcode: 'ios', gradle: 'android', flutter: 'flutter',
+  llm: 'llm', llms: 'llm', openai: 'llm', anthropic: 'llm', langchain: 'llm',
+  crewai: 'llm', 'prompt engineering': 'llm',
+  pytorch: 'ml', tensorflow: 'ml', 'machine learning': 'ml',
+  kafka: 'kafka', spark: 'spark', hadoop: 'hadoop', airflow: 'airflow', dbt: 'dbt',
+  'power bi': 'powerbi', powerbi: 'powerbi', tableau: 'tableau',
+  sap: 'sap', salesforce: 'salesforce',
+};
+
+/** Canonical token for a skill string, or null when we do not recognise it. */
+export function canonicalTech(raw: string): string | null {
+  const s = raw
+    .toLowerCase()
+    .trim()
+    .replace(/\((.*?)\)/g, ' ') // "OTP (Twilio)" -> "OTP"
+    .replace(/[^a-z0-9+#. -]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!s) return null;
+  if (TECH_ALIASES[s]) return TECH_ALIASES[s];
+
+  // Try the longest known alias that appears as a whole phrase — but never an
+  // AMBIGUOUS one: "go to market strategy" is not Golang, and "express
+  // delivery logistics" is not Express.js.
+  for (const alias of ALIASES_BY_LENGTH) {
+    if (AMBIGUOUS_ALIASES.has(alias)) continue;
+    const re = new RegExp(`(^|\\s)${alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`);
+    if (re.test(s)) return TECH_ALIASES[alias];
+  }
+  return null;
+}
+
+/** Aliases that are ordinary English words. Only an exact match counts. */
+const AMBIGUOUS_ALIASES = new Set([
+  'go', 'c', 'api', 'apis', 'express', 'node', 'rest', 'sql', 'ml', 'spring',
+  'swift', 'rails', 'flask', 'ruby', 'php', 'java', 'react', 'js', 'ts',
+]);
+
+const ALIASES_BY_LENGTH = Object.keys(TECH_ALIASES).sort((a, b) => b.length - a.length);
 
 /**
- * Word-boundary match. Plain `includes` claims "JavaScript" is "Java" and
- * "TypeScript" is nothing at all — the first is a different language, and the
- * mistake silently zeroed the stack fit of every JS role.
+ * Skills you don't have that a skill you DO have partially prepares you for.
+ * Half credit — transferable, not equivalent. React does not make you a React
+ * Native developer, but it is not nothing either.
  */
-function mentions(haystack: string, needle: string): boolean {
-  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i').test(haystack);
+const TRANSFERABLE: Record<string, string[]> = {
+  'react-native': ['react', 'javascript', 'flutter'],
+  postgres: ['mysql', 'sql'],
+  sql: ['mysql', 'postgres'],
+  mongodb: ['mysql'],
+  typescript: ['javascript'],
+  nextjs: ['react'],
+  graphql: ['rest'],
+  redis: ['mysql'],
+  azure: ['aws'],
+  gcp: ['aws'],
+};
+
+export interface SpecializationBreakdown {
+  /** null when the JD names no technologies — an honest unknown, not a zero. */
+  fit: number | null;
+  strong: string[];
+  partial: string[];
+  missing: string[];
 }
 
 /**
- * Specialization fit: how much of the JD's REQUIRED stack is your stack.
- * Null when the JD names no technologies — an honest "unknown", not a zero.
- *
- * "React Native" is not React; "Java" beside "JavaScript" is not JavaScript.
- * Foreign technologies are checked first, so a substring can never smuggle a
- * different discipline in.
+ * Specialization fit, with its working shown. A bare "64%" is another magic
+ * number; this says which technologies earned it and which cost it.
  */
-export function specializationFit(c: JobClassification): number | null {
-  const skills = [...c.requiredSkills, ...c.specialization].map(normalize);
-  if (skills.length === 0) return null;
+export function specializationBreakdown(
+  c: JobClassification,
+  userSkills: string[],
+): SpecializationBreakdown {
+  const mine = new Set(
+    userSkills.map(canonicalTech).filter((t): t is string => t !== null),
+  );
 
-  let matched = 0;
-  for (const skill of skills) {
-    // Foreign first: "React Native" is not React, "Java" is not JavaScript.
-    if (FOREIGN_STACK.some((f) => mentions(skill, f))) continue;
-    if (USER_STACK.some((u) => mentions(skill, u) || skill.startsWith(u))) matched++;
+  const jd = [...new Set([...c.requiredSkills, ...c.specialization])]
+    .map((s) => ({ raw: s, tech: canonicalTech(s) }))
+    .filter((x): x is { raw: string; tech: string } => x.tech !== null);
+
+  if (jd.length === 0) return { fit: null, strong: [], partial: [], missing: [] };
+
+  const strong: string[] = [];
+  const partial: string[] = [];
+  const missing: string[] = [];
+
+  for (const { raw, tech } of jd) {
+    if (mine.has(tech)) strong.push(raw);
+    else if ((TRANSFERABLE[tech] ?? []).some((t) => mine.has(t))) partial.push(raw);
+    else missing.push(raw);
   }
-  return Math.round((matched / skills.length) * 100);
+
+  const fit = Math.round(((strong.length + 0.5 * partial.length) / jd.length) * 100);
+  return { fit, strong, partial, missing };
+}
+
+/** Specialization fit only. See specializationBreakdown() for the working. */
+export function specializationFit(c: JobClassification, userSkills = USER_STACK): number | null {
+  return specializationBreakdown(c, userSkills).fit;
 }
 
 /**
@@ -242,15 +347,17 @@ export function targetFit(c: JobClassification, p: RoleProfile): TargetFit {
 
 /** Does the REQUIRED stack name a different engineering discipline outright? */
 function namesForeignDiscipline(c: JobClassification): boolean {
-  const skills = [...c.requiredSkills, ...c.specialization].map(normalize);
-  return skills.some((s) => DISCIPLINE_MARKERS.some((m) => mentions(s, m)));
+  return [...c.requiredSkills, ...c.specialization].some((s) => {
+    const tech = canonicalTech(s);
+    return tech !== null && DISCIPLINE_MARKERS.has(tech);
+  });
 }
 
 /** 0–100: how closely this role matches the families you are searching for. */
 export function targetRoleFit(c: JobClassification, p: RoleProfile): number {
   const fit = targetFit(c, p);
   const base = fit === 'TARGET' ? 100 : fit === 'ADJACENT' ? 65 : fit === 'AMBIGUOUS' ? 40 : 10;
-  const stack = specializationFit(c);
+  const stack = specializationFit(c, p.skills ?? USER_STACK);
   // An adjacent role with your stack beats an adjacent role without it.
   if (fit === 'ADJACENT' && stack !== null) return Math.round(base * (0.6 + 0.4 * (stack / 100)));
   return base;
@@ -409,7 +516,7 @@ export function eligibility(c: JobClassification, p: RoleProfile): Eligibility {
     roleRelevance: relevance,
     developmentConfidence: c.developmentConfidence,
     targetRoleFit: targetRoleFit(c, p),
-    specializationFit: specializationFit(c),
+    specializationFit: specializationFit(c, p.skills ?? USER_STACK),
     capsAtConsider: exp.capsAtConsider,
   };
 

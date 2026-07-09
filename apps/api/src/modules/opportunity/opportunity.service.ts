@@ -206,11 +206,19 @@ export class OpportunityService {
       orderBy: { versionNumber: 'desc' },
       select: { confirmedProfile: true, parsedJson: true },
     });
+    const confirmed = version?.confirmedProfile as
+      | { totalYearsExperience?: number; skills?: string[] }
+      | null;
+    const parsed = version?.parsedJson as {
+      structured?: { totalYearsExperience?: number; skills?: { name: string }[] };
+    } | null;
+
     const years =
-      (version?.confirmedProfile as { totalYearsExperience?: number } | null)?.totalYearsExperience ??
-      (version?.parsedJson as { structured?: { totalYearsExperience?: number } } | null)?.structured
-        ?.totalYearsExperience ??
-      2;
+      confirmed?.totalYearsExperience ?? parsed?.structured?.totalYearsExperience ?? 2;
+    // Specialization fit is measured against the skills the user confirmed,
+    // not a stack hardcoded in this file.
+    const skills =
+      confirmed?.skills ?? parsed?.structured?.skills?.map((s) => s.name) ?? undefined;
 
     return eligibility(
       {
@@ -229,7 +237,7 @@ export class OpportunityService {
         nonDevelopmentEvidence: c.nonDevelopmentEvidence,
         classificationReason: c.classificationReason,
       },
-      { ...DEFAULT_ROLE_PROFILE, yearsExperience: Math.round(years) },
+      { ...DEFAULT_ROLE_PROFILE, yearsExperience: Math.round(years), skills },
     );
   }
 
