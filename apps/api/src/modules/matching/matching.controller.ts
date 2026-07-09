@@ -63,6 +63,13 @@ export class MatchingController {
     return this.matching.rescoreExisting(user.id);
   }
 
+  /** Score existing India jobs that were never matched (LLM) — the catch-up. */
+  @Post('reconcile')
+  @HttpCode(HttpStatus.ACCEPTED)
+  reconcile(@CurrentUser() user: AuthenticatedUser) {
+    return this.matching.reconcileForUser(user.id);
+  }
+
   /** "Why didn't I get notified about this job?" — explain the decision path. */
   @Get('why/:jobId')
   why(@CurrentUser() user: AuthenticatedUser, @Param('jobId') jobId: string) {

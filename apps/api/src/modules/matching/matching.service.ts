@@ -141,6 +141,77 @@ export class MatchingService {
   }
 
   /**
+   * Reconciliation (2026-07-09): the incremental pipeline only matches jobs at
+   * INGEST time. Jobs already in the DB before a resume improves — or that were
+   * ingested faster than they were matched — sit unscored forever. This finds
+   * active, preferred-country jobs with an embedding but NO current match,
+   * ranks them by similarity to the current resume, and scores a capped batch.
+   *
+   * Safe by construction: idempotent (scoreAndUpsert), bounded (cap), does NOT
+   * spam — only fresh APPLY verdicts notify immediately; CONSIDER jobs land in
+   * the DB unnotified so the 2 PM digest picks them up.
+   */
+  async reconcileForUser(
+    userId: string,
+    cap = 60,
+  ): Promise<{
+    unmatchedFound: number;
+    scored: number;
+    apply: number;
+    consider: number;
+    skip: number;
+    notified: number;
+  }> {
+    const resume = await this.getPrimaryResumeContext(userId);
+    const countries = await this.preferredCountries(userId);
+
+    // Active, in-country, embedded, and NOT already matched — ranked by cosine
+    // similarity to the resume so we spend LLM budget on the best candidates.
+    const candidates = await this.prisma.$queryRaw<
+      { id: string; title: string; description: string }[]
+    >`
+      SELECT j.id, j.title, j.description
+      FROM job_embeddings je
+      JOIN jobs j ON j.id = je."jobId" AND j.status = 'ACTIVE'
+      CROSS JOIN (SELECT vector FROM resume_embeddings WHERE "resumeVersionId" = ${resume.resumeVersionId}) re
+      WHERE ${countrySql(countries)}
+        AND NOT EXISTS (SELECT 1 FROM job_matches m WHERE m."jobId" = j.id AND m."userId" = ${userId})
+      ORDER BY je.vector <=> re.vector
+      LIMIT ${cap}
+    `;
+
+    if (candidates.length === 0) {
+      return { unmatchedFound: 0, scored: 0, apply: 0, consider: 0, skip: 0, notified: 0 };
+    }
+
+    const matchIds = await this.scoreAndUpsert(userId, resume, candidates);
+
+    let apply = 0;
+    let consider = 0;
+    let skip = 0;
+    let notified = 0;
+    for (const id of matchIds) {
+      const result = await this.opportunity.scoreMatch(id);
+      const score = result?.opportunityScore ?? 0;
+      if (score >= 75) {
+        apply++;
+        // Only exceptional, never-seen APPLY jobs interrupt — the gate still
+        // applies its own SKIP/geo/stale/memory checks.
+        if (await this.notifications.maybeNotifyMatch(id)) notified++;
+      } else if (score >= 60) {
+        consider++; // left unnotified — the 2 PM digest delivers these
+      } else {
+        skip++;
+      }
+    }
+
+    this.logger.log(
+      `Reconcile ${userId}: ${candidates.length} unmatched -> ${apply} APPLY (${notified} notified), ${consider} CONSIDER (for digest), ${skip} SKIP`,
+    );
+    return { unmatchedFound: candidates.length, scored: matchIds.length, apply, consider, skip, notified };
+  }
+
+  /**
    * "Why didn't I get notified about this job?" — reconstructs the exact
    * decision path from stored data: similarity gate, scoring, threshold,
    * board-copy hold, notification memory. Trust through explainability.
