@@ -105,6 +105,89 @@ export class DashboardController {
   }
 
   /**
+   * Per-source conversion funnel: companies → websites → career pages → ATS
+   * detected → monitored → fresh India jobs → target-role jobs.
+   *
+   * Built before adding more adapters, and it immediately paid for itself
+   * (2026-07-09): the Places city sweep converts 539 companies into 2
+   * target-role jobs, because 374 of its career pages are hand-written HTML
+   * with an hr@ email and no ATS at all. Judge a source by what reaches the
+   * bottom of this table, never by how many companies it adds at the top.
+   */
+  @Get('sources')
+  sources() {
+    return this.sourceFunnel();
+  }
+
+  private async sourceFunnel() {
+    const india = Prisma.sql`(j.country = 'IN' OR j.location ~* 'india|bengaluru|bangalore|mumbai|pune|delhi|hyderabad|chennai|noida|gurgaon|gurugram|indore|ahmedabad|kolkata')`;
+    const eng = Prisma.sql`j.title ~* 'engineer|developer|sde|full.?stack|backend|node|react|software'`;
+    const fresh = Prisma.sql`now()::date - COALESCE(j."postedAt", j."firstSeenAt")::date <= 30`;
+
+    const rows = await this.prisma.$queryRaw<
+      {
+        source: string;
+        companies: bigint;
+        websites: bigint;
+        career_pages: bigint;
+        ats_detected: bigint;
+        monitored: bigint;
+        fresh_india_30d: bigint;
+        target_role_30d: bigint;
+      }[]
+    >`
+      WITH c AS (
+        SELECT co.id,
+               COALESCE(co."discoverySource", '(none)') AS source,
+               co.website IS NOT NULL AS has_site,
+               co."careerPageUrl" IS NOT NULL AS has_career,
+               co."atsProvider" <> 'UNKNOWN' AS ats,
+               co."atsProvider" IN (
+                 'GREENHOUSE','LEVER','ASHBY','WORKABLE',
+                 'SMARTRECRUITERS','RECRUITEE','BREEZY','KEKA'
+               ) AS monitored
+        FROM companies co
+      ), j AS (
+        SELECT co.id AS cid,
+               count(j.id) FILTER (WHERE ${fresh} AND ${india}) AS fresh_india,
+               count(j.id) FILTER (WHERE ${fresh} AND ${india} AND ${eng}) AS target_role
+        FROM companies co
+        LEFT JOIN jobs j ON j."companyId" = co.id AND j.status = 'ACTIVE'
+        GROUP BY 1
+      )
+      SELECT c.source,
+             count(*) AS companies,
+             count(*) FILTER (WHERE c.has_site) AS websites,
+             count(*) FILTER (WHERE c.has_career) AS career_pages,
+             count(*) FILTER (WHERE c.ats) AS ats_detected,
+             count(*) FILTER (WHERE c.monitored) AS monitored,
+             COALESCE(sum(j.fresh_india), 0) AS fresh_india_30d,
+             COALESCE(sum(j.target_role), 0) AS target_role_30d
+      FROM c JOIN j ON j.cid = c.id
+      GROUP BY 1 ORDER BY 8 DESC, 2 DESC
+    `;
+
+    return rows.map((r) => {
+      const companies = Number(r.companies);
+      const targetRole = Number(r.target_role_30d);
+      return {
+        source: r.source,
+        companies,
+        websites: Number(r.websites),
+        careerPages: Number(r.career_pages),
+        atsDetected: Number(r.ats_detected),
+        monitored: Number(r.monitored),
+        freshIndia30d: Number(r.fresh_india_30d),
+        targetRole30d: targetRole,
+        // The yield that decides where engineering effort goes.
+        targetRolePer100Companies: companies
+          ? Number(((targetRole / companies) * 100).toFixed(1))
+          : 0,
+      };
+    });
+  }
+
+  /**
    * "Since 8 AM" funnel + system health — the answer to "why am I not getting
    * jobs?" without SSHing into prod. Recomputed from stored data, so no new
    * instrumentation to drift.

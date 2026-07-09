@@ -54,6 +54,16 @@ interface Dashboard {
   };
 }
 
+interface SourceFunnel {
+  source: string;
+  companies: number;
+  careerPages: number;
+  atsDetected: number;
+  freshIndia30d: number;
+  targetRole30d: number;
+  targetRolePer100Companies: number;
+}
+
 /** Score badge: tier semantics (status colors), number always visible. */
 function ScoreBadge({ score }: { score: number }) {
   const tier =
@@ -155,12 +165,16 @@ function JobCard({ job, highlight }: { job: BriefJob; highlight: boolean }) {
 
 export default function MissionControl() {
   const [data, setData] = useState<Dashboard | null>(null);
+  const [sources, setSources] = useState<SourceFunnel[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     apiGet<Dashboard>('/dashboard')
       .then(setData)
       .catch((e) => setError(String(e)));
+    apiGet<SourceFunnel[]>('/dashboard/sources')
+      .then(setSources)
+      .catch(() => setSources([]));
   }, []);
 
   if (error)
@@ -293,6 +307,56 @@ export default function MissionControl() {
           </>
         )}
       </section>
+
+      {/* Where supply actually comes from. A source is worth engineering effort
+          only if companies reach the bottom of this table as target-role jobs. */}
+      {sources && sources.length > 0 && (
+        <section className="mt-8 rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+          <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-400">
+            Source yield
+          </h2>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full min-w-[520px] text-sm">
+              <thead>
+                <tr className="text-left text-[10px] uppercase tracking-wide text-neutral-500">
+                  <th className="pb-2 font-medium">Source</th>
+                  <th className="pb-2 text-right font-medium">Companies</th>
+                  <th className="pb-2 text-right font-medium">Career pages</th>
+                  <th className="pb-2 text-right font-medium">ATS</th>
+                  <th className="pb-2 text-right font-medium">Target roles</th>
+                  <th className="pb-2 text-right font-medium">Per 100</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sources.map((s) => (
+                  <tr key={s.source} className="border-t border-neutral-800">
+                    <td className="py-2 text-neutral-200">{s.source}</td>
+                    <td className="py-2 text-right tabular-nums text-neutral-400">{s.companies}</td>
+                    <td className="py-2 text-right tabular-nums text-neutral-400">{s.careerPages}</td>
+                    <td className="py-2 text-right tabular-nums text-neutral-400">{s.atsDetected}</td>
+                    <td className="py-2 text-right tabular-nums text-neutral-200">{s.targetRole30d}</td>
+                    <td
+                      className={`py-2 text-right tabular-nums font-medium ${
+                        s.targetRolePer100Companies >= 10
+                          ? 'text-emerald-400'
+                          : s.targetRolePer100Companies >= 2
+                            ? 'text-amber-400'
+                            : 'text-red-400'
+                      }`}
+                    >
+                      {s.targetRolePer100Companies}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-[11px] text-neutral-500">
+            Target-role India jobs (≤30 days) per 100 companies discovered. Adding companies to a
+            low-yield source does not add opportunities.
+          </p>
+        </section>
+      )}
 
       {/* Market signals */}
       <section className="mt-8 grid gap-4 sm:grid-cols-2">
