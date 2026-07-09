@@ -180,21 +180,27 @@ export class ResumesService {
       (version.parsedJson as { rawText?: string } | null)?.rawText ?? ''
     ).toLowerCase();
 
-    const unsupportedSkills = profile.skills.filter((s) => !raw.includes(s.toLowerCase()));
+    // Provenance, not just a warning. A skill the user adds is real profile
+    // data and may be matched on, but CareerOS must never later claim the
+    // submitted PDF contains it — that would poison resume tailoring.
+    const manuallyAddedSkills = profile.skills.filter((s) => !raw.includes(s.toLowerCase()));
 
     await this.prisma.resumeVersion.update({
       where: { id: version.id },
-      data: { confirmedProfile: profile as unknown as Prisma.InputJsonValue },
+      data: {
+        confirmedProfile: profile as unknown as Prisma.InputJsonValue,
+        manuallyAddedSkills,
+      },
     });
 
     return {
       saved: true,
-      warnings: unsupportedSkills.length
+      warnings: manuallyAddedSkills.length
         ? [
-            `${unsupportedSkills.join(', ')} ${unsupportedSkills.length === 1 ? 'does' : 'do'} not appear in the resume text. Recruiters search the document, not this profile — add it to the PDF too, and only if you can defend it in an interview.`,
+            `${manuallyAddedSkills.join(', ')} ${manuallyAddedSkills.length === 1 ? 'is' : 'are'} not in your resume text. CareerOS will match on ${manuallyAddedSkills.length === 1 ? 'it' : 'them'}, but recruiters search the document — add ${manuallyAddedSkills.length === 1 ? 'it' : 'them'} to the PDF too, and only if you can defend ${manuallyAddedSkills.length === 1 ? 'it' : 'them'} in an interview.`,
           ]
         : [],
-      unsupportedSkills,
+      unsupportedSkills: manuallyAddedSkills,
     };
   }
 
@@ -208,10 +214,19 @@ export class ResumesService {
     if (!version.confirmedProfile) {
       throw new BadRequestException('Review and confirm the parsed profile before activating');
     }
-    await this.prisma.resumeVersion.update({
-      where: { id: version.id },
-      data: { activatedAt: new Date(), reconciledAt: null, reconcileReport: Prisma.DbNull },
-    });
+    // Exactly one active version per user, atomically. Two "ACTIVE" resumes is
+    // not a display bug — it means reads could disagree about which resume the
+    // recommendations belong to.
+    await this.prisma.$transaction([
+      this.prisma.resumeVersion.updateMany({
+        where: { resume: { userId }, activatedAt: { not: null }, id: { not: version.id } },
+        data: { activatedAt: null },
+      }),
+      this.prisma.resumeVersion.update({
+        where: { id: version.id },
+        data: { activatedAt: new Date(), reconciledAt: null, reconcileReport: Prisma.DbNull },
+      }),
+    ]);
     this.logger.log(`Activated resume version ${version.id} for user ${userId}`);
 
     // Re-scoring every actionable job is ~300 paced LLM calls — minutes, not
@@ -227,11 +242,36 @@ export class ResumesService {
   /** The stored before/after report, once background reconciliation finishes. */
   async reconcileReport(userId: string, resumeVersionId: string) {
     const version = await this.ownedVersion(userId, resumeVersionId);
+    const report = version.reconcileReport as { error?: string } | null;
+    const failed = !!report?.error;
     return {
-      status: version.reconciledAt ? 'complete' : version.activatedAt ? 'running' : 'not-activated',
+      status: failed
+        ? 'failed'
+        : version.reconciledAt
+          ? 'complete'
+          : version.activatedAt
+            ? 'running'
+            : 'not-activated',
       reconciledAt: version.reconciledAt,
-      report: version.reconcileReport,
+      error: report?.error ?? null,
+      report: failed ? null : version.reconcileReport,
     };
+  }
+
+  /** Re-queue reconciliation for an already-activated version (e.g. after a failure). */
+  async retryReconcile(userId: string, resumeVersionId: string) {
+    const version = await this.ownedVersion(userId, resumeVersionId);
+    if (!version.activatedAt) throw new BadRequestException('Activate this version first');
+    await this.prisma.resumeVersion.update({
+      where: { id: version.id },
+      data: { reconciledAt: null, reconcileReport: Prisma.DbNull },
+    });
+    await this.parseQueue.add(
+      'reconcile',
+      { resumeVersionId: version.id, userId },
+      { jobId: `reconcile-${version.id}-${Date.now()}`, removeOnComplete: true, removeOnFail: false },
+    );
+    return { requeued: true };
   }
 
   private async ownedVersion(userId: string, resumeVersionId: string) {

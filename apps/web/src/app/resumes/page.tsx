@@ -115,7 +115,8 @@ export default function Resumes() {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Resume</h1>
             <p className="text-sm text-neutral-400">
-              Uploading re-scores every actionable job against the new resume.
+              Upload to check ATS compatibility and review what CareerOS extracts. Nothing changes
+              until you confirm and activate it.
             </p>
           </div>
           <a href="/" className="text-sm text-neutral-400 hover:text-neutral-200">
@@ -184,8 +185,10 @@ export default function Resumes() {
                           ATS {v.atsScore}/100 {v.atsVerdict}
                         </span>
                       )}
-                      <span className={v.activatedAt ? 'text-emerald-400' : 'text-amber-400'}>
-                        {v.activatedAt ? 'active — matching jobs' : 'not reviewed — not matching yet'}
+                      <span className={v.activatedAt ? 'text-emerald-400' : 'text-neutral-500'}>
+                        {v.activatedAt
+                          ? 'ACTIVE — drives your recommendations'
+                          : 'inactive — history kept, not matching'}
                       </span>
                     </div>
                   </div>

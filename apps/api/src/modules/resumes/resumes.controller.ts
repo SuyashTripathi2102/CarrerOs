@@ -94,4 +94,11 @@ export class ResumesController {
   reconcileReport(@CurrentUser() user: AuthenticatedUser, @Param('versionId') versionId: string) {
     return this.resumesService.reconcileReport(user.id, versionId);
   }
+
+  /** Re-run reconciliation after a failure, without re-activating. */
+  @Post('versions/:versionId/reconcile')
+  @HttpCode(HttpStatus.ACCEPTED)
+  retryReconcile(@CurrentUser() user: AuthenticatedUser, @Param('versionId') versionId: string) {
+    return this.resumesService.retryReconcile(user.id, versionId);
+  }
 }

@@ -204,6 +204,9 @@ model ResumeVersion {
   // The user's corrections to the AI parse. Once set, this — not parsedJson —
   // is the profile matching runs against.
   confirmedProfile Json?
+  // Skills the user added that are NOT in the resume text. Valid profile data,
+  // but CareerOS must never claim the submitted PDF contains them.
+  manuallyAddedSkills String[] @default([])
   // Matching uses the newest ACTIVATED version, never merely the newest upload.
   // Without this an unreviewed parse starts scoring jobs the instant the file
   // lands, which is exactly what the confirmation step exists to prevent.

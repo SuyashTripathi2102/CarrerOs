@@ -54,15 +54,30 @@ export class ResumesProcessor extends WorkerHost {
 
   private async reconcile({ resumeVersionId, userId }: ReconcileJob) {
     this.logger.log(`Reconciling actionable jobs against resume ${resumeVersionId}...`);
-    const report = await this.matching.reconcileForUser(userId, ACTIVATION_RECONCILE_CAP);
 
-    await this.prisma.resumeVersion.update({
-      where: { id: resumeVersionId },
-      data: {
-        reconciledAt: new Date(),
-        reconcileReport: report as unknown as Prisma.InputJsonValue,
-      },
-    });
-    return report;
+    // Always write a terminal state. A crash used to leave reconciledAt null
+    // forever, so the "what changed" page polled "running" indefinitely with no
+    // way for the user to learn it had died (2026-07-09).
+    try {
+      const report = await this.matching.reconcileForUser(userId, ACTIVATION_RECONCILE_CAP);
+      await this.prisma.resumeVersion.update({
+        where: { id: resumeVersionId },
+        data: {
+          reconciledAt: new Date(),
+          reconcileReport: report as unknown as Prisma.InputJsonValue,
+        },
+      });
+      return report;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await this.prisma.resumeVersion.update({
+        where: { id: resumeVersionId },
+        data: {
+          reconciledAt: new Date(),
+          reconcileReport: { error: message.slice(0, 500) } as Prisma.InputJsonValue,
+        },
+      });
+      throw err;
+    }
   }
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { use, useEffect, useState } from 'react';
-import { apiGet } from '../../../../lib/api';
+import { apiGet, apiPost } from '../../../../lib/api';
 
 type Verdict = 'APPLY' | 'CONSIDER' | 'SKIP';
 
@@ -35,8 +35,9 @@ interface ReconcileReport {
 }
 
 interface Response {
-  status: 'complete' | 'running' | 'not-activated';
+  status: 'complete' | 'running' | 'not-activated' | 'failed';
   reconciledAt: string | null;
+  error: string | null;
   report: ReconcileReport | null;
 }
 
@@ -58,6 +59,7 @@ function Stat({ label, value, tone }: { label: string; value: string | number; t
 export default function Changes({ params }: { params: Promise<{ versionId: string }> }) {
   const { versionId } = use(params);
   const [data, setData] = useState<Response | null>(null);
+  const [retrying, setRetrying] = useState(false);
 
   useEffect(() => {
     let stop = false;
@@ -75,9 +77,37 @@ export default function Changes({ params }: { params: Promise<{ versionId: strin
     return () => {
       stop = true;
     };
-  }, [versionId]);
+  }, [versionId, retrying]);
+
+  async function retry() {
+    setRetrying(true);
+    await apiPost(`/resumes/versions/${versionId}/reconcile`, {}).catch(() => undefined);
+    setData(null);
+    setRetrying(false);
+  }
 
   if (!data) return <Shell><p className="text-neutral-400">Loading…</p></Shell>;
+
+  if (data.status === 'failed') {
+    return (
+      <Shell>
+        <h1 className="text-2xl font-semibold tracking-tight">Re-scoring failed</h1>
+        <p className="mt-2 text-sm text-neutral-400">
+          Your resume is still active. Nothing was corrupted — some jobs simply were not re-scored.
+        </p>
+        <pre className="mt-4 overflow-x-auto rounded-lg border border-red-900 bg-red-950/30 p-3 text-xs text-red-300">
+          {data.error}
+        </pre>
+        <button
+          onClick={() => void retry()}
+          disabled={retrying}
+          className="mt-4 rounded-lg bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950 disabled:opacity-50"
+        >
+          {retrying ? 'Restarting…' : 'Retry re-scoring'}
+        </button>
+      </Shell>
+    );
+  }
 
   if (data.status !== 'complete' || !data.report) {
     return (

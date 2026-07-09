@@ -47,7 +47,7 @@ export class DashboardController {
     return {
       brief: briefData,
       funnel: { crawled: jobsTotal, matched: matches, recommended: ge60, notified, applied },
-      pipeline: await this.todayPipeline(),
+      pipeline: await this.todayPipeline(user.id),
       supply: await this.freshSupply(user.id),
     };
   }
@@ -210,11 +210,11 @@ export class DashboardController {
    * instrumentation to drift.
    */
   @Get('pipeline')
-  async pipeline() {
-    return this.todayPipeline();
+  async pipeline(@CurrentUser() user: AuthenticatedUser) {
+    return this.todayPipeline(user.id);
   }
 
-  private async todayPipeline() {
+  private async todayPipeline(userId: string) {
     // 8 AM IST today = 02:30 UTC (the brief boundary).
     const now = new Date();
     const since = new Date(now);
@@ -229,12 +229,18 @@ export class DashboardController {
       this.prisma.$queryRaw<{ total: bigint; india: bigint }[]>`
         SELECT count(*) AS total, count(*) FILTER (WHERE ${india}) AS india
         FROM jobs j WHERE j."firstSeenAt" >= ${since}`,
+      // Pinned to the active resume version. Without it, matches scored against
+      // a replaced resume are counted as today's verdicts — the dashboard read
+      // "10 CONSIDER" while only 1 job had ever been judged by the real resume.
       this.prisma.$queryRaw<{ apply: bigint; consider: bigint; skip: bigint; notified: bigint }[]>`
         SELECT count(*) FILTER (WHERE "opportunityScore" >= 75) AS apply,
                count(*) FILTER (WHERE "opportunityScore" >= 60 AND "opportunityScore" < 75) AS consider,
                count(*) FILTER (WHERE "opportunityScore" < 60) AS skip,
                count(*) FILTER (WHERE "notifiedAt" >= ${since}) AS notified
-        FROM job_matches WHERE "createdAt" >= ${since}`,
+        FROM job_matches
+        WHERE "createdAt" >= ${since}
+          AND "userId" = ${userId}
+          AND "resumeVersionId" = ${activeVersionSql(userId)}`,
       this.prisma.crawlRun.findFirst({
         where: { status: 'SUCCEEDED' },
         orderBy: { finishedAt: 'desc' },

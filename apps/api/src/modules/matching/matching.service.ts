@@ -119,7 +119,7 @@ export class MatchingService {
     this.logger.log(`Prefilter: ${candidates.length} candidates by cosine similarity`);
 
     const toScore = candidates.slice(0, LLM_SCORE_TOP_N);
-    const matchIds = await this.scoreAndUpsert(userId, resume, toScore);
+    const { matchIds } = await this.scoreAndUpsert(userId, resume, toScore);
 
     // Opportunity scoring + notification (memory prevents bulk-run spam).
     for (const id of matchIds) {
@@ -170,7 +170,7 @@ export class MatchingService {
       `;
       if (candidates.length === 0) continue;
 
-      const matchIds = await this.scoreAndUpsert(user.id, resume, candidates);
+      const { matchIds } = await this.scoreAndUpsert(user.id, resume, candidates);
       matched += matchIds.length;
       for (const id of matchIds) {
         await this.opportunity.scoreMatch(id);
@@ -281,11 +281,12 @@ export class MatchingService {
       candidates.map((c) => c.id),
     );
 
-    const matchIds = await this.scoreAndUpsert(userId, resume, candidates);
+    const { matchIds, failedJobIds } = await this.scoreAndUpsert(userId, resume, candidates);
 
     const report = emptyReconcileReport();
     report.inspected = candidates.length;
     report.created = matchIds.length;
+    report.failures = failedJobIds.length;
     const deltas: number[] = [];
 
     for (const id of matchIds) {
@@ -484,12 +485,29 @@ export class MatchingService {
     userId: string,
     resume: { resumeVersionId: string; parsed: ParsedResume },
     toScore: { id: string; title: string; description: string }[],
-  ): Promise<string[]> {
+  ): Promise<{ matchIds: string[]; failedJobIds: string[] }> {
     const matchIds: string[] = [];
+    const failedJobIds: string[] = [];
     for (let i = 0; i < toScore.length; i += SCORE_BATCH) {
       if (i > 0) await new Promise((r) => setTimeout(r, 8_000)); // free-tier RPM pacing
       const batch = toScore.slice(i, i + SCORE_BATCH);
-      const scores = await this.scoreBatch(resume.parsed, batch);
+
+      // One malformed model response must not destroy the whole run. On
+      // 2026-07-09 a batch of 5 aborted a 312-job reconcile at minute four and
+      // no report was ever written. Losing five scores beats losing all of them.
+      let scores;
+      try {
+        scores = await this.scoreBatch(resume.parsed, batch);
+      } catch (err) {
+        failedJobIds.push(...batch.map((b) => b.id));
+        this.logger.error(
+          `score batch ${i / SCORE_BATCH + 1} of ${Math.ceil(toScore.length / SCORE_BATCH)} failed, continuing: ${
+            err instanceof Error ? err.message.slice(0, 200) : err
+          }`,
+        );
+        continue;
+      }
+
       for (const s of scores) {
         const row = await this.prisma.jobMatch.upsert({
           // Keyed on the resume version: re-running for the same version is
@@ -524,7 +542,7 @@ export class MatchingService {
         matchIds.push(row.id);
       }
     }
-    return matchIds;
+    return { matchIds, failedJobIds };
   }
 
   async list(userId: string, minScore = 0) {
