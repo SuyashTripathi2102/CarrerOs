@@ -134,6 +134,7 @@ model User {
   matches       JobMatch[]
   applications  Application[]
   notifications Notification[]
+  reviewFeedback JobReviewFeedback[]
 
   @@map("users")
 }
@@ -360,6 +361,7 @@ model Job {
   matches      JobMatch[]
   applications Application[]
   classifications JobClassification[]
+  reviewFeedback  JobReviewFeedback[]
 
   // Dedupe guarantee: a recrawl updates the existing row instead of inserting.
   @@unique([companyId, externalId])
@@ -544,6 +546,31 @@ model JobClassification {
   @@index([classifierVersion])
   @@index([primaryFunction, roleFamily])
   @@map("job_classifications")
+}
+
+/**
+ * The user's verdict on a job CareerOS could not classify confidently.
+ *
+ * Deliberately NOT a column on JobClassification. That table answers "what is
+ * this job?" — objective, cached, shared across users, invalidated by a
+ * classifier version bump. This answers "is this MY kind of work?", which is
+ * personal, permanent, and must survive every reclassification.
+ */
+model JobReviewFeedback {
+  id       String  @id @default(cuid())
+  userId   String
+  jobId    String
+  relevant Boolean // the user said this is / is not the work they want
+  note     String?
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job  Job  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, jobId])
+  @@index([userId, relevant])
+  @@map("job_review_feedback")
 }
 
 model CompanyIntelligence {

@@ -8,6 +8,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { AiModule } from './modules/ai/ai.module';
 import { ApplicationsModule } from './modules/applications/applications.module';
+import { ReviewModule } from './modules/review/review.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { MatchingModule } from './modules/matching/matching.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
@@ -49,6 +50,7 @@ import { UsersModule } from './modules/users/users.module';
     NotificationsModule,
     OpportunityModule,
     ApplicationsModule,
+    ReviewModule,
   ],
   controllers: [AppController],
   providers: [
