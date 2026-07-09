@@ -178,6 +178,33 @@ export default function ReviewProfile({ params }: { params: Promise<{ versionId:
     }
   }
 
+  /**
+   * Read the PDF again with the current parser. Skills it finds that the
+   * confirmed profile lacks arrive as suggestions, never as edits — the parse
+   * that dropped HTML5 and CSS3 also had full confidence in its output.
+   */
+  async function reparse() {
+    setBusy(true);
+    setSaved(null);
+    try {
+      await apiPost(`/resumes/versions/${versionId}/parse`, {});
+      // The parse is a queued job; poll until the suggestions change.
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const fresh = await apiGet<ResumeProfile>(`/resumes/versions/${versionId}/profile`);
+        if (fresh.suggestedSkills.length > 0) {
+          setP(fresh);
+          return;
+        }
+      }
+      setError('Re-parse finished but found nothing new in your resume.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (activated) {
     return (
       <Shell>
@@ -349,6 +376,14 @@ export default function ReviewProfile({ params }: { params: Promise<{ versionId:
           className="rounded-lg bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950 hover:bg-white disabled:opacity-40"
         >
           Confirm & activate
+        </button>
+        <button
+          onClick={reparse}
+          disabled={busy}
+          title="Read the PDF again with the current parser. Suggests, never overwrites."
+          className="ml-auto rounded-lg border border-neutral-800 px-3 py-2 text-xs text-neutral-400 hover:border-neutral-600 hover:text-neutral-200 disabled:opacity-50"
+        >
+          {busy ? 'Re-reading…' : 'Re-parse resume'}
         </button>
       </div>
       <p className="mt-2 text-[11px] text-neutral-600">
