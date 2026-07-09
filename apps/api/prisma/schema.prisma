@@ -355,6 +355,7 @@ model Job {
   embedding    JobEmbedding?
   matches      JobMatch[]
   applications Application[]
+  classifications JobClassification[]
 
   // Dedupe guarantee: a recrawl updates the existing row instead of inserting.
   @@unique([companyId, externalId])
@@ -475,6 +476,46 @@ model Notification {
 // come from OUR OWN job corpus (LLM extraction + SQL aggregates), not from
 // external scraping — free to compute and refreshed weekly.
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What a job IS — objective, cached, and versioned. Never user-specific: this
+ * table says "Android engineering, coding PRIMARY, minimum 2 years", never
+ * "reject for Suyash". Personal fit is derived per user at read time.
+ *
+ * Rows are kept per classifierVersion so a prompt change can be audited and
+ * selectively recomputed rather than silently overwriting history.
+ */
+model JobClassification {
+  id                String @id @default(cuid())
+  jobId             String
+  classifierVersion Int
+
+  primaryFunction       String // SOFTWARE_ENGINEERING | MARKETING_GROWTH | ...
+  roleFamily            String // FULL_STACK | NATIVE_ANDROID | ...
+  specializations       String[] @default([])
+  codingIntensity       String // PRIMARY | SUBSTANTIAL | OCCASIONAL | INCIDENTAL | NONE
+  /** 0–100: how certain that BUILDING SOFTWARE is the core of this job. */
+  developmentConfidence Int
+  seniority             String // INTERN | JUNIOR | MID | SENIOR | LEAD | STAFF | PRINCIPAL | UNKNOWN
+  minimumYears          Int?
+  maximumYears          Int?
+
+  requiredSkills        String[] @default([])
+  preferredSkills       String[] @default([])
+  responsibilities      String[] @default([])
+  developmentEvidence   String[] @default([])
+  nonDevelopmentEvidence String[] @default([])
+  classificationReason  String
+
+  classifiedAt DateTime @default(now())
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, classifierVersion])
+  @@index([classifierVersion])
+  @@index([primaryFunction, roleFamily])
+  @@map("job_classifications")
+}
 
 model CompanyIntelligence {
   id        String @id @default(cuid())
