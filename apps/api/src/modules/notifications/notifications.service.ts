@@ -125,27 +125,31 @@ export class NotificationsService {
       },
     });
 
-    // The decision gate: SKIP verdicts never reach the phone — "ignore 615,
-    // apply to these 8" is the product. The match stays visible in-app.
+    // The decision gate reads the STORED verdict — it does not recompute one.
+    // Until 2026-07-10 this path called decide() while the dashboard filtered
+    // on opportunityScore, so a marketing role blocked here still appeared
+    // under "Apply today". One decision, one source, every consumer.
     const modules = Array.isArray(match.scoreBreakdown)
       ? (match.scoreBreakdown as unknown as ScoreModule[])
       : ((match.scoreBreakdown as { modules?: ScoreModule[] })?.modules ?? []);
-    const decision = decide({
-      opportunityScore: match.opportunityScore ?? 0,
-      resumeMatch: match.overallScore,
-      missingSkills: match.missingSkills,
-      modules,
-      ageDays,
-      evergreen,
-      activelyHiring,
-      title: match.job.title,
-    });
-    if (decision.verdict === 'SKIP') {
+
+    // Only APPLY interrupts. NEEDS_REVIEW is visible on the dashboard and
+    // never pushed; SKIP stays in-app as audit history.
+    if (match.verdict !== 'APPLY') {
       this.logger.log(
-        `holding notification for "${match.job.title}" — verdict SKIP (${decision.reasons.at(-1) ?? 'low fit'})`,
+        `holding notification for "${match.job.title}" — verdict ${match.verdict ?? 'UNDECIDED'} ` +
+          `(${match.verdictCode ?? 'no code'}: ${match.verdictReason?.split('\n')[0] ?? 'no reason recorded'})`,
       );
       return false;
     }
+
+    const decision: Decision = {
+      verdict: 'APPLY',
+      code: (match.verdictCode as Decision['code']) ?? 'TARGET_ROLE_ELIGIBLE',
+      banner: `🟢 ${Math.round(match.opportunityScore ?? 0)}/100`,
+      action: '✅ APPLY',
+      reasons: match.verdictReason?.split('\n').filter(Boolean) ?? [],
+    };
 
     const text = this.formatMatch(match, twinCount, decision);
     await this.deliver(

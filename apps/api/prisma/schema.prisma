@@ -398,6 +398,19 @@ model JobMatch {
   scoreBreakdown   Json? // [{module, score, weight, reason}] — explainability
   contentHash      String? // job title+salary hash at scoring time — re-notify trigger
 
+  // ── Canonical decision (2026-07-10) ──
+  // The ONE verdict. Dashboard, Telegram, 8 AM brief, 2 PM digest and the job
+  // page all read this column. No consumer may re-derive APPLY/CONSIDER from
+  // opportunityScore: that is how a marketing role reached "Apply today" while
+  // the notification path would have blocked it.
+  verdict         String? // APPLY | CONSIDER | SKIP | NEEDS_REVIEW
+  verdictReason   String?
+  verdictCode     String? // TARGET_ROLE_ELIGIBLE | DEVELOPMENT_WRONG_SPECIALIZATION | ...
+  /** Is this the kind of work I want? Reported separately from resume match. */
+  roleRelevance   Int?
+  decisionVersion Int?
+  decidedAt       DateTime?
+
   notifiedAt DateTime? // notification memory: set when the user was told
   createdAt  DateTime  @default(now())
 

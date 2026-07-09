@@ -13,7 +13,7 @@ import type {
  * Bump when the prompt or the taxonomy changes — stored classifications from
  * an older version must be recomputed rather than trusted.
  */
-export const CLASSIFIER_VERSION = 1;
+export const CLASSIFIER_VERSION = 2;
 
 /** Batch size per LLM call. JDs are long; five keeps the response parseable. */
 const CLASSIFY_BATCH = 5;
@@ -29,7 +29,7 @@ const ROLE_FAMILIES: RoleFamily[] = [
   'FULL_STACK', 'BACKEND', 'NODEJS_BACKEND', 'MERN', 'WEB_SOFTWARE_ENGINEERING',
   'GENERAL_SOFTWARE_ENGINEERING', 'SDE', 'FRONTEND', 'REACT', 'APPLICATION_ENGINEERING',
   'INTEGRATION_ENGINEERING', 'SOLUTIONS_ENGINEERING', 'PLATFORM_ENGINEERING',
-  'NATIVE_ANDROID', 'NATIVE_IOS', 'DATA_SCIENCE', 'MACHINE_LEARNING', 'DEVOPS_SRE',
+  'NATIVE_ANDROID', 'NATIVE_IOS', 'DATA_ENGINEERING', 'DATA_SCIENCE', 'MACHINE_LEARNING', 'DEVOPS_SRE',
   'MANUAL_QA', 'AUTOMATION_QA', 'PRODUCT_MANAGEMENT', 'BUSINESS_ANALYTICS', 'DATA_ANALYTICS',
   'DIGITAL_MARKETING', 'SUPPORT', 'SALES', 'ENGINEERING_MANAGEMENT', 'OTHER', 'AMBIGUOUS',
 ];
@@ -65,7 +65,12 @@ For EACH job return:
     OCCASIONAL = scripts, configuration, queries
     INCIDENTAL = reads code, does not write it
     NONE
-- developmentConfidence: 0-100, how certain that BUILDING SOFTWARE is the core responsibility
+- developmentConfidence: 0-100. Confidence that HANDS-ON software development is a core
+    responsibility OF THIS SPECIFIC ROLE — not confidence that the role sits inside an
+    engineering organisation. An Engineering Manager, Director of Engineering, VP Engineering or
+    Head of Engineering belongs to engineering but does not write production code: their
+    developmentConfidence is LOW. Keep this consistent with codingIntensity — a role with
+    codingIntensity NONE or INCIDENTAL cannot have high developmentConfidence.
 - seniority: ${SENIORITIES.join(' | ')}
 - minimumYears / maximumYears: integers from the JD text, null when unstated
 - requiredSkills / preferredSkills: technologies named in the JD

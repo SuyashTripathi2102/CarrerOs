@@ -8,6 +8,7 @@ import { MATCH_NEW_JOBS_QUEUE } from './matching.constants';
 import { MatchNewJobsProcessor } from './match-new-jobs.processor';
 import { MatchingController, MatchingInternalController } from './matching.controller';
 import { GENERATE_MATCHES_QUEUE, MatchingProcessor } from './matching.processor';
+import { JobClassifierService } from './job-classifier.service';
 import { MatchingService } from './matching.service';
 
 @Module({
@@ -19,7 +20,13 @@ import { MatchingService } from './matching.service';
     BullModule.registerQueue({ name: MATCH_NEW_JOBS_QUEUE }),
   ],
   controllers: [MatchingController, MatchingInternalController],
-  providers: [MatchingService, MatchingProcessor, EmbedProcessor, MatchNewJobsProcessor],
+  providers: [
+    MatchingService,
+    JobClassifierService,
+    MatchingProcessor,
+    EmbedProcessor,
+    MatchNewJobsProcessor,
+  ],
   exports: [MatchingService],
 })
 export class MatchingModule {}

@@ -49,6 +49,7 @@ export type RoleFamily =
   // normally excluded
   | 'NATIVE_ANDROID'
   | 'NATIVE_IOS'
+  | 'DATA_ENGINEERING'
   | 'DATA_SCIENCE'
   | 'MACHINE_LEARNING'
   | 'DEVOPS_SRE'
@@ -118,6 +119,9 @@ export const DEFAULT_ROLE_PROFILE: Omit<RoleProfile, 'yearsExperience'> = {
   excludedFamilies: [
     'NATIVE_ANDROID',
     'NATIVE_IOS',
+    // Genuine engineering with PRIMARY coding — excluded because it is not the
+    // Node/MERN/full-stack path, never because it "isn't development".
+    'DATA_ENGINEERING',
     'DATA_SCIENCE',
     'MACHINE_LEARNING',
     'DEVOPS_SRE',
@@ -197,27 +201,48 @@ export function experienceVerdict(c: JobClassification, years: number): Experien
     return { eligible: true, capsAtConsider: false, reason: 'no explicit experience requirement' };
   }
 
+  const asks = c.maximumYears ? `${min}–${c.maximumYears} years` : `${min}+ years`;
   const gap = min - years;
-  if (gap <= 0) return { eligible: true, capsAtConsider: false, reason: `asks ${min}y, you have ${years}y` };
+  if (gap <= 0) {
+    return { eligible: true, capsAtConsider: false, reason: `JD requests ${asks}; you have ~${years}` };
+  }
   if (gap === 1) {
     return {
       eligible: true,
       capsAtConsider: true,
-      reason: `asks ${min}y vs your ${years}y — a stretch; strong stack fit required`,
+      reason: `Experience stretch: JD requests ${asks}; your profile has approximately ${years} years`,
     };
   }
   return {
     eligible: false,
     capsAtConsider: false,
-    reason: `asks ${min}y vs your ${years}y — ${gap} years short`,
+    reason: `JD requests ${asks}; your profile has approximately ${years} years — ${gap} years short`,
   };
 }
+
+/**
+ * Why a job was admitted or refused. Never collapse these — "not a development
+ * role" said about an Android engineer is false, and a user who catches the
+ * system lying once stops trusting the explanations that are true.
+ */
+export type EligibilityCode =
+  | 'TARGET_ROLE_ELIGIBLE'
+  | 'TARGET_ROLE_EXPERIENCE_STRETCH'
+  | 'TARGET_ROLE_TOO_SENIOR'
+  /** Right role, wrong stack — decided by resume scoring, not by the gate. */
+  | 'TARGET_ROLE_WEAK_STACK'
+  | 'DEVELOPMENT_WRONG_SPECIALIZATION'
+  | 'NOT_DEVELOPMENT'
+  | 'LOW_CODING_RESPONSIBILITY'
+  | 'LOW_CONFIDENCE'
+  | 'AMBIGUOUS_NEEDS_REVIEW';
 
 export interface Eligibility {
   /** Passes every hard gate — may proceed to personalized resume scoring. */
   eligible: boolean;
   /** Genuinely uncertain: show in Needs Review, never auto-APPLY, never push. */
   needsReview: boolean;
+  code: EligibilityCode;
   fit: TargetFit;
   roleRelevance: number;
   capsAtConsider: boolean;
@@ -248,8 +273,9 @@ export function eligibility(c: JobClassification, p: RoleProfile): Eligibility {
       ...base,
       eligible: false,
       needsReview: false,
+      code: genuineEngineering ? 'DEVELOPMENT_WRONG_SPECIALIZATION' : 'NOT_DEVELOPMENT',
       reason: genuineEngineering
-        ? `genuine software engineering, but ${humanize(c.roleFamily)} is outside your target families`
+        ? `genuine ${humanize(c.roleFamily)} role, but outside your Node.js/MERN/full-stack targets`
         : `${humanize(c.primaryFunction)} role — building software is not the core responsibility`,
     };
   }
@@ -259,6 +285,7 @@ export function eligibility(c: JobClassification, p: RoleProfile): Eligibility {
       ...base,
       eligible: false,
       needsReview: fit === 'AMBIGUOUS',
+      code: fit === 'AMBIGUOUS' ? 'AMBIGUOUS_NEEDS_REVIEW' : 'LOW_CODING_RESPONSIBILITY',
       reason: `coding is ${humanize(c.codingIntensity)} here, not a primary responsibility`,
     };
   }
@@ -266,11 +293,17 @@ export function eligibility(c: JobClassification, p: RoleProfile): Eligibility {
   // Seniority and years are hard, and they come before review triage: a role
   // you cannot get should not consume your attention in the review queue.
   if (!exp.eligible) {
-    return { ...base, eligible: false, needsReview: false, reason: exp.reason };
+    return { ...base, eligible: false, needsReview: false, code: 'TARGET_ROLE_TOO_SENIOR', reason: exp.reason };
   }
 
   if (fit === 'AMBIGUOUS' || c.developmentConfidence < REVIEW_MIN_CONFIDENCE) {
-    return { ...base, eligible: false, needsReview: true, reason: c.classificationReason };
+    return {
+      ...base,
+      eligible: false,
+      needsReview: true,
+      code: 'AMBIGUOUS_NEEDS_REVIEW',
+      reason: c.classificationReason,
+    };
   }
 
   const threshold = fit === 'TARGET' ? TARGET_MIN_CONFIDENCE : ADJACENT_MIN_CONFIDENCE;
@@ -279,6 +312,7 @@ export function eligibility(c: JobClassification, p: RoleProfile): Eligibility {
       ...base,
       eligible: false,
       needsReview: true,
+      code: 'LOW_CONFIDENCE',
       reason: `${c.developmentConfidence}% development confidence — below the ${threshold}% bar for ${humanize(fit)} roles`,
     };
   }
@@ -289,9 +323,16 @@ export function eligibility(c: JobClassification, p: RoleProfile): Eligibility {
       ...base,
       eligible: false,
       needsReview: true,
+      code: 'AMBIGUOUS_NEEDS_REVIEW',
       reason: `adjacent role family with ${humanize(c.codingIntensity)} coding — needs a human look`,
     };
   }
 
-  return { ...base, eligible: true, needsReview: false, reason: exp.reason };
+  return {
+    ...base,
+    eligible: true,
+    needsReview: false,
+    code: exp.capsAtConsider ? 'TARGET_ROLE_EXPERIENCE_STRETCH' : 'TARGET_ROLE_ELIGIBLE',
+    reason: exp.reason,
+  };
 }

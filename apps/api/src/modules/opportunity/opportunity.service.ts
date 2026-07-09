@@ -2,7 +2,17 @@ import { Injectable } from '@nestjs/common';
 import { HiringTrend, JobStatus, Prisma } from '@prisma/client';
 import { createHash } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
-import { companyTier } from './company-tier';
+import { decide } from '../notifications/decision';
+import {
+  DEFAULT_ROLE_PROFILE,
+  eligibility,
+  type Eligibility,
+  type JobClassification,
+} from '../matching/role-classification';
+import { companyTier, isEvergreen } from './company-tier';
+
+/** Bump when decide() changes: stored verdicts say which logic produced them. */
+export const DECISION_VERSION = 1;
 
 /**
  * Opportunity Score (ADR-10): modular scorers, each returning a 0-100 score,
@@ -129,15 +139,84 @@ export class OpportunityService {
       },
     });
 
+    // The canonical decision, computed once and stored. Role eligibility comes
+    // from the JD classification and no score module can overturn it.
+    const elig = await this.eligibilityFor(match.jobId, match.userId);
+    const ageDays = Math.floor(
+      (Date.now() - (match.job.postedAt ?? match.job.firstSeenAt).getTime()) / 86_400_000,
+    );
+    const tier = companyTier(match.job.company.name);
+    const decision = decide({
+      opportunityScore: result.opportunityScore,
+      resumeMatch: match.overallScore,
+      missingSkills: match.missingSkills,
+      modules: result.breakdown,
+      eligibility: elig ?? undefined,
+      ageDays,
+      evergreen: isEvergreen(tier),
+      activelyHiring: (match.job.company.intelligence?.activeJobs ?? 0) >= 3,
+    });
+
     await this.prisma.jobMatch.update({
       where: { id: matchId },
       data: {
         opportunityScore: result.opportunityScore,
         scoreBreakdown: result.breakdown as unknown as Prisma.InputJsonValue,
         contentHash: result.contentHash,
+        verdict: decision.verdict,
+        verdictCode: decision.code,
+        // All reasons, newline-joined: consumers render them, none recompute them.
+        verdictReason: decision.reasons.join('\n') || null,
+        roleRelevance: elig?.roleRelevance ?? null,
+        decisionVersion: DECISION_VERSION,
+        decidedAt: new Date(),
       },
     });
     return result;
+  }
+
+  /**
+   * Role eligibility for this user, derived from the job's stored objective
+   * classification. An unclassified job is never eligible: a job CareerOS has
+   * not read cannot be recommended.
+   */
+  private async eligibilityFor(jobId: string, userId: string): Promise<Eligibility | null> {
+    const c = await this.prisma.jobClassification.findFirst({
+      where: { jobId },
+      orderBy: { classifierVersion: 'desc' },
+    });
+    if (!c) return null;
+
+    const version = await this.prisma.resumeVersion.findFirst({
+      where: { resume: { userId, isPrimary: true }, activatedAt: { not: null } },
+      orderBy: { versionNumber: 'desc' },
+      select: { confirmedProfile: true, parsedJson: true },
+    });
+    const years =
+      (version?.confirmedProfile as { totalYearsExperience?: number } | null)?.totalYearsExperience ??
+      (version?.parsedJson as { structured?: { totalYearsExperience?: number } } | null)?.structured
+        ?.totalYearsExperience ??
+      2;
+
+    return eligibility(
+      {
+        primaryFunction: c.primaryFunction as JobClassification['primaryFunction'],
+        roleFamily: c.roleFamily as JobClassification['roleFamily'],
+        specialization: c.specializations,
+        codingIntensity: c.codingIntensity as JobClassification['codingIntensity'],
+        developmentConfidence: c.developmentConfidence,
+        seniority: c.seniority as JobClassification['seniority'],
+        minimumYears: c.minimumYears,
+        maximumYears: c.maximumYears,
+        requiredSkills: c.requiredSkills,
+        preferredSkills: c.preferredSkills,
+        responsibilities: c.responsibilities,
+        developmentEvidence: c.developmentEvidence,
+        nonDevelopmentEvidence: c.nonDevelopmentEvidence,
+        classificationReason: c.classificationReason,
+      },
+      { ...DEFAULT_ROLE_PROFILE, yearsExperience: Math.round(years) },
+    );
   }
 
   compute(ctx: ScoringContext): OpportunityResult {

@@ -52,7 +52,7 @@ export class DailyBriefService {
         JOIN companies c ON c.id = j."companyId"
         WHERE m."userId" = ${user.id}
           AND m."resumeVersionId" = ${activeVersionSql(user.id)}
-          AND m."opportunityScore" >= 60 AND m."opportunityScore" < 75
+          AND m.verdict = 'CONSIDER'
           AND m."notifiedAt" IS NULL
           AND COALESCE(j."postedAt", j."firstSeenAt") >= now() - interval '30 days'
           AND (j.country = 'IN' OR j.location ~* 'india|bengaluru|bangalore|mumbai|pune|delhi|hyderabad|chennai|noida|gurgaon|indore|ahmedabad')
@@ -141,7 +141,7 @@ export class DailyBriefService {
             userId,
             resumeVersionId: activeVersionId ?? '',
             createdAt: { gte: dayAgo },
-            opportunityScore: { gte: 60 },
+            verdict: { in: ['APPLY', 'CONSIDER'] },
           },
         }),
         this.prisma.$queryRaw<
@@ -154,7 +154,7 @@ export class DailyBriefService {
           JOIN companies c ON c.id = j."companyId"
           WHERE m."userId" = ${userId}
             AND m."resumeVersionId" = ${activeVersionSql(userId)}
-            AND m."opportunityScore" >= 75
+            AND m.verdict = 'APPLY'
             AND COALESCE(j."postedAt", j."firstSeenAt") >= ${weekAgo}
           ORDER BY m."opportunityScore" DESC LIMIT 3
         `,
@@ -168,7 +168,7 @@ export class DailyBriefService {
           JOIN companies c ON c.id = j."companyId"
           WHERE m."userId" = ${userId}
             AND m."resumeVersionId" = ${activeVersionSql(userId)}
-            AND m."opportunityScore" >= 60 AND m."opportunityScore" < 75
+            AND m.verdict = 'CONSIDER'
             AND COALESCE(j."postedAt", j."firstSeenAt") >= ${new Date(Date.now() - 30 * 86_400_000)}
           ORDER BY m."opportunityScore" DESC LIMIT 3
         `,

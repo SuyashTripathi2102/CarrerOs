@@ -188,7 +188,8 @@ describe('eligibility — the hard gate, from the nine false recommendations', (
     expect(e.eligible).toBe(false);
     expect(e.fit).toBe('NON_TARGET');
     // And say so honestly — never "building software is not the core responsibility".
-    expect(e.reason).toBe('genuine software engineering, but native android is outside your target families');
+    expect(e.code).toBe('DEVELOPMENT_WRONG_SPECIALIZATION');
+    expect(e.reason).toBe('genuine native android role, but outside your Node.js/MERN/full-stack targets');
   });
 
   it('7. Groww "Intern - Growth (AI & MarTech)" — marketing', () => {
@@ -325,7 +326,8 @@ describe('eligibility — ambiguous roles go to review, never to APPLY', () => {
       SUYASH,
     );
     expect(e.eligible).toBe(false);
-    expect(e.reason).toBe('genuine software engineering, but devops sre is outside your target families');
+    expect(e.code).toBe('DEVELOPMENT_WRONG_SPECIALIZATION');
+    expect(e.reason).toBe('genuine devops sre role, but outside your Node.js/MERN/full-stack targets');
   });
 
   it('an AMBIGUOUS classification never becomes eligible', () => {
@@ -364,6 +366,53 @@ describe('eligibility — ambiguous roles go to review, never to APPLY', () => {
     );
     expect(e.fit).toBe('ADJACENT');
     expect(e.eligible).toBe(true); // eligible to be SCORED; stack fit decides the verdict
+  });
+});
+
+describe('rejection reasons are never collapsed', () => {
+  // "Not a development role" said about an Android engineer is a lie, and a
+  // user who catches the system lying once stops trusting the true reasons.
+  it('gives a distinct code to each kind of refusal', () => {
+    const codes = [
+      eligibility(classification({ primaryFunction: 'MARKETING_GROWTH', roleFamily: 'DIGITAL_MARKETING', codingIntensity: 'OCCASIONAL', developmentConfidence: 10 }), SUYASH).code,
+      eligibility(classification({ roleFamily: 'NATIVE_ANDROID' }), SUYASH).code,
+      eligibility(classification({ minimumYears: 6, seniority: 'SENIOR' }), SUYASH).code,
+      eligibility(classification({ minimumYears: 3 }), SUYASH).code,
+      eligibility(classification(), SUYASH).code,
+      eligibility(classification({ developmentConfidence: 55 }), SUYASH).code,
+      eligibility(classification({ primaryFunction: 'AMBIGUOUS', roleFamily: 'AMBIGUOUS' }), SUYASH).code,
+    ];
+    expect(codes).toEqual([
+      'NOT_DEVELOPMENT',
+      'DEVELOPMENT_WRONG_SPECIALIZATION',
+      'TARGET_ROLE_TOO_SENIOR',
+      'TARGET_ROLE_EXPERIENCE_STRETCH',
+      'TARGET_ROLE_ELIGIBLE',
+      'LOW_CONFIDENCE',
+      'AMBIGUOUS_NEEDS_REVIEW',
+    ]);
+  });
+
+  it('data engineering is excluded as a specialization, not denied as development', () => {
+    const e = eligibility(
+      classification({
+        primaryFunction: 'DATA_ENGINEERING',
+        roleFamily: 'DATA_ENGINEERING',
+        codingIntensity: 'PRIMARY',
+        developmentConfidence: 100,
+      }),
+      SUYASH,
+    );
+    expect(e.eligible).toBe(false);
+    expect(e.code).toBe('DEVELOPMENT_WRONG_SPECIALIZATION');
+    expect(e.reason).toMatch(/genuine data engineering role/);
+  });
+
+  it('states the experience stretch in the user-facing wording', () => {
+    const e = eligibility(classification({ minimumYears: 3, maximumYears: 6 }), SUYASH);
+    expect(e.reason).toBe(
+      'Experience stretch: JD requests 3–6 years; your profile has approximately 2 years',
+    );
   });
 });
 

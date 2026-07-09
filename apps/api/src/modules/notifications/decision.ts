@@ -1,3 +1,4 @@
+import type { Eligibility, EligibilityCode } from '../matching/role-classification';
 import type { ScoreModule } from '../opportunity/opportunity.service';
 
 /**
@@ -13,8 +14,12 @@ export interface DecisionInput {
   resumeMatch: number;
   missingSkills: string[];
   modules: ScoreModule[];
-  /** Job title — used to catch different role families (PM/sales/design). */
-  title?: string;
+  /**
+   * Role eligibility, decided from the full JD before any scoring happened.
+   * Replaces the old title regex, which never matched "Analytics and Tag
+   * Manager Implementation Specialist" and so let it reach APPLY at 77.
+   */
+  eligibility?: Eligibility;
   /** Days since posted (or first seen). Staleness caps the verdict. */
   ageDays?: number;
   /** Big-tech/evergreen employers keep strategic roles open for months. */
@@ -24,7 +29,8 @@ export interface DecisionInput {
 }
 
 export interface Decision {
-  verdict: 'APPLY' | 'CONSIDER' | 'SKIP';
+  verdict: 'APPLY' | 'CONSIDER' | 'SKIP' | 'NEEDS_REVIEW';
+  code: EligibilityCode | 'STALE' | 'CORE_STACK_MISMATCH' | 'SCORE_BELOW_BAR';
   /** e.g. "🟢 82/100 · HIGH PRIORITY" */
   banner: string;
   /** e.g. "✅ APPLY" */
@@ -37,6 +43,21 @@ const LEARNABLE_GAP = 3; // ≤ this many missing skills reads as "learnable"
 export function decide(input: DecisionInput): Decision {
   const score = Math.round(input.opportunityScore);
   const mod = (name: string) => input.modules.find((m) => m.module === name);
+
+  // Role eligibility is decided from the JD before scoring, and nothing
+  // downstream may overturn it. A high score cannot make an ineligible role
+  // eligible — that inversion is what recommended a Google Tag Manager job.
+  const elig = input.eligibility;
+  if (elig && !elig.eligible) {
+    const verdict = elig.needsReview ? 'NEEDS_REVIEW' : 'SKIP';
+    return {
+      verdict,
+      code: elig.code,
+      banner: `${verdict === 'NEEDS_REVIEW' ? '🔎' : '🔴'} ${score}/100`,
+      action: verdict === 'NEEDS_REVIEW' ? '🔎 NEEDS REVIEW' : '❌ SKIP',
+      reasons: [elig.reason],
+    };
+  }
 
   const experience = mod('experienceFit');
   const freshness = mod('freshness');
@@ -67,13 +88,9 @@ export function decide(input: DecisionInput): Decision {
     blockers.push(`core stack mismatch — ${Math.round(input.resumeMatch)}% match, different specialization`);
   }
 
-  // Role-family mismatch: an engineer should never be pushed a PM / sales /
-  // design / QA-manager role just because the company context overlaps
-  // (2026-07-09: an Associate Product Manager scored 68 and was sent).
-  const roleMismatch = isNonEngineeringRole(input.title);
-  if (roleMismatch) {
-    blockers.push('different role family — not a software engineering position');
-  }
+  // An experience stretch (JD asks one year more than you have) may be worth a
+  // look, but never an automatic APPLY.
+  if (elig?.capsAtConsider) blockers.push(elig.reason);
 
   // Staleness interprets the age instead of just displaying it (2026-07-08
   // feedback: a 70d-old posting must never read as high priority) — but a
@@ -100,15 +117,32 @@ export function decide(input: DecisionInput): Decision {
   }
 
   let verdict: Decision['verdict'];
-  if (score >= 75 && blockers.length === 0) verdict = 'APPLY';
-  else if (score >= 60) verdict = 'CONSIDER';
-  else verdict = 'SKIP';
+  let code: Decision['code'];
+  if (score >= 75 && blockers.length === 0) {
+    verdict = 'APPLY';
+    code = 'TARGET_ROLE_ELIGIBLE';
+  } else if (score >= 60) {
+    verdict = 'CONSIDER';
+    code = elig?.capsAtConsider ? 'TARGET_ROLE_EXPERIENCE_STRETCH' : 'TARGET_ROLE_ELIGIBLE';
+  } else {
+    verdict = 'SKIP';
+    code = 'SCORE_BELOW_BAR';
+  }
+
   // A strong score with a hard blocker is still worth a human look — downgrade,
   // never silently drop.
-  if (verdict === 'APPLY' && blockers.length > 0) verdict = 'CONSIDER';
-  if (age > 60 && !stillHiring) verdict = 'SKIP';
-  if (coreMismatch) verdict = 'SKIP';
-  if (roleMismatch) verdict = 'SKIP';
+  if (verdict === 'APPLY' && blockers.length > 0) {
+    verdict = 'CONSIDER';
+    code = elig?.capsAtConsider ? 'TARGET_ROLE_EXPERIENCE_STRETCH' : 'TARGET_ROLE_WEAK_STACK';
+  }
+  if (age > 60 && !stillHiring) {
+    verdict = 'SKIP';
+    code = 'STALE';
+  }
+  if (coreMismatch) {
+    verdict = 'SKIP';
+    code = 'CORE_STACK_MISMATCH';
+  }
 
   // Emoji follows the VERDICT, not the score — a green badge over "CONSIDER"
   // was contradictory (2026-07-09). Green = apply, yellow = consider, red = skip.
@@ -118,24 +152,12 @@ export function decide(input: DecisionInput): Decision {
 
   return {
     verdict,
+    code,
     // Decision first, evidence second — the score justifies, it doesn't lead.
     banner: `${tierEmoji} ${score}/100`,
     action,
     reasons: [...reasons, ...blockers.map((b) => `⚠ ${b}`)],
   };
-}
-
-/** Title-based role-family guard. Conservative — only fires on clear non-eng
- *  role words, and never on titles that also name an engineering discipline. */
-function isNonEngineeringRole(title?: string): boolean {
-  if (!title) return false;
-  const t = title.toLowerCase();
-  const eng =
-    /\b(engineer|developer|programmer|sde|architect|devops|full[\s-]?stack|backend|back[\s-]?end|frontend|front[\s-]?end|software|data scientist|ml|machine learning)\b/;
-  if (eng.test(t)) return false;
-  const nonEng =
-    /\b(product manager|program manager|project manager|sales|business development|marketing|recruit|talent acquisition|hr\b|human resources|designer|ux researcher|accountant|finance|customer success|account executive|content writer|operations manager|admin\b)\b/;
-  return nonEng.test(t);
 }
 
 /** 🔥 today · 🟡 this week · ⚪ older — humans parse symbols faster than dates. */

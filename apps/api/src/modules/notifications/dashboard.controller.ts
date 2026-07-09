@@ -34,7 +34,7 @@ export class DashboardController {
       this.prisma.job.count({ where: { status: 'ACTIVE' } }),
       this.prisma.jobMatch.count({ where: { userId: user.id, ...version } }),
       this.prisma.jobMatch.count({
-        where: { userId: user.id, ...version, opportunityScore: { gte: 60 } },
+        where: { userId: user.id, ...version, verdict: { in: ['APPLY', 'CONSIDER'] } },
       }),
       // Notification memory spans versions on purpose: a job you were already
       // told about must not be re-announced by a new resume.
@@ -233,9 +233,9 @@ export class DashboardController {
       // a replaced resume are counted as today's verdicts — the dashboard read
       // "10 CONSIDER" while only 1 job had ever been judged by the real resume.
       this.prisma.$queryRaw<{ apply: bigint; consider: bigint; skip: bigint; notified: bigint }[]>`
-        SELECT count(*) FILTER (WHERE "opportunityScore" >= 75) AS apply,
-               count(*) FILTER (WHERE "opportunityScore" >= 60 AND "opportunityScore" < 75) AS consider,
-               count(*) FILTER (WHERE "opportunityScore" < 60) AS skip,
+        SELECT count(*) FILTER (WHERE verdict = 'APPLY') AS apply,
+               count(*) FILTER (WHERE verdict = 'CONSIDER') AS consider,
+               count(*) FILTER (WHERE verdict IN ('SKIP', 'NEEDS_REVIEW')) AS skip,
                count(*) FILTER (WHERE "notifiedAt" >= ${since}) AS notified
         FROM job_matches
         WHERE "createdAt" >= ${since}

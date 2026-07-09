@@ -7,6 +7,8 @@ import type { EmbeddingProvider, LlmProvider } from '../ai/llm.provider';
 import { NotificationsService } from '../notifications/notifications.service';
 import { OpportunityService } from '../opportunity/opportunity.service';
 import type { ParsedResume } from '../resumes/resume-intelligence.service';
+import { CLASSIFIER_VERSION, JobClassifierService } from './job-classifier.service';
+import { DEFAULT_ROLE_PROFILE, eligibility } from './role-classification';
 
 const SIMILARITY_TOP_K = 40; // pgvector prefilter size
 const LLM_SCORE_TOP_N = 15; // how many get deep LLM scoring
@@ -93,6 +95,7 @@ export class MatchingService {
     @Inject(EMBEDDING_PROVIDER) private readonly embedder: EmbeddingProvider,
     private readonly opportunity: OpportunityService,
     private readonly notifications: NotificationsService,
+    private readonly classifier: JobClassifierService,
   ) {}
 
   /**
@@ -118,7 +121,9 @@ export class MatchingService {
     const candidates = await this.similarJobs(resume.resumeVersionId, SIMILARITY_TOP_K, countries);
     this.logger.log(`Prefilter: ${candidates.length} candidates by cosine similarity`);
 
-    const toScore = candidates.slice(0, LLM_SCORE_TOP_N);
+    // Role eligibility before scoring — similarity ranks, it never admits.
+    const { eligible } = await this.gateByRole(userId, candidates);
+    const toScore = eligible.slice(0, LLM_SCORE_TOP_N);
     const { matchIds } = await this.scoreAndUpsert(userId, resume, toScore);
 
     // Opportunity scoring + notification (memory prevents bulk-run spam).
@@ -170,7 +175,9 @@ export class MatchingService {
       `;
       if (candidates.length === 0) continue;
 
-      const { matchIds } = await this.scoreAndUpsert(user.id, resume, candidates);
+      const { eligible } = await this.gateByRole(user.id, candidates);
+      if (eligible.length === 0) continue;
+      const { matchIds } = await this.scoreAndUpsert(user.id, resume, eligible);
       matched += matchIds.length;
       for (const id of matchIds) {
         await this.opportunity.scoreMatch(id);
@@ -262,6 +269,7 @@ export class MatchingService {
       CROSS JOIN (SELECT vector FROM resume_embeddings WHERE "resumeVersionId" = ${resume.resumeVersionId}) re
       WHERE ${countrySql(countries)}
         AND now()::date - COALESCE(j."postedAt", j."firstSeenAt")::date <= ${RECONCILE_MAX_AGE_DAYS}
+        AND 1 - (je.vector <=> re.vector) >= ${MIN_SIMILARITY}
         AND NOT EXISTS (
           SELECT 1 FROM job_matches m
           WHERE m."jobId" = j.id AND m."userId" = ${userId}
@@ -273,15 +281,29 @@ export class MatchingService {
 
     if (candidates.length === 0) return emptyReconcileReport();
 
+    // Hard role gate before any personalized LLM call.
+    const gate = await this.gateByRole(userId, candidates);
+    this.logger.log(
+      `role gate: ${gate.eligible.length}/${candidates.length} eligible · ` +
+        Object.entries(gate.rejectedByCode)
+          .map(([k, v]) => `${k}=${v}`)
+          .join(' '),
+    );
+    if (gate.eligible.length === 0) {
+      const empty = emptyReconcileReport();
+      empty.inspected = candidates.length;
+      return empty;
+    }
+
     // Baseline from the previous resume version, so we can report the delta
     // rather than just "60 scored".
     const previous = await this.previousScores(
       userId,
       resume.resumeVersionId,
-      candidates.map((c) => c.id),
+      gate.eligible.map((c) => c.id),
     );
 
-    const { matchIds, failedJobIds } = await this.scoreAndUpsert(userId, resume, candidates);
+    const { matchIds, failedJobIds } = await this.scoreAndUpsert(userId, resume, gate.eligible);
 
     const report = emptyReconcileReport();
     report.inspected = candidates.length;
@@ -367,6 +389,120 @@ export class MatchingService {
         `${report.consider} CONSIDER, ${report.failures} failed`,
     );
     return report;
+  }
+
+  /**
+   * The hard role gate. Runs BEFORE personalized scoring, so no LLM call is
+   * spent on a job that could never be recommended. Jobs we have not read yet
+   * are classified here — an unclassified job is never eligible, and letting
+   * that silently starve the pipeline would be worse than the bug it fixes.
+   *
+   * Returns only the jobs a human could act on. Everything else is recorded
+   * with a truthful code (NOT_DEVELOPMENT, DEVELOPMENT_WRONG_SPECIALIZATION,
+   * TARGET_ROLE_TOO_SENIOR, AMBIGUOUS_NEEDS_REVIEW …), never collapsed.
+   */
+  private async gateByRole(
+    userId: string,
+    candidates: { id: string; title: string; description: string }[],
+  ): Promise<{
+    eligible: typeof candidates;
+    rejectedByCode: Record<string, number>;
+    needsReview: string[];
+  }> {
+    const rejectedByCode: Record<string, number> = {};
+    const needsReview: string[] = [];
+    if (candidates.length === 0) return { eligible: [], rejectedByCode, needsReview };
+
+    const known = await this.prisma.jobClassification.findMany({
+      where: { jobId: { in: candidates.map((c) => c.id) } },
+      orderBy: { classifierVersion: 'desc' },
+    });
+    const byJob = new Map<string, (typeof known)[number]>();
+    for (const k of known) if (!byJob.has(k.jobId)) byJob.set(k.jobId, k);
+
+    const unclassified = candidates.filter((c) => !byJob.has(c.id));
+    if (unclassified.length) {
+      this.logger.log(`classifying ${unclassified.length} new jobs before scoring`);
+      const { classified } = await this.classifier.classify(unclassified, async (batch) => {
+        for (const c of batch) {
+          const row = await this.prisma.jobClassification.upsert({
+            where: { jobId_classifierVersion: { jobId: c.jobId, classifierVersion: CLASSIFIER_VERSION } },
+            create: {
+              jobId: c.jobId,
+              classifierVersion: CLASSIFIER_VERSION,
+              primaryFunction: c.primaryFunction,
+              roleFamily: c.roleFamily,
+              specializations: c.specialization,
+              codingIntensity: c.codingIntensity,
+              developmentConfidence: c.developmentConfidence,
+              seniority: c.seniority,
+              minimumYears: c.minimumYears,
+              maximumYears: c.maximumYears,
+              requiredSkills: c.requiredSkills,
+              preferredSkills: c.preferredSkills,
+              responsibilities: c.responsibilities,
+              developmentEvidence: c.developmentEvidence,
+              nonDevelopmentEvidence: c.nonDevelopmentEvidence,
+              classificationReason: c.classificationReason,
+            },
+            update: {},
+          });
+          byJob.set(c.jobId, row);
+        }
+      });
+      this.logger.log(`classified ${classified.length}/${unclassified.length}`);
+    }
+
+    const profile = { ...DEFAULT_ROLE_PROFILE, yearsExperience: await this.userYears(userId) };
+    const eligible: typeof candidates = [];
+
+    for (const cand of candidates) {
+      const c = byJob.get(cand.id);
+      if (!c) {
+        rejectedByCode['UNCLASSIFIED'] = (rejectedByCode['UNCLASSIFIED'] ?? 0) + 1;
+        continue;
+      }
+      const e = eligibility(
+        {
+          primaryFunction: c.primaryFunction as never,
+          roleFamily: c.roleFamily as never,
+          specialization: c.specializations,
+          codingIntensity: c.codingIntensity as never,
+          developmentConfidence: c.developmentConfidence,
+          seniority: c.seniority as never,
+          minimumYears: c.minimumYears,
+          maximumYears: c.maximumYears,
+          requiredSkills: c.requiredSkills,
+          preferredSkills: c.preferredSkills,
+          responsibilities: c.responsibilities,
+          developmentEvidence: c.developmentEvidence,
+          nonDevelopmentEvidence: c.nonDevelopmentEvidence,
+          classificationReason: c.classificationReason,
+        },
+        profile,
+      );
+      if (e.eligible) eligible.push(cand);
+      else {
+        rejectedByCode[e.code] = (rejectedByCode[e.code] ?? 0) + 1;
+        if (e.needsReview) needsReview.push(cand.id);
+      }
+    }
+    return { eligible, rejectedByCode, needsReview };
+  }
+
+  /** Years of experience from the active, confirmed resume profile. */
+  private async userYears(userId: string): Promise<number> {
+    const v = await this.prisma.resumeVersion.findFirst({
+      where: { resume: { userId, isPrimary: true }, activatedAt: { not: null } },
+      orderBy: { versionNumber: 'desc' },
+      select: { confirmedProfile: true, parsedJson: true },
+    });
+    const years =
+      (v?.confirmedProfile as { totalYearsExperience?: number } | null)?.totalYearsExperience ??
+      (v?.parsedJson as { structured?: { totalYearsExperience?: number } } | null)?.structured
+        ?.totalYearsExperience ??
+      2;
+    return Math.round(years);
   }
 
   /** Scores these jobs received under the user's previous resume version. */
