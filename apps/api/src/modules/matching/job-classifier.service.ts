@@ -104,8 +104,16 @@ export class JobClassifierService {
   /**
    * Classify jobs in batches. A failed batch is skipped, never fatal — the same
    * containment that stops one malformed response from killing a 300-job run.
+   *
+   * `onBatch` fires after every successful batch so callers can persist
+   * incrementally. The first backfill (2026-07-09) held 380 results in memory
+   * and wrote them only at the end: a crash at minute eleven would have thrown
+   * away $1.39 of completed work.
    */
-  async classify(jobs: ClassifierInput[]): Promise<{ classified: ClassifiedJob[]; failedIds: string[] }> {
+  async classify(
+    jobs: ClassifierInput[],
+    onBatch?: (batch: ClassifiedJob[]) => Promise<void>,
+  ): Promise<{ classified: ClassifiedJob[]; failedIds: string[] }> {
     const classified: ClassifiedJob[] = [];
     const failedIds: string[] = [];
 
@@ -127,11 +135,14 @@ export class JobClassifierService {
           maxOutputTokens: 8192,
         });
 
+        const done: ClassifiedJob[] = [];
         for (const raw of res.jobs ?? []) {
           const normalized = this.normalize(raw);
-          if (normalized) classified.push(normalized);
+          if (normalized) done.push(normalized);
           else if (raw.jobId) failedIds.push(raw.jobId);
         }
+        classified.push(...done);
+        if (onBatch && done.length) await onBatch(done);
       } catch (err) {
         failedIds.push(...batch.map((b) => b.id));
         this.logger.error(

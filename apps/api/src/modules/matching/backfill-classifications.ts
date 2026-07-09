@@ -11,7 +11,7 @@ import { PrismaClient } from '@prisma/client';
 import { ConfigService } from '@nestjs/config';
 import { VertexGeminiProvider } from '../ai/vertex-gemini.provider';
 import { AiUsageService } from '../ai/ai-usage.service';
-import { CLASSIFIER_VERSION, JobClassifierService } from './job-classifier.service';
+import { CLASSIFIER_VERSION, JobClassifierService, type ClassifiedJob } from './job-classifier.service';
 import {
   DEFAULT_ROLE_PROFILE,
   eligibility,
@@ -52,32 +52,42 @@ async function main() {
   }
 
   const started = new Date();
-  const { classified, failedIds } = await classifier.classify(jobs);
+  let persisted = 0;
 
-  for (const c of classified) {
-    await prisma.jobClassification.upsert({
-      where: { jobId_classifierVersion: { jobId: c.jobId, classifierVersion: CLASSIFIER_VERSION } },
-      create: {
-        jobId: c.jobId,
-        classifierVersion: CLASSIFIER_VERSION,
-        primaryFunction: c.primaryFunction,
-        roleFamily: c.roleFamily,
-        specializations: c.specialization,
-        codingIntensity: c.codingIntensity,
-        developmentConfidence: c.developmentConfidence,
-        seniority: c.seniority,
-        minimumYears: c.minimumYears,
-        maximumYears: c.maximumYears,
-        requiredSkills: c.requiredSkills,
-        preferredSkills: c.preferredSkills,
-        responsibilities: c.responsibilities,
-        developmentEvidence: c.developmentEvidence,
-        nonDevelopmentEvidence: c.nonDevelopmentEvidence,
-        classificationReason: c.classificationReason,
-      },
-      update: {},
-    });
-  }
+  // Persist after every batch. The candidate query already excludes jobs that
+  // hold a row at this classifierVersion, so a restart resumes and never
+  // re-pays for completed work.
+  const persist = async (batch: ClassifiedJob[]) => {
+    for (const c of batch) {
+      await prisma.jobClassification.upsert({
+        where: { jobId_classifierVersion: { jobId: c.jobId, classifierVersion: CLASSIFIER_VERSION } },
+        create: {
+          jobId: c.jobId,
+          classifierVersion: CLASSIFIER_VERSION,
+          primaryFunction: c.primaryFunction,
+          roleFamily: c.roleFamily,
+          specializations: c.specialization,
+          codingIntensity: c.codingIntensity,
+          developmentConfidence: c.developmentConfidence,
+          seniority: c.seniority,
+          minimumYears: c.minimumYears,
+          maximumYears: c.maximumYears,
+          requiredSkills: c.requiredSkills,
+          preferredSkills: c.preferredSkills,
+          responsibilities: c.responsibilities,
+          developmentEvidence: c.developmentEvidence,
+          nonDevelopmentEvidence: c.nonDevelopmentEvidence,
+          classificationReason: c.classificationReason,
+        },
+        update: {},
+      });
+      persisted++;
+    }
+    process.stdout.write(`\rpersisted ${persisted}/${jobs.length}`);
+  };
+
+  const { classified, failedIds } = await classifier.classify(jobs, persist);
+  console.log('');
 
   const cost = await prisma.aiUsage.aggregate({
     where: { createdAt: { gte: started }, kind: 'GENERATE' },
