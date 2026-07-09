@@ -140,6 +140,30 @@ export class MatchingService {
     return { rescored: matches.length, notified };
   }
 
+  /** Reconcile every user with a parsed primary resume (system-driven catch-up:
+   *  runs after a resume re-parse and on a schedule). */
+  async reconcileAll(cap = 60): Promise<{ users: number; scored: number; apply: number }> {
+    const users = await this.prisma.user.findMany({
+      where: {
+        resumes: { some: { isPrimary: true, versions: { some: { embedding: { isNot: null } } } } },
+      },
+      select: { id: true },
+    });
+    let scored = 0;
+    let apply = 0;
+    for (const u of users) {
+      const r = await this.reconcileForUser(u.id, cap).catch((e) => {
+        this.logger.error(`reconcile failed for ${u.id}: ${e instanceof Error ? e.message : e}`);
+        return null;
+      });
+      if (r) {
+        scored += r.scored;
+        apply += r.apply;
+      }
+    }
+    return { users: users.length, scored, apply };
+  }
+
   /**
    * Reconciliation (2026-07-09): the incremental pipeline only matches jobs at
    * INGEST time. Jobs already in the DB before a resume improves — or that were

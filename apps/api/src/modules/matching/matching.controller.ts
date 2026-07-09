@@ -12,10 +12,27 @@ import {
 import { InjectQueue } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';
 import { Queue } from 'bullmq';
+import { UseGuards } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 import type { AuthenticatedUser } from '../../common/types/authenticated-user';
+import { InternalTokenGuard } from '../internal/internal-token.guard';
 import { GENERATE_MATCHES_QUEUE } from './matching.processor';
 import { MatchingService } from './matching.service';
+
+/** System-driven catch-up: called after a resume re-parse and on a schedule. */
+@Public()
+@UseGuards(InternalTokenGuard)
+@Controller('internal/matches')
+export class MatchingInternalController {
+  constructor(private readonly matching: MatchingService) {}
+
+  @Post('reconcile')
+  @HttpCode(HttpStatus.OK)
+  reconcileAll() {
+    return this.matching.reconcileAll();
+  }
+}
 
 @Controller('matches')
 export class MatchingController {

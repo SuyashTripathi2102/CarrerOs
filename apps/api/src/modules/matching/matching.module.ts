@@ -6,7 +6,7 @@ import { OpportunityModule } from '../opportunity/opportunity.module';
 import { EmbedProcessor } from './embed.processor';
 import { MATCH_NEW_JOBS_QUEUE } from './matching.constants';
 import { MatchNewJobsProcessor } from './match-new-jobs.processor';
-import { MatchingController } from './matching.controller';
+import { MatchingController, MatchingInternalController } from './matching.controller';
 import { GENERATE_MATCHES_QUEUE, MatchingProcessor } from './matching.processor';
 import { MatchingService } from './matching.service';
 
@@ -18,7 +18,8 @@ import { MatchingService } from './matching.service';
     BullModule.registerQueue({ name: EMBED_JOBS_QUEUE }),
     BullModule.registerQueue({ name: MATCH_NEW_JOBS_QUEUE }),
   ],
-  controllers: [MatchingController],
+  controllers: [MatchingController, MatchingInternalController],
   providers: [MatchingService, MatchingProcessor, EmbedProcessor, MatchNewJobsProcessor],
+  exports: [MatchingService],
 })
 export class MatchingModule {}
