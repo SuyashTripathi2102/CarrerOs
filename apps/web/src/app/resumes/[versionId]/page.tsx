@@ -154,6 +154,24 @@ export default function ReviewProfile({ params }: { params: Promise<{ versionId:
 
   const set = <K extends keyof ResumeProfile>(k: K, v: ResumeProfile[K]) => setP({ ...p, [k]: v });
 
+  /**
+   * Move suggestions into the profile. ONE state update — two sequential
+   * `set()` calls both spread the same stale `p`, so the second silently
+   * discarded the first and the skill was never added.
+   */
+  function acceptSuggestions(accepted: string[]) {
+    setP((prev) =>
+      prev === null
+        ? prev
+        : {
+            ...prev,
+            skills: [...prev.skills, ...accepted.filter((s) => !prev.skills.includes(s))],
+            suggestedSkills: prev.suggestedSkills.filter((s) => !accepted.includes(s)),
+          },
+    );
+    setSaved(null); // the profile changed; the last save no longer describes it
+  }
+
   async function save() {
     if (!p) return;
     setBusy(true);
@@ -274,10 +292,7 @@ export default function ReviewProfile({ params }: { params: Promise<{ versionId:
                 until you say so.
               </p>
               <button
-                onClick={() => {
-                  set('skills', [...p.skills, ...p.suggestedSkills]);
-                  set('suggestedSkills', []);
-                }}
+                onClick={() => acceptSuggestions(p.suggestedSkills)}
                 className="shrink-0 rounded-md border border-sky-700 bg-sky-900/60 px-2.5 py-1 text-xs text-sky-100 hover:bg-sky-900"
               >
                 Add all
@@ -287,10 +302,7 @@ export default function ReviewProfile({ params }: { params: Promise<{ versionId:
               {p.suggestedSkills.map((s) => (
                 <button
                   key={s}
-                  onClick={() => {
-                    set('skills', [...p.skills, s]);
-                    set('suggestedSkills', p.suggestedSkills.filter((x) => x !== s));
-                  }}
+                  onClick={() => acceptSuggestions([s])}
                   title="Found in your resume text — click to add"
                   className="rounded-full border border-sky-800 bg-sky-950 px-2.5 py-1 text-xs text-sky-200 hover:border-sky-600"
                 >
