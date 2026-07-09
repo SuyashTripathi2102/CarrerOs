@@ -264,15 +264,26 @@ export class MatchingService {
     const resume = await this.getPrimaryResumeContext(userId);
     const countries = await this.preferredCountries(userId);
 
+    // A resume version is not a profile. Correcting the skills on version 2
+    // must re-score version 2's matches.
+    const version = await this.prisma.resumeVersion.findUnique({
+      where: { id: resume.resumeVersionId },
+      select: { profileUpdatedAt: true },
+    });
+    // Epoch: before any profile edit, every decided match counts as current.
+    const profileUpdatedAt = version?.profileUpdatedAt ?? new Date(0);
+
     // Actionable-first: only jobs a human could still act on (<= RECONCILE_MAX_AGE
     // days). 51% of the India pool is 90d+ zombie listings — ranking purely by
     // similarity burned LLM budget on ghosts while leaving fresh jobs unscored
     // (2026-07-09 audit). Coverage that matters = eligible ACTIONABLE jobs.
     //
-    // NOT EXISTS is keyed on the resume version, so re-running for the same
-    // version is idempotent while a NEW version re-evaluates everything. Keyed
-    // on (jobId, userId) alone — as it was until 2026-07-09 — a corrected
-    // resume re-scored nothing, because every actionable job already had a row.
+    // A job is a candidate when it has NO match for this resume version, or a
+    // match decided BEFORE the profile last changed. Keying idempotence on the
+    // version id alone (2026-07-09) meant a corrected profile re-scored
+    // nothing: every actionable job already had a row, so reconciliation
+    // finished in 286ms and reported success. Keying it on (jobId, userId), as
+    // it was before that, was the same bug one level up.
     const candidates = await this.prisma.$queryRaw<
       { id: string; title: string; description: string }[]
     >`
@@ -287,6 +298,8 @@ export class MatchingService {
           SELECT 1 FROM job_matches m
           WHERE m."jobId" = j.id AND m."userId" = ${userId}
             AND m."resumeVersionId" = ${resume.resumeVersionId}
+            AND m."decidedAt" IS NOT NULL
+            AND m."decidedAt" >= ${profileUpdatedAt}
         )
       ORDER BY je.vector <=> re.vector
       LIMIT ${cap}

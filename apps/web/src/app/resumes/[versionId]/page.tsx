@@ -40,6 +40,8 @@ interface ResumeProfile {
 interface SaveResult {
   warnings: string[];
   unsupportedSkills: string[];
+  /** The profile changed but no score has moved yet. Activation does that. */
+  rescoreRequired: boolean;
 }
 
 function Field({
@@ -372,6 +374,14 @@ export default function ReviewProfile({ params }: { params: Promise<{ versionId:
           {w}
         </p>
       ))}
+
+      {saved?.rescoreRequired && (
+        <p className="mt-4 rounded-lg border border-sky-900 bg-sky-950/40 p-3 text-sm text-sky-300">
+          Profile saved — <strong className="font-medium">but no score has changed yet.</strong>{' '}
+          Your jobs are still ranked against the previous profile. Click{' '}
+          <strong className="font-medium">Confirm &amp; activate</strong> to re-score them.
+        </p>
+      )}
 
       <div className="mt-6 flex items-center gap-3">
         <button

@@ -212,6 +212,11 @@ model ResumeVersion {
   // as manuallyAddedSkills, but stated per-skill and positively rather than as
   // an absence, so every surface can cite where a skill came from.
   skillProvenance Json?
+  // When the confirmed profile last changed. Reconciliation re-scores matches
+  // decided before this instant. A resume VERSION is not a profile: correcting
+  // the skills on version 2 must re-score version 2's matches, and keying
+  // idempotence on the version id alone made that a silent no-op.
+  profileUpdatedAt DateTime?
   // Matching uses the newest ACTIVATED version, never merely the newest upload.
   // Without this an unreviewed parse starts scoring jobs the instant the file
   // lands, which is exactly what the confirmation step exists to prevent.

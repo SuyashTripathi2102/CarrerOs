@@ -222,6 +222,9 @@ export class ResumesService {
         confirmedProfile: profile as unknown as Prisma.InputJsonValue,
         skillProvenance: origins as unknown as Prisma.InputJsonValue,
         manuallyAddedSkills,
+        // Every match decided before this instant is now stale. Reconciliation
+        // reads it; without it, a corrected profile changes no score.
+        profileUpdatedAt: new Date(),
       },
     });
 
@@ -233,6 +236,10 @@ export class ResumesService {
           ]
         : [],
       unsupportedSkills: manuallyAddedSkills,
+      // Saving corrects the profile. It does NOT re-score anything — activation
+      // is the only path into the matcher. Say so, or the user reads yesterday's
+      // scores as today's answer.
+      rescoreRequired: version.activatedAt !== null,
     };
   }
 
