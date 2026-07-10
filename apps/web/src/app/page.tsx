@@ -23,25 +23,13 @@ interface Dashboard {
     trending: { company: string; newJobs7d: number }[];
     missingSkills: { skill: string; count: number }[];
   };
+  decisions: { applyNow: number; worthApplying: number; needsReview: number };
   funnel: {
     crawled: number;
     matched: number;
     recommended: number;
     notified: number;
     applied: number;
-  };
-  pipeline: {
-    since: string;
-    lastSuccessfulCrawl: string | null;
-    crawls: { succeeded: number; failed: number; topFailures: { reason: string; count: number }[] };
-    newJobs: number;
-    indiaJobs: number;
-    matched: number;
-    apply: number;
-    consider: number;
-    skip: number;
-    notificationsSent: number;
-    explanation: string;
   };
   supply: {
     freshIndiaEngineering7d: number;
@@ -50,18 +38,7 @@ interface Dashboard {
     coveragePct: number;
     zombieHidden: number;
     totalIndiaEngineering: number;
-    providers: { provider: string; freshIndia7d: number; zombiePct: number | null }[];
   };
-}
-
-interface SourceFunnel {
-  source: string;
-  companies: number;
-  careerPages: number;
-  atsDetected: number;
-  freshIndia30d: number;
-  targetRole30d: number;
-  targetRolePer100Companies: number;
 }
 
 /** Score badge: tier semantics (status colors), number always visible. */
@@ -86,15 +63,31 @@ function locationLine(j: BriefJob): string {
   return parts.join(' · ');
 }
 
-function Tile({ label, value, hint }: { label: string; value: number; hint?: string }) {
+/** A decision bucket in the hero: count + label, links to its list. */
+function DecisionCard({
+  count,
+  label,
+  href,
+  tone,
+}: {
+  count: number;
+  label: string;
+  href: string;
+  tone: 'apply' | 'consider' | 'review';
+}) {
+  const styles = {
+    apply: 'border-emerald-800 bg-emerald-950/40 text-emerald-300',
+    consider: 'border-amber-800 bg-amber-950/40 text-amber-300',
+    review: 'border-sky-800 bg-sky-950/40 text-sky-300',
+  }[tone];
   return (
-    <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
-      <div className="text-3xl font-semibold tabular-nums tracking-tight">
-        {value.toLocaleString()}
-      </div>
-      <div className="mt-1 text-xs uppercase tracking-wide text-neutral-400">{label}</div>
-      {hint && <div className="text-[11px] text-neutral-500">{hint}</div>}
-    </div>
+    <a
+      href={href}
+      className={`rounded-xl border p-4 transition hover:brightness-125 ${styles} ${count === 0 ? 'opacity-50' : ''}`}
+    >
+      <div className="text-3xl font-semibold tabular-nums tracking-tight">{count}</div>
+      <div className="mt-1 text-xs uppercase tracking-wide">{label}</div>
+    </a>
   );
 }
 
@@ -165,16 +158,12 @@ function JobCard({ job, highlight }: { job: BriefJob; highlight: boolean }) {
 
 export default function MissionControl() {
   const [data, setData] = useState<Dashboard | null>(null);
-  const [sources, setSources] = useState<SourceFunnel[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     apiGet<Dashboard>('/dashboard')
       .then(setData)
       .catch((e) => setError(String(e)));
-    apiGet<SourceFunnel[]>('/dashboard/sources')
-      .then(setSources)
-      .catch(() => setSources([]));
   }, []);
 
   if (error)
@@ -190,7 +179,7 @@ export default function MissionControl() {
       </Shell>
     );
 
-  const { brief, funnel } = data;
+  const { brief, decisions, supply, funnel } = data;
   const today = new Date().toLocaleDateString('en-IN', {
     weekday: 'long',
     day: 'numeric',
@@ -211,155 +200,91 @@ export default function MissionControl() {
           <a href="/applications" className="text-sm text-neutral-400 hover:text-neutral-200">
             Applications
           </a>
+          <a href="/insights" className="text-sm text-neutral-400 hover:text-neutral-200">
+            Insights
+          </a>
           <button onClick={logout} className="text-sm text-neutral-500 hover:text-neutral-300">
             Sign out
           </button>
         </nav>
       </header>
 
-      {/* FRESH SUPPLY — the real constraint. Zombie counts are hidden here on
-          purpose: 6,000 "jobs watched" is a vanity number when only ~50 India
-          engineering roles are actually actionable. */}
-      <section className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Tile
-          label="Fresh this week"
-          value={data.supply.freshIndiaEngineering7d}
-          hint="India engineering, ≤7 days"
-        />
-        <Tile
-          label="Actionable now"
-          value={data.supply.actionable}
-          hint="≤30 days old"
-        />
-        <Tile
-          label="Evaluated"
-          value={data.supply.coveragePct}
-          hint={`% of actionable (${data.supply.actionableEvaluated}/${data.supply.actionable})`}
-        />
-        <Tile label="Applied" value={funnel.applied} hint="the number that matters" />
-      </section>
-      <p className="mt-2 text-[11px] text-neutral-600">
-        {data.supply.zombieHidden} listings older than 90 days are hidden from these numbers —
-        they&apos;re on boards but almost certainly not hiring. Total watched: {funnel.crawled.toLocaleString()}.
+      {/* Slim market strip — context, one line. The tiles, pipeline and source
+          yield live on /insights now: this page is about decisions, not the
+          crawler. */}
+      <p className="mt-4 text-xs text-neutral-500">
+        <span className="text-neutral-300">{supply.freshIndiaEngineering7d}</span> fresh this week ·{' '}
+        <span className="text-neutral-300">{supply.actionable}</span> actionable ·{' '}
+        <span className="text-neutral-300">{supply.coveragePct}%</span> evaluated ·{' '}
+        <span className="text-neutral-300">{funnel.applied}</span> applied ·{' '}
+        <a href="/insights" className="underline underline-offset-2 hover:text-neutral-300">
+          discovery health →
+        </a>
       </p>
 
-      {/* Today Pipeline — "why am I / am I not getting jobs?" */}
-      <section className="mt-6 rounded-xl border border-neutral-800 bg-neutral-900 p-4">
-        <div className="flex items-baseline justify-between">
-          <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-400">
-            Since 8 AM
-          </h2>
-          <span className="text-[11px] text-neutral-500">
-            {data.pipeline.lastSuccessfulCrawl
-              ? `last crawl ${new Date(data.pipeline.lastSuccessfulCrawl).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`
-              : 'no crawl yet'}
-          </span>
-        </div>
-        <div className="mt-3 grid grid-cols-3 gap-2 text-sm sm:grid-cols-6">
-          <PipeStat label="Crawls" value={data.pipeline.crawls.succeeded} />
-          <PipeStat label="New jobs" value={data.pipeline.newJobs} />
-          <PipeStat label="India" value={data.pipeline.indiaJobs} />
-          <PipeStat label="Apply" value={data.pipeline.apply} tone="good" />
-          <PipeStat label="Consider" value={data.pipeline.consider} tone="mid" />
-          <PipeStat label="Sent" value={data.pipeline.notificationsSent} />
-        </div>
-        <p className="mt-3 text-sm text-neutral-300">{data.pipeline.explanation}</p>
-        {data.pipeline.crawls.failed > 0 && (
-          <p className="mt-1 text-[11px] text-amber-500/80">
-            {data.pipeline.crawls.failed} crawls failed
-            {data.pipeline.crawls.topFailures[0]
-              ? ` · ${data.pipeline.crawls.topFailures[0].reason}`
-              : ''}
-          </p>
-        )}
+      {/* The decisions. Everything the system concluded, as three buckets. */}
+      <section className="mt-4 grid grid-cols-3 gap-3">
+        <DecisionCard count={decisions.applyNow} label="Apply now" href="#apply-now" tone="apply" />
+        <DecisionCard
+          count={decisions.worthApplying}
+          label="Worth applying"
+          href="#worth-applying"
+          tone="consider"
+        />
+        <DecisionCard
+          count={decisions.needsReview}
+          label="Needs review"
+          href="/needs-review"
+          tone="review"
+        />
       </section>
+      <p className="mt-2 text-[11px] text-neutral-600">
+        <a href="/excluded" className="underline underline-offset-2 hover:text-neutral-400">
+          See everything CareerOS excluded, and why →
+        </a>
+      </p>
 
-      {/* Today */}
-      <section className="mt-8">
-        <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-400">
-          Today — {brief.newJobs24h} new jobs · {brief.indiaNew24h} in India ·{' '}
-          {brief.recommended24h} recommended
+      <section id="apply-now" className="mt-8 scroll-mt-4">
+        <h2 className="flex items-center gap-2 text-lg font-semibold">
+          🟢 Apply now
+          <span className="text-sm font-normal text-neutral-500">
+            your role, your stack, fresh
+          </span>
         </h2>
-
-        <h3 className="mt-5 flex items-center gap-2 text-lg font-semibold">
-          🔥 Apply today
-          <span className="text-sm font-normal text-neutral-500">fresh, high-scoring</span>
-        </h3>
         <div className="mt-3 space-y-2">
           {brief.mustApply.length === 0 && (
             <p className="rounded-xl border border-neutral-800 bg-neutral-900/60 p-4 text-sm text-neutral-400">
-              Nothing clears the bar today — it stays high on purpose.
+              Nothing clears the apply-now bar right now — it stays high on purpose. Check{' '}
+              <a href="#worth-applying" className="underline underline-offset-2">
+                Worth applying
+              </a>
+              .
             </p>
           )}
           {brief.mustApply.map((j, i) => (
             <JobCard key={i} job={j} highlight />
           ))}
         </div>
-
-        {brief.worthALook.length > 0 && (
-          <>
-            <h3 className="mt-6 text-lg font-semibold">🟡 Consider</h3>
-            <div className="mt-3 space-y-2">
-              {brief.worthALook.map((j, i) => (
-                <JobCard key={i} job={j} highlight={false} />
-              ))}
-            </div>
-          </>
-        )}
       </section>
 
-      {/* Where supply actually comes from. A source is worth engineering effort
-          only if companies reach the bottom of this table as target-role jobs. */}
-      {sources && sources.length > 0 && (
-        <section className="mt-8 rounded-xl border border-neutral-800 bg-neutral-900 p-4">
-          <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-400">
-            Source yield
+      {brief.worthALook.length > 0 && (
+        <section id="worth-applying" className="mt-8 scroll-mt-4">
+          <h2 className="flex items-center gap-2 text-lg font-semibold">
+            🟡 Worth applying
+            <span className="text-sm font-normal text-neutral-500">
+              a stretch, but genuinely yours
+            </span>
           </h2>
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full min-w-[520px] text-sm">
-              <thead>
-                <tr className="text-left text-[10px] uppercase tracking-wide text-neutral-500">
-                  <th className="pb-2 font-medium">Source</th>
-                  <th className="pb-2 text-right font-medium">Companies</th>
-                  <th className="pb-2 text-right font-medium">Career pages</th>
-                  <th className="pb-2 text-right font-medium">ATS</th>
-                  <th className="pb-2 text-right font-medium">Target roles</th>
-                  <th className="pb-2 text-right font-medium">Per 100</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sources.map((s) => (
-                  <tr key={s.source} className="border-t border-neutral-800">
-                    <td className="py-2 text-neutral-200">{s.source}</td>
-                    <td className="py-2 text-right tabular-nums text-neutral-400">{s.companies}</td>
-                    <td className="py-2 text-right tabular-nums text-neutral-400">{s.careerPages}</td>
-                    <td className="py-2 text-right tabular-nums text-neutral-400">{s.atsDetected}</td>
-                    <td className="py-2 text-right tabular-nums text-neutral-200">{s.targetRole30d}</td>
-                    <td
-                      className={`py-2 text-right tabular-nums font-medium ${
-                        s.targetRolePer100Companies >= 10
-                          ? 'text-emerald-400'
-                          : s.targetRolePer100Companies >= 2
-                            ? 'text-amber-400'
-                            : 'text-red-400'
-                      }`}
-                    >
-                      {s.targetRolePer100Companies}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="mt-3 space-y-2">
+            {brief.worthALook.map((j, i) => (
+              <JobCard key={i} job={j} highlight={false} />
+            ))}
           </div>
-          <p className="mt-3 text-[11px] text-neutral-500">
-            Target-role India jobs (≤30 days) per 100 companies discovered. Adding companies to a
-            low-yield source does not add opportunities.
-          </p>
         </section>
       )}
 
-      {/* Market signals */}
-      <section className="mt-8 grid gap-4 sm:grid-cols-2">
+      {/* Market signals — the only telemetry that changes what you learn/target. */}
+      <section className="mt-10 grid gap-4 sm:grid-cols-2">
         <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
           <h3 className="text-sm font-medium uppercase tracking-wide text-neutral-400">
             Fresh roles this week
@@ -403,25 +328,6 @@ export default function MissionControl() {
         </div>
       </section>
     </Shell>
-  );
-}
-
-function PipeStat({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: number;
-  tone?: 'good' | 'mid';
-}) {
-  const color =
-    tone === 'good' ? 'text-emerald-400' : tone === 'mid' ? 'text-amber-400' : 'text-neutral-100';
-  return (
-    <div className="rounded-lg bg-neutral-950/60 px-2 py-2 text-center">
-      <div className={`text-xl font-semibold tabular-nums ${color}`}>{value}</div>
-      <div className="text-[10px] uppercase tracking-wide text-neutral-500">{label}</div>
-    </div>
   );
 }
 

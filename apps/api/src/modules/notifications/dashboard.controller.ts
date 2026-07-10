@@ -29,23 +29,44 @@ export class DashboardController {
     });
     const version = { resumeVersionId: activeVersion?.id ?? '' };
 
-    const [briefData, jobsTotal, matches, ge60, notified, applied] = await Promise.all([
-      this.brief.data(user.id),
-      this.prisma.job.count({ where: { status: 'ACTIVE' } }),
-      this.prisma.jobMatch.count({ where: { userId: user.id, ...version } }),
-      this.prisma.jobMatch.count({
-        where: { userId: user.id, ...version, verdict: { in: ['APPLY', 'CONSIDER'] } },
-      }),
-      // Notification memory spans versions on purpose: a job you were already
-      // told about must not be re-announced by a new resume.
-      this.prisma.jobMatch.count({
-        where: { userId: user.id, notifiedAt: { not: null } },
-      }),
-      this.prisma.application.count({ where: { userId: user.id } }),
-    ]);
+    // The decisions hero. Active version, ACTIVE jobs, and — for the two
+    // "apply" buckets — not already acted on, so the counts match the lists
+    // shown below them. Needs-review excludes jobs the user has already judged.
+    const notApplied = { applications: { none: { userId: user.id, status: { not: 'SAVED' as const } } } };
+
+    const [briefData, jobsTotal, matches, ge60, notified, applied, applyNow, worthApplying, needsReview] =
+      await Promise.all([
+        this.brief.data(user.id),
+        this.prisma.job.count({ where: { status: 'ACTIVE' } }),
+        this.prisma.jobMatch.count({ where: { userId: user.id, ...version } }),
+        this.prisma.jobMatch.count({
+          where: { userId: user.id, ...version, verdict: { in: ['APPLY', 'CONSIDER'] } },
+        }),
+        // Notification memory spans versions on purpose: a job you were already
+        // told about must not be re-announced by a new resume.
+        this.prisma.jobMatch.count({
+          where: { userId: user.id, notifiedAt: { not: null } },
+        }),
+        this.prisma.application.count({ where: { userId: user.id } }),
+        this.prisma.jobMatch.count({
+          where: { userId: user.id, ...version, verdict: 'APPLY', job: { status: 'ACTIVE', ...notApplied } },
+        }),
+        this.prisma.jobMatch.count({
+          where: { userId: user.id, ...version, verdict: 'CONSIDER', job: { status: 'ACTIVE', ...notApplied } },
+        }),
+        this.prisma.jobMatch.count({
+          where: {
+            userId: user.id,
+            ...version,
+            verdict: 'NEEDS_REVIEW',
+            job: { status: 'ACTIVE', reviewFeedback: { none: { userId: user.id } } },
+          },
+        }),
+      ]);
 
     return {
       brief: briefData,
+      decisions: { applyNow, worthApplying, needsReview },
       funnel: { crawled: jobsTotal, matched: matches, recommended: ge60, notified, applied },
       pipeline: await this.todayPipeline(user.id),
       supply: await this.freshSupply(user.id),
