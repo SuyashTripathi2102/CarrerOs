@@ -1,13 +1,19 @@
-import { Queue, Worker } from 'bullmq';
+import { Job, Queue, Worker } from 'bullmq';
 import { ApiClient } from '../api-client';
 import { QueueNames } from '../queues/names';
 import { createRedisConnection } from '../queues/connection';
-import { runPlacesCityDiscovery } from '../discovery/places-city-discovery';
+import {
+  runPlacesCityDiscovery,
+  type PlacesDiscoveryOverride,
+} from '../discovery/places-city-discovery';
 
 export function startPlacesDiscoveryWorker(api: ApiClient): Worker {
   return new Worker(
     QueueNames.PLACES_DISCOVERY,
-    async () => runPlacesCityDiscovery(api),
+    // Job data may carry a {cities, queries, maxPages} override — used for the
+    // one-city smoke test before the full sweep. Empty = the scheduled full run.
+    async (job: Job<PlacesDiscoveryOverride | undefined>) =>
+      runPlacesCityDiscovery(api, job.data ?? {}),
     { connection: createRedisConnection() },
   );
 }
