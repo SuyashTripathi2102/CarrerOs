@@ -41,6 +41,32 @@ interface Stats {
   interviewRate: number | null;
 }
 
+interface WaitAction {
+  label: string;
+  detail: string;
+  stars: number;
+  href?: string;
+}
+interface Cause {
+  factor: string;
+  detail: string;
+  strength: number;
+}
+interface IntelItem {
+  applicationId: string;
+  jobId: string;
+  status: string;
+  hadReferralContact: boolean;
+  tailoredResume: boolean;
+  waitingActions: WaitAction[];
+  likelyCauses: Cause[];
+}
+interface Intel {
+  funnel: Stats;
+  insights: string[];
+  items: IntelItem[];
+}
+
 const daysSince = (iso: string) => Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
 
 /** The horizontal pipeline: Applied → OA → Interview → Offer. */
@@ -93,21 +119,55 @@ function StageBar({ status }: { status: Status }) {
   );
 }
 
-/** No reply in a while → what to do about it. */
-function FollowUpNudge({ days }: { days: number }) {
+const Stars = ({ n, max = 5 }: { n: number; max?: number }) => (
+  <span className="text-amber-300">
+    {'★'.repeat(n)}
+    <span className="text-neutral-700">{'★'.repeat(Math.max(0, max - n))}</span>
+  </span>
+);
+
+/** While an application is live: the highest-leverage moves, ranked. */
+function NextActions({ actions }: { actions: WaitAction[] }) {
+  if (!actions.length) return null;
   return (
-    <div className="mt-3 rounded-lg border border-amber-900/60 bg-amber-950/20 p-3">
-      <p className="text-xs text-amber-300">
-        <strong className="font-medium">No reply in {days} days.</strong> Applications go cold
-        quietly — a nudge often un-sticks them.
+    <div className="mt-3 rounded-lg border border-neutral-800 bg-neutral-950/60 p-3">
+      <p className="text-[11px] uppercase tracking-wide text-neutral-500">Best next moves</p>
+      <ul className="mt-1.5 space-y-1">
+        {actions.map((a, i) => (
+          <li key={i} className="flex items-baseline gap-2 text-[12.5px]">
+            <Stars n={a.stars} />
+            {a.href ? (
+              <Link href={a.href} className="text-sky-300 hover:underline">
+                {a.label}
+              </Link>
+            ) : (
+              <span className="text-neutral-200">{a.label}</span>
+            )}
+            <span className="text-neutral-500">— {a.detail}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** After a rejection / long silence: honest, ranked likely contributors. */
+function LikelyCauses({ causes }: { causes: Cause[] }) {
+  if (!causes.length) return null;
+  return (
+    <div className="mt-3 rounded-lg border border-red-900/40 bg-red-950/15 p-3">
+      <p className="text-[11px] uppercase tracking-wide text-red-300/80">
+        Likely factors (not certainties) — fix the inputs next time
       </p>
-      <div className="mt-1.5 flex flex-wrap gap-2 text-[11px] text-neutral-400">
-        <span className="rounded-full border border-neutral-700 px-2 py-0.5">✉ Follow up with the recruiter</span>
-        <span className="rounded-full border border-neutral-700 px-2 py-0.5">🤝 Look for a referral</span>
-        <Link href="/" className="rounded-full border border-neutral-700 px-2 py-0.5 hover:border-neutral-500">
-          🔁 Apply to similar roles →
-        </Link>
-      </div>
+      <ul className="mt-1.5 space-y-1.5">
+        {causes.map((c, i) => (
+          <li key={i} className="text-[12.5px]">
+            <span className="mr-1"><Stars n={c.strength} max={4} /></span>
+            <span className="font-medium text-neutral-100">{c.factor}</span>
+            <span className="text-neutral-400"> — {c.detail}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -121,10 +181,18 @@ function Stat({ value, label }: { value: number; label: string }) {
   );
 }
 
-function AppCard({ row, onStatus }: { row: AppRow; onStatus: (id: string, s: Status) => void }) {
+function AppCard({
+  row,
+  intel,
+  onStatus,
+}: {
+  row: AppRow;
+  intel?: IntelItem;
+  onStatus: (id: string, s: Status) => void;
+}) {
   const lastEvent = row.events[0];
   const idle = lastEvent ? daysSince(lastEvent.createdAt) : row.appliedAt ? daysSince(row.appliedAt) : 0;
-  const needsFollowUp = row.status === 'APPLIED' && row.appliedAt != null && daysSince(row.appliedAt) >= 7;
+  const active = !['REJECTED', 'WITHDRAWN', 'ACCEPTED'].includes(row.status);
 
   return (
     <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
@@ -140,6 +208,16 @@ function AppCard({ row, onStatus }: { row: AppRow; onStatus: (id: string, s: Sta
               : ''}
             {row.status !== 'SAVED' && idle > 0 ? ` · ${idle}d in stage` : ''}
           </div>
+          {intel && (
+            <div className="mt-1 flex gap-1.5 text-[10px]">
+              <span className={intel.hadReferralContact ? 'text-emerald-400' : 'text-neutral-600'}>
+                {intel.hadReferralContact ? '✓ referral' : '✗ no referral'}
+              </span>
+              <span className={intel.tailoredResume ? 'text-emerald-400' : 'text-neutral-600'}>
+                {intel.tailoredResume ? '✓ tailored' : '✗ generic resume'}
+              </span>
+            </div>
+          )}
         </div>
         <select
           value={row.status}
@@ -158,7 +236,8 @@ function AppCard({ row, onStatus }: { row: AppRow; onStatus: (id: string, s: Sta
         <StageBar status={row.status} />
       </div>
 
-      {needsFollowUp && <FollowUpNudge days={daysSince(row.appliedAt!)} />}
+      {active && intel && <NextActions actions={intel.waitingActions} />}
+      {intel && <LikelyCauses causes={intel.likelyCauses} />}
     </div>
   );
 }
@@ -166,17 +245,25 @@ function AppCard({ row, onStatus }: { row: AppRow; onStatus: (id: string, s: Sta
 export default function ApplicationsPage() {
   const [rows, setRows] = useState<AppRow[] | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [intel, setIntel] = useState<Intel | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   function load() {
-    Promise.all([apiGet<AppRow[]>('/applications'), apiGet<Stats>('/applications/stats')])
-      .then(([r, s]) => {
+    Promise.all([
+      apiGet<AppRow[]>('/applications'),
+      apiGet<Stats>('/applications/stats'),
+      apiGet<Intel>('/applications/intelligence'),
+    ])
+      .then(([r, s, i]) => {
         setRows(r);
         setStats(s);
+        setIntel(i);
       })
       .catch((e) => setError(String(e)));
   }
   useEffect(load, []);
+
+  const intelById = new Map((intel?.items ?? []).map((i) => [i.applicationId, i]));
 
   async function setStatus(id: string, status: Status) {
     await apiPatch(`/applications/${id}`, { status });
@@ -212,6 +299,19 @@ export default function ApplicationsPage() {
           </section>
         )}
 
+        {intel && intel.insights.length > 0 && (
+          <section className="mt-4 space-y-2">
+            {intel.insights.map((t, i) => (
+              <p
+                key={i}
+                className="rounded-lg border border-sky-900/40 bg-sky-950/20 px-3 py-2 text-[13px] text-sky-100/90"
+              >
+                💡 {t}
+              </p>
+            ))}
+          </section>
+        )}
+
         {error && <p className="mt-6 text-red-400">{error}</p>}
         {!rows && !error && <p className="mt-6 text-neutral-400">Loading…</p>}
 
@@ -225,7 +325,7 @@ export default function ApplicationsPage() {
         {active.length > 0 && (
           <section className="mt-6 space-y-3">
             {active.map((r) => (
-              <AppCard key={r.id} row={r} onStatus={setStatus} />
+              <AppCard key={r.id} row={r} intel={intelById.get(r.id)} onStatus={setStatus} />
             ))}
           </section>
         )}
@@ -235,7 +335,7 @@ export default function ApplicationsPage() {
             <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-500">Closed</h2>
             <div className="mt-3 space-y-3 opacity-70">
               {closed.map((r) => (
-                <AppCard key={r.id} row={r} onStatus={setStatus} />
+                <AppCard key={r.id} row={r} intel={intelById.get(r.id)} onStatus={setStatus} />
               ))}
             </div>
           </section>

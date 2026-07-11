@@ -70,4 +70,10 @@ export class ApplicationsController {
   stats(@CurrentUser() user: AuthenticatedUser) {
     return this.applications.stats(user.id);
   }
+
+  /** Per-application next-actions + likely causes + honest portfolio insights. */
+  @Get('intelligence')
+  intelligence(@CurrentUser() user: AuthenticatedUser) {
+    return this.applications.intelligence(user.id);
+  }
 }

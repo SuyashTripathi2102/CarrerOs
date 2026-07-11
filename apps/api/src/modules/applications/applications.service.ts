@@ -5,6 +5,12 @@ import {
 } from '@nestjs/common';
 import { ApplicationStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  funnelInsights,
+  likelyCauses,
+  waitingActions,
+  type AppSignals,
+} from './application-intelligence';
 
 /**
  * The application tracker (ROADMAP v0.3): makes "Applied" — the north-star
@@ -125,6 +131,116 @@ export class ApplicationsService {
       // Honest rate: needs volume before it means anything; null under 5.
       interviewRate: applied >= 5 ? Math.round((interviews / applied) * 100) : null,
     };
+  }
+
+  /**
+   * Application Intelligence: per-application next-actions (while live) and
+   * likely causes (after rejection / long silence), plus honest portfolio
+   * insights — all from data we already store. No LLM, no fabricated numbers.
+   */
+  async intelligence(userId: string) {
+    const stats = await this.stats(userId);
+    const apps = await this.prisma.application.findMany({
+      where: { userId, status: { not: ApplicationStatus.SAVED } },
+      orderBy: { updatedAt: 'desc' },
+      select: {
+        id: true,
+        jobId: true,
+        status: true,
+        appliedAt: true,
+        job: {
+          select: { id: true, firstSeenAt: true, company: { select: { name: true } } },
+        },
+      },
+    });
+    if (apps.length === 0) return { funnel: stats, insights: [], items: [] };
+
+    const jobIds = apps.map((a) => a.jobId);
+    const companyNames = [...new Set(apps.map((a) => a.job.company.name))];
+
+    const version = await this.prisma.resumeVersion.findFirst({
+      where: { resume: { userId, isPrimary: true }, activatedAt: { not: null } },
+      orderBy: { versionNumber: 'desc' },
+      select: { id: true, confirmedProfile: true },
+    });
+    const userYears =
+      (version?.confirmedProfile as { totalYearsExperience?: number } | null)
+        ?.totalYearsExperience ?? null;
+
+    const matches = version?.id
+      ? await this.prisma.jobMatch.findMany({
+          where: { userId, resumeVersionId: version.id, jobId: { in: jobIds } },
+          select: { jobId: true, missingSkills: true, specializationFit: true },
+        })
+      : [];
+    const matchByJob = new Map(matches.map((m) => [m.jobId, m]));
+
+    const classes = await this.prisma.jobClassification.findMany({
+      where: { jobId: { in: jobIds } },
+      orderBy: { classifierVersion: 'desc' },
+      select: { jobId: true, minimumYears: true },
+    });
+    const minYearsByJob = new Map<string, number | null>();
+    for (const c of classes) if (!minYearsByJob.has(c.jobId)) minYearsByJob.set(c.jobId, c.minimumYears);
+
+    const contacted = await this.prisma.referralContact.findMany({
+      where: { userId, companyName: { in: companyNames }, status: { in: ['CONTACTED', 'REPLIED'] } },
+      select: { companyName: true },
+    });
+    const contactedCompanies = new Set(contacted.map((c) => c.companyName));
+
+    const tailored = await this.prisma.companyResume.findMany({
+      where: { userId, jobId: { in: jobIds } },
+      select: { jobId: true },
+    });
+    const tailoredJobs = new Set(tailored.map((t) => t.jobId));
+
+    const DAY = 86_400_000;
+    let withReferral = 0;
+    let tailoredCount = 0;
+    const items = apps.map((a) => {
+      const match = matchByJob.get(a.jobId);
+      const hadReferralContact = contactedCompanies.has(a.job.company.name);
+      const tailoredResume = tailoredJobs.has(a.jobId);
+      if (hadReferralContact) withReferral++;
+      if (tailoredResume) tailoredCount++;
+      const daysSinceApplied = a.appliedAt
+        ? Math.floor((Date.now() - a.appliedAt.getTime()) / DAY)
+        : null;
+      const jobAgeAtApplyDays = a.appliedAt
+        ? Math.max(0, Math.floor((a.appliedAt.getTime() - a.job.firstSeenAt.getTime()) / DAY))
+        : null;
+      const signals: AppSignals = {
+        status: a.status,
+        daysSinceApplied,
+        jobAgeAtApplyDays,
+        userYears,
+        minimumYears: minYearsByJob.get(a.jobId) ?? null,
+        missingRequired: match?.missingSkills ?? [],
+        specializationFit: match?.specializationFit ?? null,
+        hadReferralContact,
+        tailoredResume,
+      };
+      const terminal = a.status === 'REJECTED' || a.status === 'WITHDRAWN';
+      const ghosted = a.status === 'APPLIED' && (daysSinceApplied ?? 0) >= 21;
+      return {
+        applicationId: a.id,
+        jobId: a.jobId,
+        status: a.status,
+        hadReferralContact,
+        tailoredResume,
+        waitingActions: terminal ? [] : waitingActions(signals, a.jobId),
+        likelyCauses: terminal || ghosted ? likelyCauses(signals) : [],
+      };
+    });
+
+    const insights = funnelInsights({
+      applied: stats.applied,
+      withReferral,
+      tailored: tailoredCount,
+      interviews: stats.interviews,
+    });
+    return { funnel: stats, insights, items };
   }
 
   /** Applications sitting in APPLIED with no movement — the follow-up nudge. */
