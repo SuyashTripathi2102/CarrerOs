@@ -56,51 +56,57 @@ export class DiscoveryService {
     let created = 0;
     let merged = 0;
 
+    let skipped = 0;
     for (const c of candidates) {
-      const detected = c.atsHintUrl ? detectAts(c.atsHintUrl) : null;
-
-      let existing: Company | null = null;
-      if (detected?.identifier) {
-        existing = await this.prisma.company.findUnique({
-          where: {
-            atsProvider_atsIdentifier: {
-              atsProvider: detected.provider,
-              atsIdentifier: detected.identifier,
-            },
-          },
-        });
-      }
-      if (!existing && c.website) {
-        existing = await this.prisma.company.findFirst({
-          where: { website: { contains: this.hostOf(c.website), mode: 'insensitive' } },
-        });
-      }
-      if (!existing) {
-        existing = await this.prisma.company.findFirst({
-          where: { name: { equals: c.name, mode: 'insensitive' } },
-        });
-      }
-
-      if (existing) {
-        merged++;
-        // Enrich blanks — never overwrite existing data with directory data.
-        await this.prisma.company.update({
-          where: { id: existing.id },
-          data: {
-            website: existing.website ?? c.website ?? undefined,
-            industry: existing.industry ?? c.industry ?? undefined,
-            country: existing.country ?? c.country ?? undefined,
-            city: existing.city ?? c.city ?? undefined,
-            teamSize: existing.teamSize ?? c.teamSize ?? undefined,
-            description: existing.description ?? c.description ?? undefined,
-          },
-        });
-        continue;
-      }
-
-      const monitorable =
-        detected?.identifier && CRAWLABLE_PROVIDERS.includes(detected.provider);
+      // One bad candidate must never abort a 6,000-company batch. Every DB path
+      // below (the website dedup, the enrich-update, the create) can hit the
+      // UNIQUE(website) constraint — Places returns the same website for many
+      // differently-named listings (franchises, SEO doorway pages, shared
+      // domains) that the host-substring dedup can miss. Contain each row.
       try {
+        const detected = c.atsHintUrl ? detectAts(c.atsHintUrl) : null;
+
+        let existing: Company | null = null;
+        if (detected?.identifier) {
+          existing = await this.prisma.company.findUnique({
+            where: {
+              atsProvider_atsIdentifier: {
+                atsProvider: detected.provider,
+                atsIdentifier: detected.identifier,
+              },
+            },
+          });
+        }
+        if (!existing && c.website) {
+          existing = await this.prisma.company.findFirst({
+            where: { website: { contains: this.hostOf(c.website), mode: 'insensitive' } },
+          });
+        }
+        if (!existing) {
+          existing = await this.prisma.company.findFirst({
+            where: { name: { equals: c.name, mode: 'insensitive' } },
+          });
+        }
+
+        if (existing) {
+          merged++;
+          // Enrich blanks — never overwrite existing data with directory data.
+          await this.prisma.company.update({
+            where: { id: existing.id },
+            data: {
+              website: existing.website ?? c.website ?? undefined,
+              industry: existing.industry ?? c.industry ?? undefined,
+              country: existing.country ?? c.country ?? undefined,
+              city: existing.city ?? c.city ?? undefined,
+              teamSize: existing.teamSize ?? c.teamSize ?? undefined,
+              description: existing.description ?? c.description ?? undefined,
+            },
+          });
+          continue;
+        }
+
+        const monitorable =
+          detected?.identifier && CRAWLABLE_PROVIDERS.includes(detected.provider);
         await this.prisma.company.create({
           data: {
             name: c.name,
@@ -125,18 +131,17 @@ export class DiscoveryService {
         });
         created++;
       } catch (err) {
-        // Places returns the same website for many differently-named listings
-        // (franchises, SEO doorway pages, shared domains). website is UNIQUE, so
-        // the host-substring dedup above can miss a collision the DB then
-        // rejects. That is a duplicate, not a batch-killer — skip it and go on.
-        // Before the guard, one P2002 aborted an entire 6,102-company sweep.
-        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-          merged++;
-          continue;
+        // A duplicate (P2002) is expected and fine — it is already in the DB.
+        // Anything else, log once and keep going; coverage beats perfection.
+        if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002')) {
+          this.logger.warn(
+            `bulk-discover[${source}] skipped "${c.name}": ${err instanceof Error ? err.message.slice(0, 120) : err}`,
+          );
         }
-        throw err;
+        skipped++;
       }
     }
+    if (skipped) this.logger.log(`bulk-discover[${source}]: ${skipped} skipped (dup/error)`);
 
     this.logger.log(`bulk-discover[${source}]: ${created} new, ${merged} merged`);
     return { created, merged };
