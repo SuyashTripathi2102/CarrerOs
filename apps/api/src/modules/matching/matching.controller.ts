@@ -103,4 +103,11 @@ export class MatchingController {
   why(@CurrentUser() user: AuthenticatedUser, @Param('jobId') jobId: string) {
     return this.matching.explainNotification(user.id, jobId, this.minScore);
   }
+
+  /** Full decision context for the job detail page: verdict + dimensions +
+   *  classification + specialization breakdown, all from stored data. */
+  @Get('detail/:jobId')
+  detail(@CurrentUser() user: AuthenticatedUser, @Param('jobId') jobId: string) {
+    return this.matching.jobDetail(user.id, jobId);
+  }
 }

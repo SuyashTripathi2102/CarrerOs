@@ -8,7 +8,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { OpportunityService } from '../opportunity/opportunity.service';
 import type { ParsedResume } from '../resumes/resume-intelligence.service';
 import { CLASSIFIER_VERSION, JobClassifierService } from './job-classifier.service';
-import { DEFAULT_ROLE_PROFILE, eligibility } from './role-classification';
+import { DEFAULT_ROLE_PROFILE, eligibility, specializationBreakdown } from './role-classification';
+import type { JobClassification } from './role-classification';
 
 const SIMILARITY_TOP_K = 40; // pgvector prefilter size
 const LLM_SCORE_TOP_N = 15; // how many get deep LLM scoring
@@ -749,6 +750,79 @@ export class MatchingService {
       select: { id: true },
     });
     return v?.id ?? null;
+  }
+
+  /**
+   * Everything the job detail page shows, for THIS user: the stored canonical
+   * verdict and its four separated dimensions, the objective classification,
+   * and the specialization breakdown (strong / transferable / missing) computed
+   * against the user's confirmed skills. All read from stored data — no LLM,
+   * no re-decision. The page renders the verdict; it never recomputes one.
+   */
+  async jobDetail(userId: string, jobId: string) {
+    const activeVersionId = await this.activeResumeVersionId(userId);
+    const match = activeVersionId
+      ? await this.prisma.jobMatch.findFirst({
+          where: { userId, jobId, resumeVersionId: activeVersionId },
+        })
+      : null;
+
+    const c = await this.prisma.jobClassification.findFirst({
+      where: { jobId },
+      orderBy: { classifierVersion: 'desc' },
+    });
+
+    // Confirmed skills drive the specialization breakdown, so it matches the
+    // number stored on the match rather than a hardcoded stack.
+    const version = activeVersionId
+      ? await this.prisma.resumeVersion.findUnique({
+          where: { id: activeVersionId },
+          select: { confirmedProfile: true },
+        })
+      : null;
+    const confirmedSkills =
+      (version?.confirmedProfile as { skills?: string[] } | null)?.skills ?? [];
+
+    const specialization = c
+      ? specializationBreakdown(
+          {
+            requiredSkills: c.requiredSkills,
+            specialization: c.specializations,
+          } as JobClassification,
+          confirmedSkills,
+        )
+      : null;
+
+    return {
+      verdict: match
+        ? {
+            verdict: match.verdict,
+            code: match.verdictCode,
+            reason: match.verdictReason,
+            action: match.actionRecommendation,
+            opportunityScore: match.opportunityScore == null ? null : Math.round(match.opportunityScore),
+            developmentConfidence: match.developmentConfidence,
+            targetRoleFit: match.targetRoleFit,
+            specializationFit: match.specializationFit,
+            resumeFit: match.overallScore,
+            missingSkills: match.missingSkills,
+          }
+        : null,
+      classification: c
+        ? {
+            roleFamily: c.roleFamily,
+            primaryFunction: c.primaryFunction,
+            codingIntensity: c.codingIntensity,
+            seniority: c.seniority,
+            minimumYears: c.minimumYears,
+            maximumYears: c.maximumYears,
+            requiredSkills: c.requiredSkills,
+            responsibilities: c.responsibilities,
+            developmentEvidence: c.developmentEvidence,
+          }
+        : null,
+      specialization,
+    };
   }
 
   private async getPrimaryResumeContext(userId: string) {
