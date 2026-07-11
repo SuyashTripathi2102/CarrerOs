@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { ApiClient } from './api-client';
 import { startCrawlCompanyWorker } from './processors/crawl-company.processor';
-import { startCrawlBoardWorker } from './processors/crawl-board.processor';
+import { ensureBoardSchedules, startCrawlBoardWorker } from './processors/crawl-board.processor';
 import {
   startDiscoverCompanyWorker,
   startDiscoveryFanoutWorker,
@@ -33,6 +33,7 @@ async function main() {
   await ensureRefreshSchedule();
   await ensureDailyBriefSchedule();
   await ensurePlacesDiscoverySchedule();
+  await ensureBoardSchedules();
 
   console.log(`CareerOS workers started (${workers.length} processors listening).`);
 
