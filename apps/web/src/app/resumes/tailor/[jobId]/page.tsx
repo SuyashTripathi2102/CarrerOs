@@ -14,6 +14,16 @@ interface Scores {
   recruiter: number;
   hiringManager: number;
 }
+interface KeywordItem {
+  keyword: string;
+  status: 'PRESENT' | 'ACCEPTED_VARIANT' | 'ADD_EXACT' | 'MISSING';
+  yourTerm?: string;
+}
+interface Ats {
+  required: KeywordItem[];
+  requiredMatchPct: number | null;
+  addExact: string[];
+}
 interface Tailored {
   jobTitle: string;
   company: string;
@@ -22,6 +32,7 @@ interface Tailored {
   companyHtml: string;
   changes: Change[];
   missingRequired: string[];
+  ats: Ats;
   scores: { before: Scores; after: Scores };
 }
 
@@ -145,28 +156,58 @@ export default function TailorPage() {
         project depth + ownership. All from your real content — nothing invented.
       </p>
 
-      {/* What changed vs the master. */}
-      {data.changes.length > 0 && (
-        <section className="mt-5 rounded-xl border border-emerald-900/50 bg-emerald-950/20 p-4">
-          <h2 className="text-sm font-medium uppercase tracking-wide text-emerald-400">
-            Changes applied
-          </h2>
-          <ul className="mt-2 space-y-1 text-sm text-neutral-200">
-            {data.changes.map((c, i) => (
-              <li key={i}>+ {c.detail}</li>
+      {/* ATS keyword check — the WHY behind the number, not just a score. */}
+      {data.ats.required.length > 0 && (
+        <section className="mt-5 rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-400">
+              ATS keyword check
+            </h2>
+            <span className="text-[12px] tabular-nums text-neutral-400">
+              {data.ats.requiredMatchPct ?? 0}% of required keywords an ATS would match
+            </span>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {data.ats.required.map((k, i) => (
+              <KeywordChip key={i} k={k} />
             ))}
-          </ul>
-          <p className="mt-2 text-[11px] text-neutral-500">
-            Only exact keyword spellings for skills you already have — never an invented skill.
-          </p>
-        </section>
-      )}
+          </div>
+          <div className="mt-2 flex flex-wrap gap-3 text-[10px] text-neutral-500">
+            <span>✓ present</span>
+            <span>~ your wording (ATS accepts)</span>
+            <span>+ add exact phrase</span>
+            <span>✕ missing</span>
+          </div>
 
-      {data.missingRequired.length > 0 && (
-        <p className="mt-3 text-[11px] text-neutral-500">
-          Not added (you&apos;d need to genuinely have these): {data.missingRequired.join(', ')} — add
-          a line only if you&apos;ve actually used them.
-        </p>
+          {data.ats.addExact.length > 0 && (
+            <div className="mt-3 rounded-lg border border-amber-900/40 bg-amber-950/20 p-3">
+              <p className="text-[12px] font-medium text-amber-200">
+                Free wins — you already have these, just spell them the JD&apos;s way:
+              </p>
+              <p className="mt-1 text-[12px] text-amber-100/90">{data.ats.addExact.join(', ')}</p>
+              {data.masterSource === 'custom' ? (
+                <p className="mt-1.5 text-[11px] text-neutral-400">
+                  Add these exact phrases in your{' '}
+                  <Link href="/resumes/master" className="underline hover:text-white">
+                    master resume
+                  </Link>{' '}
+                  — CareerOS never edits your HTML for you.
+                </p>
+              ) : (
+                <p className="mt-1.5 text-[11px] text-neutral-400">
+                  Already inserted into the generated resume below.
+                </p>
+              )}
+            </div>
+          )}
+
+          {data.missingRequired.length > 0 && (
+            <p className="mt-3 text-[12px] text-neutral-400">
+              <span className="text-red-300">Real gaps</span> (not on your resume):{' '}
+              {data.missingRequired.join(', ')} — add a line only if you&apos;ve genuinely used them.
+            </p>
+          )}
+        </section>
       )}
 
       {/* The tailored resume, rendered. */}
@@ -189,6 +230,30 @@ export default function TailorPage() {
         className="mt-3 h-[900px] w-full overflow-hidden rounded-xl border border-neutral-700 bg-white"
       />
     </Shell>
+  );
+}
+
+const KW_STYLE: Record<KeywordItem['status'], string> = {
+  PRESENT: 'border-emerald-800 bg-emerald-950/40 text-emerald-300',
+  ACCEPTED_VARIANT: 'border-sky-800 bg-sky-950/40 text-sky-300',
+  ADD_EXACT: 'border-amber-800 bg-amber-950/40 text-amber-200',
+  MISSING: 'border-red-900 bg-red-950/40 text-red-300',
+};
+const KW_ICON: Record<KeywordItem['status'], string> = {
+  PRESENT: '✓',
+  ACCEPTED_VARIANT: '~',
+  ADD_EXACT: '+',
+  MISSING: '✕',
+};
+
+function KeywordChip({ k }: { k: KeywordItem }) {
+  return (
+    <span
+      className={`rounded border px-1.5 py-0.5 text-[11px] ${KW_STYLE[k.status]}`}
+      title={k.yourTerm ? `you wrote "${k.yourTerm}"` : k.status.toLowerCase()}
+    >
+      {KW_ICON[k.status]} {k.keyword}
+    </span>
   );
 }
 

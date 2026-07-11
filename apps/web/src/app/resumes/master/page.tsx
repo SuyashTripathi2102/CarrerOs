@@ -39,6 +39,18 @@ export default function MasterResumePage() {
     }
   }
 
+  function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    file
+      .text()
+      .then((t) => {
+        setHtml(t);
+        setStatus('Loaded from file — check the preview, then Save as master.');
+      })
+      .catch((err) => setError(String(err)));
+  }
+
   async function revert() {
     setStatus('Reverting…');
     try {
@@ -101,6 +113,10 @@ export default function MasterResumePage() {
               <div className="mb-1 flex items-center justify-between">
                 <label className="text-xs uppercase tracking-wide text-neutral-500">HTML</label>
                 <div className="flex gap-2">
+                  <label className="cursor-pointer rounded-lg border border-neutral-700 px-3 py-1 text-[12px] text-neutral-300 hover:border-neutral-500">
+                    Upload .html
+                    <input type="file" accept=".html,text/html" className="hidden" onChange={onFile} />
+                  </label>
                   {source === 'custom' && (
                     <button
                       onClick={revert}

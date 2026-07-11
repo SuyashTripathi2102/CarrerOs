@@ -341,6 +341,13 @@ export class ResumesService {
       companyHtml,
       changes,
       missingRequired: audit.missingRequired,
+      // The "why" behind the ATS number — per required keyword, present / your
+      // wording differs / missing — so the score is explainable, not a mystery.
+      ats: {
+        required: audit.required,
+        requiredMatchPct: audit.requiredMatchPct,
+        addExact: audit.addExact,
+      },
       scores: { before, after },
     };
   }
