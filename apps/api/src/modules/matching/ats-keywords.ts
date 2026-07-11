@@ -57,9 +57,17 @@ function trivialVariant(a: string, b: string): boolean {
 export interface AtsKeywordAudit {
   required: KeywordItem[];
   preferred: KeywordItem[];
-  /** Exact strings to add, required-first — the actionable output. */
+  /**
+   * Zero-risk wins: skills you HAVE, where the JD's wording differs from yours.
+   * Just match its spelling. Required-first.
+   */
   addExact: string[];
-  /** How many required keywords an ATS would literally match right now. */
+  /**
+   * Required keywords genuinely absent from your resume. Add ONLY if you can
+   * defend them — name a project — never just to game the filter.
+   */
+  missingRequired: string[];
+  /** How many required keywords an ATS would match right now (literal + accepted). */
   requiredMatchPct: number | null;
 }
 
@@ -101,13 +109,15 @@ export function atsKeywordAudit(
     .filter((k) => !reqLower.has(k.toLowerCase()))
     .map(classify);
 
-  // Only urge additions that genuinely matter: required rewordings and truly
-  // missing required keywords, plus preferred rewordings. Never nag about a
-  // spelling an ATS already accepts.
+  // Zero-risk wording fixes only — skills you have, spelled the JD's way. Never
+  // a spelling an ATS already accepts, never a skill you lack.
   const addExact = [
-    ...req.filter((i) => i.status === 'ADD_EXACT' || i.status === 'MISSING'),
+    ...req.filter((i) => i.status === 'ADD_EXACT'),
     ...pref.filter((i) => i.status === 'ADD_EXACT'),
   ].map((i) => i.keyword);
+
+  // Genuinely absent required keywords — a skills gap, not a wording fix.
+  const missingRequired = req.filter((i) => i.status === 'MISSING').map((i) => i.keyword);
 
   // "Covered" = literal match OR an accepted spelling variant.
   const requiredMatchPct = req.length
@@ -118,5 +128,5 @@ export function atsKeywordAudit(
       )
     : null;
 
-  return { required: req, preferred: pref, addExact, requiredMatchPct };
+  return { required: req, preferred: pref, addExact, missingRequired, requiredMatchPct };
 }

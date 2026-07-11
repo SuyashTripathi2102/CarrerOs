@@ -40,6 +40,7 @@ interface Detail {
     required: KeywordItem[];
     preferred: KeywordItem[];
     addExact: string[];
+    missingRequired: string[];
     requiredMatchPct: number | null;
   } | null;
   company: {
@@ -456,8 +457,8 @@ export default function JobPage() {
           {ats.addExact.length > 0 && (
             <div className="mt-3 rounded-lg border border-amber-900/60 bg-amber-950/20 p-3">
               <p className="text-xs text-amber-300">
-                <strong className="font-medium">Add these exact phrases to your resume</strong> before
-                you apply:
+                <strong className="font-medium">Free wins</strong> — you have these; just match the
+                JD&apos;s exact spelling:
               </p>
               <div className="mt-1.5 flex flex-wrap gap-1.5">
                 {ats.addExact.map((k) => (
@@ -470,6 +471,19 @@ export default function JobPage() {
                 ))}
               </div>
             </div>
+          )}
+
+          {ats.missingRequired.length > 0 && (
+            <p className="mt-2 text-[11px] text-neutral-500">
+              Genuinely absent: {ats.missingRequired.join(', ')} — add only if you&apos;ve actually
+              used them (name a project); never just to game the filter.
+            </p>
+          )}
+
+          {ats.addExact.length === 0 && ats.missingRequired.length === 0 && (
+            <p className="mt-2 text-[11px] text-emerald-500/80">
+              ✓ Your resume already matches every required keyword. Apply with confidence.
+            </p>
           )}
 
           <div className="mt-4 space-y-1.5 text-sm">

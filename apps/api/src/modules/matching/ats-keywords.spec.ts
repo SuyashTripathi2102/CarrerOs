@@ -35,10 +35,12 @@ describe('atsKeywordAudit', () => {
     expect(a.addExact).toEqual([]);
   });
 
-  it('marks a technology you do not have at all as MISSING', () => {
+  it('separates genuinely-missing skills from zero-risk wording fixes', () => {
     const a = atsKeywordAudit(['Docker', 'Kubernetes'], [], RESUME, SKILLS);
     expect(a.required.map((k) => k.status)).toEqual(['MISSING', 'MISSING']);
-    expect(a.addExact).toEqual(['Docker', 'Kubernetes']);
+    // Missing skills are NOT in addExact — you cannot just type a word you lack.
+    expect(a.addExact).toEqual([]);
+    expect(a.missingRequired).toEqual(['Docker', 'Kubernetes']);
   });
 
   it('ranks required above preferred and never double-counts a shared keyword', () => {
@@ -48,11 +50,10 @@ describe('atsKeywordAudit', () => {
     expect(a.preferred.map((k) => k.keyword)).toEqual(['GraphQL']);
   });
 
-  it('the actionable list adds missing + real-rewording required, not accepted variants', () => {
+  it('addExact is only real rewordings of skills you have; missing goes elsewhere', () => {
     const a = atsKeywordAudit(['Docker', 'REST API', 'React'], ['MySQL'], RESUME, SKILLS);
-    // Docker missing + REST API reworded are adds; React (React.js) is accepted;
-    // MySQL preferred is present.
-    expect(a.addExact).toEqual(['Docker', 'REST API']);
+    expect(a.addExact).toEqual(['REST API']); // you have RESTful APIs; match the JD wording
+    expect(a.missingRequired).toEqual(['Docker']); // genuine gap
   });
 
   it('counts accepted variants as covered in the required percentage', () => {
