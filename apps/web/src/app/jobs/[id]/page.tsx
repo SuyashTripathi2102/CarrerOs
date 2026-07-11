@@ -267,6 +267,52 @@ export default function JobPage() {
       whyNotApply.push('CareerOS could not confidently tell what this role is');
   }
 
+  // GAP ANALYZER — the fastest ways to improve your odds, ranked by impact for
+  // the least effort. Synthesised from real signals; impact is qualitative.
+  type Action = { text: string; effort: string; impact: 'High' | 'Medium' | 'Low'; href?: string };
+  const actions: Action[] = [];
+  if (v && v.verdict !== 'SKIP') {
+    if ((ats?.addExact.length ?? 0) > 0)
+      actions.push({
+        text: `Add ${ats!.addExact.length} exact ATS keyword${ats!.addExact.length === 1 ? '' : 's'} you already have (${ats!.addExact.slice(0, 3).join(', ')})`,
+        effort: '2 min',
+        impact: 'High',
+        href: `/resumes/tailor/${id}`,
+      });
+    actions.push({
+      text: 'Get a referral — a Postman/company engineer vouching for you',
+      effort: 'a few messages',
+      impact: 'High',
+    });
+    const topSkill = detail?.whatIf?.[0];
+    if (topSkill)
+      actions.push({
+        text: `Learn ${topSkill.skill} — stack fit ${spec?.fit}% → ${topSkill.newFit}%`,
+        effort: 'hours',
+        impact: topSkill.delta >= 15 ? 'High' : 'Medium',
+      });
+    if (ageDays <= 2)
+      actions.push({
+        text: 'Apply now — the posting is fresh, so you are an early applicant',
+        effort: '15 min',
+        impact: 'Medium',
+      });
+    if ((ats?.missingRequired.length ?? 0) > 0)
+      actions.push({
+        text: `Name a project using ${ats!.missingRequired.slice(0, 2).join(' / ')} if you've used ${ats!.missingRequired.length === 1 ? 'it' : 'them'}`,
+        effort: '10 min',
+        impact: 'Medium',
+      });
+    actions.push({
+      text: 'Tailor your resume to this JD (auto ATS keywords + 3-audience score)',
+      effort: '1 click',
+      impact: 'Medium',
+      href: `/resumes/tailor/${id}`,
+    });
+  }
+  const impactRank = { High: 0, Medium: 1, Low: 2 };
+  actions.sort((a, b) => impactRank[a.impact] - impactRank[b.impact]);
+
   return (
     <Shell>
       <Link href="/" className="text-sm text-neutral-500 hover:text-neutral-300">
@@ -395,6 +441,48 @@ export default function JobPage() {
               {v.reason}
             </p>
           )}
+        </section>
+      )}
+
+      {/* GAP ANALYZER — your fastest path to an interview, ranked. */}
+      {actions.length > 0 && (
+        <section className="mt-4 rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+          <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-400">
+            Fastest ways to improve your odds
+          </h2>
+          <ol className="mt-3 space-y-2">
+            {actions.map((a, i) => {
+              const dot =
+                a.impact === 'High' ? 'bg-emerald-400' : a.impact === 'Medium' ? 'bg-amber-400' : 'bg-neutral-500';
+              const inner = (
+                <>
+                  <span className="flex items-center gap-2">
+                    <span className="text-xs tabular-nums text-neutral-600">{i + 1}</span>
+                    <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+                    <span className="text-neutral-200">{a.text}</span>
+                  </span>
+                  <span className="shrink-0 text-[11px] text-neutral-500">
+                    {a.impact} · {a.effort}
+                    {a.href ? ' →' : ''}
+                  </span>
+                </>
+              );
+              return a.href ? (
+                <li key={i}>
+                  <Link
+                    href={a.href}
+                    className="flex items-center justify-between gap-3 rounded-lg border border-neutral-800 bg-neutral-950/40 px-3 py-2 text-sm hover:border-neutral-600"
+                  >
+                    {inner}
+                  </Link>
+                </li>
+              ) : (
+                <li key={i} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                  {inner}
+                </li>
+              );
+            })}
+          </ol>
         </section>
       )}
 
