@@ -716,6 +716,12 @@ export default function JobPage() {
         >
           📄 Tailor my resume
         </Link>
+        <Link
+          href={`/referrals/${id}`}
+          className="rounded-lg border border-violet-800 bg-violet-950/40 px-4 py-2 font-medium text-violet-200 hover:bg-violet-900/40"
+        >
+          🤝 Find a referral
+        </Link>
       </div>
 
       {/* CLASSIFICATION FACTS */}

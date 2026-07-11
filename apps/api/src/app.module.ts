@@ -21,6 +21,7 @@ import { InternalModule } from './modules/internal/internal.module';
 import { JobsModule } from './modules/jobs/jobs.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
+import { ReferralsModule } from './modules/referrals/referrals.module';
 import { ResumesModule } from './modules/resumes/resumes.module';
 import { StorageModule } from './modules/storage/storage.module';
 import { UsersModule } from './modules/users/users.module';
@@ -51,6 +52,7 @@ import { UsersModule } from './modules/users/users.module';
     OpportunityModule,
     ApplicationsModule,
     ReviewModule,
+    ReferralsModule,
   ],
   controllers: [AppController],
   providers: [

@@ -110,6 +110,10 @@ services:
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       NOTIFY_MIN_SCORE: ${NOTIFY_MIN_SCORE:-70}
       NOTIFY_MAX_AGE_DAYS: ${NOTIFY_MAX_AGE_DAYS:-30}
+      # Referral Engine — public GitHub people discovery. Optional: without it we
+      # fall back to the anonymous 60/hr limit. A read-only PAT (public data,
+      # no scopes needed) lifts that to 5000/hr. Server secret, never committed.
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
     volumes:
       # chmod 600, NOT in git. Harmless empty dir mount until the key exists.
       - ./secrets:/secrets:ro

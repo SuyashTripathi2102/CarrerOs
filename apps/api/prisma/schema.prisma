@@ -137,6 +137,7 @@ model User {
   reviewFeedback JobReviewFeedback[]
   careerPreferences CareerPreference[]
   companyResumes    CompanyResume[]
+  referralContacts  ReferralContact[]
 
   @@map("users")
 }
@@ -370,6 +371,7 @@ model Job {
   classifications JobClassification[]
   reviewFeedback  JobReviewFeedback[]
   companyResumes  CompanyResume[]
+  referralContacts ReferralContact[]
 
   // Dedupe guarantee: a recrawl updates the existing row instead of inserting.
   @@unique([companyId, externalId])
@@ -611,6 +613,50 @@ model CompanyResume {
   @@unique([userId, jobId])
   @@index([userId])
   @@map("company_resumes")
+}
+
+/**
+ * A person who could refer the user into a company, discovered from PUBLIC
+ * sources only (GitHub org members / contributors — never LinkedIn, never a
+ * ToS-protected portal). `publicEmail` is stored ONLY when the person published
+ * it on their own profile. `draft` is a message the USER reviews and sends
+ * themselves — CareerOS never sends, never in bulk. `status` is the seed of a
+ * referral CRM: SUGGESTED → DRAFTED → CONTACTED → REPLIED (or ARCHIVED).
+ */
+model ReferralContact {
+  id          String    @id @default(cuid())
+  userId      String
+  jobId       String? // the job this shortlist was built for; SetNull if it's removed
+  companyId   String? // best-effort link; no FK so a company merge can't orphan it
+  companyName String
+  source      String    @default("GITHUB")
+  name        String
+  handle      String // github login — unique per company for a user
+  profileUrl  String
+  avatarUrl   String?
+  bio         String?
+  location    String?
+  publicEmail String? // only an address the person published themselves
+  blogUrl     String?
+  twitter     String?
+  role        String // ENGINEER | RECRUITER | HIRING_MANAGER
+  signals     Json? // { sharedTech, viaRepos, contributions, publicMember }
+  priority    Int       @default(0) // 0–100 rank
+  reason      String // human-readable "why this person"
+  draft       String? // generated outreach — reviewed and sent by the user
+  status      String    @default("SUGGESTED")
+  contactedAt DateTime?
+  repliedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job  Job? @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, companyName, handle])
+  @@index([userId, companyName])
+  @@index([userId, status])
+  @@map("referral_contacts")
 }
 
 model JobReviewFeedback {
