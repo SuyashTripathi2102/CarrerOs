@@ -1064,7 +1064,10 @@ export class MatchingService {
 
 CANDIDATE:
 ${resume.summaryForMatching}
-Skills: ${resume.skills.map((s) => s.name).join(', ')}
+Skills: ${(resume.skills as Array<string | { name?: string }>)
+      .map((s) => (typeof s === 'string' ? s : (s?.name ?? '')))
+      .filter(Boolean)
+      .join(', ')}
 Total experience: ${resume.totalYearsExperience ?? 'unknown'} years
 
 JOBS:

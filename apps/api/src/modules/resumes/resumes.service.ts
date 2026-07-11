@@ -53,6 +53,22 @@ export interface ReviewableProfile extends ResumeProfile {
 // the Cc (control) category except \n, \r and \t.
 const CONTROL_CHARS = /(?![\n\r\t])\p{Cc}/gu;
 
+/** Plain text of an HTML resume — for ATS keyword matching against the real doc. */
+function htmlToText(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&#39;|&#x27;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 @Injectable()
 export class ResumesService {
   private readonly logger = new Logger(ResumesService.name);
@@ -287,7 +303,11 @@ export class ResumesService {
     const custom = resume?.masterHtml ?? null;
     const masterSource: 'custom' | 'generated' = custom ? 'custom' : 'generated';
     const masterHtml = custom ?? buildMasterHtml(profile);
-    const audit = atsKeywordAudit(required, preferred, resumeText, profile.skills);
+    // Score against the resume the user ACTUALLY uses: the master HTML's text
+    // when they've set a custom master, else the PDF text layer. Otherwise the
+    // ATS % reflects a stale PDF, not the resume being tailored.
+    const effectiveText = custom ? htmlToText(custom) : resumeText;
+    const audit = atsKeywordAudit(required, preferred, effectiveText, profile.skills);
 
     let companyHtml: string;
     let changes: ResumeChange[];
@@ -304,12 +324,12 @@ export class ResumesService {
     }
 
     // Scores before (master) and after (with the added keywords in the text).
-    const before = scoreResume(profile, required, preferred, resumeText);
+    const before = scoreResume(profile, required, preferred, effectiveText);
     const after = scoreResume(
       profile,
       required,
       preferred,
-      `${resumeText} ${audit.addExact.join(' ')}`,
+      `${effectiveText} ${audit.addExact.join(' ')}`,
     );
 
     await this.prisma.companyResume.upsert({
