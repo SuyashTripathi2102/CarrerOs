@@ -772,6 +772,20 @@ export class MatchingService {
       orderBy: { classifierVersion: 'desc' },
     });
 
+    const job = await this.prisma.job.findUnique({
+      where: { id: jobId },
+      select: {
+        company: {
+          select: {
+            name: true,
+            confidence: true,
+            atsProvider: true,
+            intelligence: { select: { activeJobs: true, hiringTrend: true, hiresJuniors: true } },
+          },
+        },
+      },
+    });
+
     // Confirmed skills drive the specialization breakdown, so it matches the
     // number stored on the match rather than a hardcoded stack.
     const version = activeVersionId
@@ -782,6 +796,9 @@ export class MatchingService {
       : null;
     const confirmedSkills =
       (version?.confirmedProfile as { skills?: string[] } | null)?.skills ?? [];
+    const userYears =
+      (version?.confirmedProfile as { totalYearsExperience?: number } | null)
+        ?.totalYearsExperience ?? null;
 
     const specialization = c
       ? specializationBreakdown(
@@ -794,6 +811,17 @@ export class MatchingService {
       : null;
 
     return {
+      userYears,
+      company: job?.company
+        ? {
+            name: job.company.name,
+            confidence: Math.round(job.company.confidence),
+            atsProvider: job.company.atsProvider,
+            activeJobs: job.company.intelligence?.activeJobs ?? null,
+            hiringTrend: job.company.intelligence?.hiringTrend ?? null,
+            hiresJuniors: job.company.intelligence?.hiresJuniors ?? null,
+          }
+        : null,
       verdict: match
         ? {
             verdict: match.verdict,

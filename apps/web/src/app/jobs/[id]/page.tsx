@@ -28,6 +28,15 @@ interface Transferable {
 }
 
 interface Detail {
+  userYears: number | null;
+  company: {
+    name: string;
+    confidence: number;
+    atsProvider: string;
+    activeJobs: number | null;
+    hiringTrend: string | null;
+    hiresJuniors: boolean | null;
+  } | null;
   verdict: {
     verdict: string | null;
     code: string | null;
@@ -54,6 +63,20 @@ interface Detail {
   specialization: { fit: number | null; strong: string[]; transferable: Transferable[]; missing: string[] } | null;
 }
 
+/** One plain-language line per verdict — what the numbers mean, so nobody has to interpret them. */
+const VERDICT_HEADLINE: Record<string, string> = {
+  APPLY: 'Apply now — your role, your stack, and it clears the bar.',
+  CONSIDER: 'Worth applying — genuinely yours, with one thing to weigh.',
+  NEEDS_REVIEW: 'Needs a look — CareerOS could not call this one confidently.',
+  SKIP: 'Not a match for your search.',
+};
+
+const stars = (pct: number | null) => {
+  if (pct == null) return '☆☆☆☆☆';
+  const n = Math.max(0, Math.min(5, Math.round(pct / 20)));
+  return '★★★★★'.slice(0, n) + '☆☆☆☆☆'.slice(0, 5 - n);
+};
+
 const humanize = (s: string | null) => (s ? s.replace(/_/g, ' ').toLowerCase() : '');
 
 const VERDICT_STYLE: Record<string, { ring: string; text: string; dot: string; label: string }> = {
@@ -70,6 +93,7 @@ function Dim({ label, value, suffix = '%' }: { label: string; value: number | nu
       <div className="mt-0.5 text-lg font-semibold tabular-nums text-neutral-100">
         {value == null ? '—' : `${value}${suffix}`}
       </div>
+      <div className="text-[11px] leading-none text-amber-500/70">{stars(value)}</div>
     </div>
   );
 }
@@ -132,6 +156,7 @@ export default function JobPage() {
   const v = detail?.verdict;
   const c = detail?.classification;
   const spec = detail?.specialization;
+  const co = detail?.company;
   const vstyle = (v?.verdict && VERDICT_STYLE[v.verdict]) || VERDICT_STYLE.SKIP;
   const experience = c
     ? c.minimumYears == null
@@ -140,6 +165,44 @@ export default function JobPage() {
         ? `${c.minimumYears}–${c.maximumYears} yrs`
         : `${c.minimumYears}+ yrs`
     : null;
+
+  // Experience math, spelled out rather than buried.
+  const userYears = detail?.userYears ?? null;
+  const gap =
+    c?.minimumYears != null && userYears != null ? c.minimumYears - userYears : null;
+  const gapVerdict =
+    gap == null
+      ? null
+      : gap <= 0
+        ? 'You meet it'
+        : gap === 1
+          ? 'One-year stretch — apply anyway'
+          : `${gap}-year gap — likely a reach`;
+
+  // Good news first: what makes this a fit, then what might hurt.
+  const strengths: string[] = [];
+  const concerns: string[] = [];
+  if (v) {
+    if (v.targetRoleFit != null && v.targetRoleFit >= 80) strengths.push('Exactly the kind of role you search for');
+    if (v.developmentConfidence != null && v.developmentConfidence >= 80)
+      strengths.push('Hands-on software development is the core of the job');
+    (spec?.strong ?? []).forEach((s) => strengths.push(`${s} — on your resume`));
+    if (co?.hiringTrend === 'GROWING') strengths.push('Company is actively hiring');
+    if (ageDays <= 2) strengths.push('Fresh posting');
+    if (gap != null && gap <= 0) strengths.push('You meet the experience requirement');
+    if (gap === 1) concerns.push('One year short of the stated experience');
+    else if (gap != null && gap > 1) concerns.push(`${gap} years short of the stated experience`);
+    (spec?.missing ?? []).forEach((s) => concerns.push(`${s} — not on your resume`));
+    (spec?.transferable ?? []).forEach((t) => concerns.push(`${t.skill} — ${t.note}`));
+  }
+  const confidence =
+    v?.opportunityScore == null
+      ? null
+      : v.opportunityScore >= 80
+        ? 'High'
+        : v.opportunityScore >= 65
+          ? 'Good'
+          : 'Moderate';
 
   return (
     <Shell>
@@ -160,21 +223,24 @@ export default function JobPage() {
         </p>
       </header>
 
-      {/* VERDICT HERO */}
+      {/* VERDICT HERO — plain language first, numbers as backup. */}
       {v && v.verdict && (
         <section className={`mt-5 rounded-2xl border ${vstyle.ring} bg-neutral-900 p-5`}>
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <div className={`flex items-center gap-2 text-sm font-medium ${vstyle.text}`}>
-                <span className={`h-2.5 w-2.5 rounded-full ${vstyle.dot}`} />
-                CareerOS verdict · {vstyle.label}
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className={`flex items-center gap-2 text-lg font-semibold ${vstyle.text}`}>
+                <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${vstyle.dot}`} />
+                {vstyle.label}
               </div>
-              {v.action && (
-                <div className="mt-1 text-xs text-neutral-500">{humanize(v.action)}</div>
+              <p className="mt-1 text-sm text-neutral-300">
+                {VERDICT_HEADLINE[v.verdict] ?? ''}
+              </p>
+              {confidence && (
+                <p className="mt-1 text-xs text-neutral-500">Confidence: {confidence}</p>
               )}
             </div>
             {v.opportunityScore != null && (
-              <div className="text-right">
+              <div className="shrink-0 text-right">
                 <div className="text-3xl font-semibold tabular-nums text-neutral-100">
                   {v.opportunityScore}
                 </div>
@@ -182,6 +248,32 @@ export default function JobPage() {
               </div>
             )}
           </div>
+
+          {/* Good news first. */}
+          {(strengths.length > 0 || concerns.length > 0) && (
+            <div className="mt-4 grid gap-3 border-t border-neutral-800 pt-4 sm:grid-cols-2">
+              {strengths.length > 0 && (
+                <div>
+                  <div className="text-[11px] uppercase tracking-wide text-emerald-500">Why this fits</div>
+                  <ul className="mt-1.5 space-y-1 text-sm text-neutral-200">
+                    {strengths.slice(0, 6).map((s, i) => (
+                      <li key={i}>✔ {s}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {concerns.length > 0 && (
+                <div>
+                  <div className="text-[11px] uppercase tracking-wide text-amber-500">What may hurt</div>
+                  <ul className="mt-1.5 space-y-1 text-sm text-neutral-400">
+                    {concerns.slice(0, 6).map((s, i) => (
+                      <li key={i}>⚠ {s}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
             <Dim label="Development" value={v.developmentConfidence} />
@@ -191,9 +283,78 @@ export default function JobPage() {
           </div>
 
           {v.reason && (
-            <p className="mt-4 whitespace-pre-line border-t border-neutral-800 pt-3 text-sm text-neutral-300">
+            <p className="mt-4 whitespace-pre-line border-t border-neutral-800 pt-3 text-xs text-neutral-500">
+              <span className="text-neutral-400">CareerOS reasoning: </span>
               {v.reason}
             </p>
+          )}
+        </section>
+      )}
+
+      {/* EXPERIENCE — its own block, spelled out. */}
+      {c && (c.minimumYears != null || userYears != null) && (
+        <section className="mt-4 rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+          <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-400">Experience</h2>
+          <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+            <div>
+              <span className="text-neutral-500">Required</span>{' '}
+              <span className="font-medium text-neutral-200">{experience}</span>
+            </div>
+            {userYears != null && (
+              <div>
+                <span className="text-neutral-500">You</span>{' '}
+                <span className="font-medium text-neutral-200">{userYears} yrs</span>
+              </div>
+            )}
+            {gapVerdict && (
+              <div
+                className={`rounded-full px-2.5 py-0.5 text-xs ${
+                  gap != null && gap <= 0
+                    ? 'bg-emerald-950 text-emerald-300'
+                    : gap === 1
+                      ? 'bg-amber-950 text-amber-300'
+                      : 'bg-red-950 text-red-300'
+                }`}
+              >
+                {gapVerdict}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* COMPANY HEALTH — data we already have, surfaced. */}
+      {co && (
+        <section className="mt-4 rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+          <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-400">
+            {co.name}
+          </h2>
+          <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
+            <div>
+              <div className="text-[11px] uppercase tracking-wide text-neutral-500">Confidence</div>
+              <div className="font-medium text-neutral-200">{co.confidence}/100</div>
+            </div>
+            {co.hiringTrend && (
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-neutral-500">Hiring</div>
+                <div className="font-medium text-neutral-200">{humanize(co.hiringTrend)}</div>
+              </div>
+            )}
+            {co.activeJobs != null && (
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-neutral-500">Open roles</div>
+                <div className="font-medium text-neutral-200">{co.activeJobs}</div>
+              </div>
+            )}
+            <div>
+              <div className="text-[11px] uppercase tracking-wide text-neutral-500">Source</div>
+              <div className="font-medium capitalize text-neutral-200">
+                {co.atsProvider ? co.atsProvider.toLowerCase() : 'career page'}
+              </div>
+            </div>
+          </div>
+          {co.hiresJuniors && (
+            <p className="mt-2 text-[11px] text-emerald-500/80">✓ Has hired at ≤2 years before</p>
           )}
         </section>
       )}
