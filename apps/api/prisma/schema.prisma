@@ -135,6 +135,7 @@ model User {
   applications  Application[]
   notifications Notification[]
   reviewFeedback JobReviewFeedback[]
+  careerPreferences CareerPreference[]
 
   @@map("users")
 }
@@ -561,6 +562,28 @@ model JobClassification {
  * classifier version bump. This answers "is this MY kind of work?", which is
  * personal, permanent, and must survive every reclassification.
  */
+/**
+ * The user's standing answer to "do you want roles in this ecosystem?" — a
+ * permanent career-direction signal, keyed on a canonical discipline token
+ * (dotnet, php, react-native, ...). Not every software engineer wants every
+ * software job; a .NET role can be a perfect skill match and the wrong path.
+ * NO excludes the discipline from future recommendations; SOMETIMES keeps it
+ * visible but never auto-recommends.
+ */
+model CareerPreference {
+  id         String   @id @default(cuid())
+  userId     String
+  discipline String // canonical token: dotnet | php | react-native | ...
+  preference String // YES | NO | SOMETIMES
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, discipline])
+  @@map("career_preferences")
+}
+
 model JobReviewFeedback {
   id       String  @id @default(cuid())
   userId   String

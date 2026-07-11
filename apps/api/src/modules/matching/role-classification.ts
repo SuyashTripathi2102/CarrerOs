@@ -360,6 +360,65 @@ export function specializationFit(c: JobClassification, userSkills = USER_STACK)
 }
 
 /**
+ * Foreign ecosystems — a .NET or PHP or React Native role can be genuine,
+ * well-matched software development and still be the wrong CAREER PATH for a
+ * Node/MERN engineer. Skill fit doesn't capture direction; this does. The key
+ * is the canonical token (stable, for storing a preference); the label is what
+ * the user sees.
+ */
+const DISCIPLINE_LABELS: Record<string, string> = {
+  dotnet: '.NET / C#',
+  php: 'PHP',
+  java: 'Java',
+  python: 'Python',
+  ruby: 'Ruby / Rails',
+  go: 'Go',
+  rust: 'Rust',
+  scala: 'Scala',
+  cpp: 'C / C++',
+  'react-native': 'React Native (mobile)',
+  android: 'Android (mobile)',
+  ios: 'iOS (mobile)',
+  flutter: 'Flutter (mobile)',
+  ml: 'Machine Learning / AI',
+  llm: 'LLM / AI',
+  kafka: 'Data / Streaming',
+  spark: 'Big Data',
+  hadoop: 'Big Data',
+  salesforce: 'Salesforce',
+  sap: 'SAP',
+};
+
+export interface OffPathDiscipline {
+  /** Canonical token — the stable key a preference is stored against. */
+  key: string;
+  /** Human label shown to the user. */
+  label: string;
+}
+
+/**
+ * The foreign ecosystem at the CORE of this job that the user doesn't work in —
+ * the reason a genuine dev role is still off their path. Null when the job's
+ * required stack is the user's own (an on-path role). The user's answer to
+ * "want roles like this?" is stored against `key`.
+ */
+export function offPathDiscipline(
+  c: JobClassification,
+  userSkills: string[],
+): OffPathDiscipline | null {
+  const mine = new Set(userSkills.map(canonicalTech).filter((t): t is string => t !== null));
+  const jd = new Set(
+    [...c.requiredSkills, ...c.specialization]
+      .map(canonicalTech)
+      .filter((t): t is string => t !== null),
+  );
+  for (const key of Object.keys(DISCIPLINE_LABELS)) {
+    if (jd.has(key) && !mine.has(key)) return { key, label: DISCIPLINE_LABELS[key] };
+  }
+  return null;
+}
+
+/**
  * Which bucket this job falls into for this user. Title is never consulted.
  *
  * A catch-all family ("Software Engineer", "SDE") only counts as TARGET when

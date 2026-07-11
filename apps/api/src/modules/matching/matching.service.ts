@@ -8,7 +8,12 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { OpportunityService } from '../opportunity/opportunity.service';
 import type { ParsedResume } from '../resumes/resume-intelligence.service';
 import { CLASSIFIER_VERSION, JobClassifierService } from './job-classifier.service';
-import { DEFAULT_ROLE_PROFILE, eligibility, specializationBreakdown } from './role-classification';
+import {
+  DEFAULT_ROLE_PROFILE,
+  eligibility,
+  offPathDiscipline,
+  specializationBreakdown,
+} from './role-classification';
 import type { JobClassification } from './role-classification';
 import { atsKeywordAudit } from './ats-keywords';
 
@@ -482,6 +487,12 @@ export class MatchingService {
     }
 
     const profile = { ...DEFAULT_ROLE_PROFILE, yearsExperience: await this.userYears(userId) };
+    // Standing career-direction signal: disciplines the user said "No" to are
+    // excluded outright, even when the skill match is otherwise fine.
+    const [userSkills, noDisciplines] = await Promise.all([
+      this.confirmedSkills(userId),
+      this.excludedDisciplines(userId),
+    ]);
     const eligible: typeof candidates = [];
 
     for (const cand of candidates) {
@@ -489,6 +500,16 @@ export class MatchingService {
       if (!c) {
         rejectedByCode['UNCLASSIFIED'] = (rejectedByCode['UNCLASSIFIED'] ?? 0) + 1;
         continue;
+      }
+      if (noDisciplines.size > 0) {
+        const off = offPathDiscipline(
+          { requiredSkills: c.requiredSkills, specialization: c.specializations } as JobClassification,
+          userSkills,
+        );
+        if (off && noDisciplines.has(off.key)) {
+          rejectedByCode['CAREER_PATH_EXCLUDED'] = (rejectedByCode['CAREER_PATH_EXCLUDED'] ?? 0) + 1;
+          continue;
+        }
       }
       const e = eligibility(
         {
@@ -516,6 +537,35 @@ export class MatchingService {
       }
     }
     return { eligible, rejectedByCode, needsReview };
+  }
+
+  /** Confirmed skills from the active resume — for off-path discipline checks. */
+  private async confirmedSkills(userId: string): Promise<string[]> {
+    const v = await this.prisma.resumeVersion.findFirst({
+      where: { resume: { userId, isPrimary: true }, activatedAt: { not: null } },
+      orderBy: { versionNumber: 'desc' },
+      select: { confirmedProfile: true },
+    });
+    return (v?.confirmedProfile as { skills?: string[] } | null)?.skills ?? [];
+  }
+
+  /** Discipline tokens the user has said "No" to — excluded from matching. */
+  private async excludedDisciplines(userId: string): Promise<Set<string>> {
+    const prefs = await this.prisma.careerPreference.findMany({
+      where: { userId, preference: 'NO' },
+      select: { discipline: true },
+    });
+    return new Set(prefs.map((p) => p.discipline));
+  }
+
+  /** Store a standing "want roles like this?" answer. Re-runs on next matching. */
+  async setCareerPreference(userId: string, discipline: string, preference: string) {
+    const value = ['YES', 'NO', 'SOMETIMES'].includes(preference) ? preference : 'SOMETIMES';
+    return this.prisma.careerPreference.upsert({
+      where: { userId_discipline: { userId, discipline } },
+      create: { userId, discipline, preference: value },
+      update: { preference: value },
+    });
   }
 
   /** Years of experience from the active, confirmed resume profile. */
@@ -835,10 +885,32 @@ export class MatchingService {
         ? atsKeywordAudit(c.requiredSkills, c.preferredSkills, resumeText, confirmedSkills)
         : null;
 
+    // Career direction — is this a foreign ecosystem (.NET, PHP, mobile)? If so,
+    // surface it with the user's standing preference so they can teach CareerOS.
+    const offPath = c
+      ? offPathDiscipline(
+          { requiredSkills: c.requiredSkills, specialization: c.specializations } as JobClassification,
+          confirmedSkills,
+        )
+      : null;
+    const careerPath = offPath
+      ? {
+          discipline: offPath.key,
+          label: offPath.label,
+          preference:
+            (
+              await this.prisma.careerPreference.findUnique({
+                where: { userId_discipline: { userId, discipline: offPath.key } },
+              })
+            )?.preference ?? null,
+        }
+      : null;
+
     return {
       userYears,
       whatIf,
       atsKeywords,
+      careerPath,
       company: job?.company
         ? {
             name: job.company.name,

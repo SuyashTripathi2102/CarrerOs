@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   DefaultValuePipe,
   Get,
@@ -109,5 +110,15 @@ export class MatchingController {
   @Get('detail/:jobId')
   detail(@CurrentUser() user: AuthenticatedUser, @Param('jobId') jobId: string) {
     return this.matching.jobDetail(user.id, jobId);
+  }
+
+  /** Standing career-direction preference for a discipline (YES/NO/SOMETIMES). */
+  @Post('career-preference')
+  @HttpCode(HttpStatus.OK)
+  careerPreference(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() body: { discipline: string; preference: string },
+  ) {
+    return this.matching.setCareerPreference(user.id, body.discipline, body.preference);
   }
 }

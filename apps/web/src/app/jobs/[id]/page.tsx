@@ -35,6 +35,7 @@ interface KeywordItem {
 
 interface Detail {
   userYears: number | null;
+  careerPath: { discipline: string; label: string; preference: 'YES' | 'NO' | 'SOMETIMES' | null } | null;
   whatIf: { skill: string; newFit: number | null; delta: number }[];
   atsKeywords: {
     required: KeywordItem[];
@@ -138,12 +139,27 @@ export default function JobPage() {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tracked, setTracked] = useState(false);
+  const [pathPref, setPathPref] = useState<'YES' | 'NO' | 'SOMETIMES' | null>(null);
 
   useEffect(() => {
     if (!id) return;
     apiGet<JobDetail>(`/jobs/${id}`).then(setJob).catch((e) => setError(String(e)));
-    apiGet<Detail>(`/matches/detail/${id}`).then(setDetail).catch(() => setDetail(null));
+    apiGet<Detail>(`/matches/detail/${id}`)
+      .then((d) => {
+        setDetail(d);
+        setPathPref(d.careerPath?.preference ?? null);
+      })
+      .catch(() => setDetail(null));
   }, [id]);
+
+  async function saveCareerPref(discipline: string, preference: 'YES' | 'NO' | 'SOMETIMES') {
+    setPathPref(preference);
+    try {
+      await apiPost('/matches/career-preference', { discipline, preference });
+    } catch {
+      /* keep the optimistic choice; retry on next visit */
+    }
+  }
 
   async function markApplied() {
     if (!id || tracked) return;
@@ -269,6 +285,47 @@ export default function JobPage() {
           {experience ? ` · 🧭 ${experience}` : ''}
         </p>
       </header>
+
+      {/* CAREER DIRECTION — a foreign ecosystem, and the standing preference. */}
+      {detail?.careerPath && (
+        <section className="mt-4 rounded-xl border border-violet-900/60 bg-violet-950/20 p-4">
+          <p className="text-sm text-violet-200">
+            This is a <strong className="font-medium">{detail.careerPath.label}</strong> role —
+            outside your Node.js / MERN / full-stack path. It may match some skills, but it&apos;s a
+            different career direction.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="text-xs text-neutral-400">Want roles like this in future?</span>
+            {(['YES', 'SOMETIMES', 'NO'] as const).map((opt) => (
+              <button
+                key={opt}
+                onClick={() => saveCareerPref(detail.careerPath!.discipline, opt)}
+                className={`rounded-full border px-3 py-1 text-xs ${
+                  pathPref === opt
+                    ? opt === 'NO'
+                      ? 'border-red-700 bg-red-950 text-red-300'
+                      : opt === 'YES'
+                        ? 'border-emerald-700 bg-emerald-950 text-emerald-300'
+                        : 'border-amber-700 bg-amber-950 text-amber-300'
+                    : 'border-neutral-700 text-neutral-300 hover:border-neutral-500'
+                }`}
+              >
+                {opt === 'YES' ? 'Yes' : opt === 'NO' ? 'No, never' : 'Sometimes'}
+              </button>
+            ))}
+          </div>
+          {pathPref === 'NO' && (
+            <p className="mt-2 text-[11px] text-neutral-500">
+              Got it — CareerOS will stop recommending {detail.careerPath.label} roles.
+            </p>
+          )}
+          {pathPref === 'SOMETIMES' && (
+            <p className="mt-2 text-[11px] text-neutral-500">
+              CareerOS will keep these visible but never push them at you.
+            </p>
+          )}
+        </section>
+      )}
 
       {/* VERDICT HERO — plain language first, numbers as backup. */}
       {v && v.verdict && (
@@ -437,7 +494,27 @@ export default function JobPage() {
       )}
 
       {/* ATS KEYWORD OPTIMIZER — beat the literal keyword filter. */}
-      {ats && (ats.required.length > 0 || ats.preferred.length > 0) && (
+      {ats && (ats.required.length > 0 || ats.preferred.length > 0) && (() => {
+        const all = [...ats.required, ...ats.preferred];
+        const matches = all.filter((k) => k.status === 'PRESENT');
+        const accepted = all.filter((k) => k.status === 'ACCEPTED_VARIANT');
+        const rewordings = all.filter((k) => k.status === 'ADD_EXACT');
+        const missing = all.filter((k) => k.status === 'MISSING');
+        const Group = ({ label, items, tone }: { label: string; items: KeywordItem[]; tone: string }) =>
+          items.length === 0 ? null : (
+            <div>
+              <div className={`text-[11px] uppercase tracking-wide ${tone}`}>{label}</div>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {items.map((k) => (
+                  <span key={k.keyword} className="rounded-md border border-neutral-700 bg-neutral-950 px-2 py-0.5 font-mono text-xs text-neutral-200">
+                    {k.keyword}
+                    {k.yourTerm ? <span className="text-neutral-500"> ← {k.yourTerm}</span> : null}
+                  </span>
+                ))}
+              </div>
+            </div>
+          );
+        return (
         <section className="mt-4 rounded-xl border border-neutral-800 bg-neutral-900 p-4">
           <div className="flex items-baseline justify-between">
             <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-400">
@@ -445,39 +522,32 @@ export default function JobPage() {
             </h2>
             {ats.requiredMatchPct != null && (
               <span className="text-sm font-semibold tabular-nums text-neutral-200">
-                {ats.requiredMatchPct}% exact-match
+                {ats.requiredMatchPct}%
               </span>
             )}
           </div>
           <p className="mt-1 text-[11px] text-neutral-500">
-            ATS filters often match the JD&apos;s exact wording. This checks your resume text
-            literally — not just whether you have the skill.
+            This is a <strong>keyword</strong> check, not a skill check. Recruiters&apos; ATS software
+            scans for the JD&apos;s exact words —{' '}
+            {ats.requiredMatchPct != null && (
+              <>an ATS would match <strong className="text-neutral-300">{ats.requiredMatchPct}%</strong> of the required keywords in your resume as-is.</>
+            )}
           </p>
 
           {ats.addExact.length > 0 && (
             <div className="mt-3 rounded-lg border border-amber-900/60 bg-amber-950/20 p-3">
               <p className="text-xs text-amber-300">
-                <strong className="font-medium">Free wins</strong> — you have these; just match the
-                JD&apos;s exact spelling:
+                <strong className="font-medium">Free wins</strong> — you already have these; just add
+                the JD&apos;s exact spelling to your resume:
               </p>
               <div className="mt-1.5 flex flex-wrap gap-1.5">
                 {ats.addExact.map((k) => (
-                  <span
-                    key={k}
-                    className="rounded-md border border-amber-800 bg-amber-950/60 px-2 py-0.5 font-mono text-xs text-amber-200"
-                  >
+                  <span key={k} className="rounded-md border border-amber-800 bg-amber-950/60 px-2 py-0.5 font-mono text-xs text-amber-200">
                     {k}
                   </span>
                 ))}
               </div>
             </div>
-          )}
-
-          {ats.missingRequired.length > 0 && (
-            <p className="mt-2 text-[11px] text-neutral-500">
-              Genuinely absent: {ats.missingRequired.join(', ')} — add only if you&apos;ve actually
-              used them (name a project); never just to game the filter.
-            </p>
           )}
 
           {ats.addExact.length === 0 && ats.missingRequired.length === 0 && (
@@ -486,16 +556,15 @@ export default function JobPage() {
             </p>
           )}
 
-          <div className="mt-4 space-y-1.5 text-sm">
-            {ats.required.map((k) => (
-              <KeywordRow key={`r-${k.keyword}`} item={k} required />
-            ))}
-            {ats.preferred.map((k) => (
-              <KeywordRow key={`p-${k.keyword}`} item={k} required={false} />
-            ))}
+          <div className="mt-4 space-y-3">
+            <Group label="✓ Matches exactly" items={matches} tone="text-emerald-500" />
+            <Group label="✓ Accepted wording (ATS treats as the same)" items={accepted} tone="text-emerald-500/70" />
+            <Group label="~ Add exact wording (you have the skill)" items={rewordings} tone="text-amber-500" />
+            <Group label="✕ Missing — name only if you've used it" items={missing} tone="text-neutral-500" />
           </div>
         </section>
-      )}
+        );
+      })()}
 
       {/* COMPANY HEALTH — data we already have, surfaced. */}
       {co && (
@@ -618,39 +687,6 @@ export default function JobPage() {
         )}
       </section>
     </Shell>
-  );
-}
-
-function KeywordRow({ item, required }: { item: KeywordItem; required: boolean }) {
-  const style =
-    item.status === 'PRESENT'
-      ? { mark: '✓', color: 'text-emerald-400', note: 'exact match' }
-      : item.status === 'ACCEPTED_VARIANT'
-        ? {
-            mark: '✓',
-            color: 'text-emerald-400/80',
-            note: item.yourTerm ? `you wrote “${item.yourTerm}” — ATS accepts it` : 'accepted variant',
-          }
-        : item.status === 'ADD_EXACT'
-          ? {
-              mark: '~',
-              color: 'text-amber-400',
-              note: item.yourTerm ? `you wrote “${item.yourTerm}” — add this exact phrase` : 'add this exact phrase',
-            }
-          : { mark: '✕', color: 'text-neutral-500', note: 'missing' };
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <span className="flex items-center gap-2">
-        <span className={`text-base leading-none ${style.color}`}>{style.mark}</span>
-        <span className="font-mono text-xs text-neutral-200">{item.keyword}</span>
-        {required && (
-          <span className="rounded bg-neutral-800 px-1 text-[9px] uppercase tracking-wide text-neutral-500">
-            required
-          </span>
-        )}
-      </span>
-      <span className={`text-[11px] ${style.color}`}>{style.note}</span>
-    </div>
   );
 }
 
