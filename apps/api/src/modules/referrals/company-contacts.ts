@@ -61,7 +61,10 @@ const hostOf = (url: string | null | undefined): string | null => {
  */
 export function extractEmails(html: string, siteHost: string | null): CompanyEmail[] {
   const found = new Map<string, CompanyEmail>();
-  for (const raw of html.match(EMAIL_RE) ?? []) {
+  // Strip JSON \uXXXX escapes (e.g. > = ">") so ">info@x.com" doesn't
+  // leak in as "u003einfo@x.com". They never appear inside a real address.
+  const text = html.replace(/\\u[0-9a-fA-F]{4}/g, ' ');
+  for (const raw of text.match(EMAIL_RE) ?? []) {
     const address = raw.toLowerCase().replace(/[.,;:]+$/, '');
     const at = address.lastIndexOf('@');
     if (at < 1) continue;

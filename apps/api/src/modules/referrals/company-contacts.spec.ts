@@ -30,6 +30,12 @@ describe('extractEmails', () => {
     expect(addrs).not.toContain('you@example.com'); // placeholder
   });
 
+  it('does not leak JSON \\u003e escapes into the local part', () => {
+    const emails = extractEmails('contact \\u003einfo@acme.com for help', 'acme.com');
+    expect(emails.map((e) => e.address)).toContain('info@acme.com');
+    expect(emails.map((e) => e.address)).not.toContain('u003einfo@acme.com');
+  });
+
   it('when the domain is unknown, still drops junk/placeholder addresses', () => {
     const emails = extractEmails(html, null);
     const addrs = emails.map((e) => e.address);
