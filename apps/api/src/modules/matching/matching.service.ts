@@ -16,6 +16,7 @@ import {
 } from './role-classification';
 import type { JobClassification } from './role-classification';
 import { atsKeywordAudit } from './ats-keywords';
+import { opportunityScore, type HiringTrend } from './opportunity-score';
 
 const SIMILARITY_TOP_K = 40; // pgvector prefilter size
 const LLM_SCORE_TOP_N = 15; // how many get deep LLM scoring
@@ -817,6 +818,9 @@ export class MatchingService {
 
     const limit = Math.min(120, Math.max(1, opts.limit ?? 60));
     const indiaOnly = opts.indiaOnly ?? true;
+    // Pull a wider similarity pool, then re-rank by Opportunity Score so a
+    // referral/watchlist/fresh job can rise above a slightly-higher-fit cold one.
+    const pool = Math.min(200, limit * 3);
 
     const rows = await this.prisma.$queryRaw<
       Array<{
@@ -832,13 +836,21 @@ export class MatchingService {
         similarity: number;
         applied: boolean;
         verdict: string | null;
+        ref_contacted: boolean;
+        ref_found: boolean;
+        watched: boolean;
+        hiring_trend: string | null;
       }>
     >`
       SELECT j.id, j.title, j.location, j."workMode", j.url, j.country,
              j."postedAt", j."firstSeenAt", c.name AS company,
              (1 - (je.vector <=> re.vector))::float8 AS similarity,
              (a.id IS NOT NULL) AS applied,
-             m.verdict
+             m.verdict,
+             COALESCE(ref.contacted, false) AS ref_contacted,
+             COALESCE(ref.found, false) AS ref_found,
+             (cw.id IS NOT NULL) AS watched,
+             ci."hiringTrend" AS hiring_trend
       FROM job_embeddings je
       JOIN jobs j ON j.id = je."jobId" AND j.status = 'ACTIVE'
       JOIN companies c ON c.id = j."companyId"
@@ -846,28 +858,52 @@ export class MatchingService {
       LEFT JOIN applications a ON a."jobId" = j.id AND a."userId" = ${userId}
       LEFT JOIN job_matches m
         ON m."jobId" = j.id AND m."userId" = ${userId} AND m."resumeVersionId" = ${versionId}
+      LEFT JOIN LATERAL (
+        SELECT bool_or(rc.status IN ('CONTACTED', 'REPLIED')) AS contacted, count(*) > 0 AS found
+        FROM referral_contacts rc WHERE rc."userId" = ${userId} AND rc."companyName" = c.name
+      ) ref ON true
+      LEFT JOIN company_watches cw ON cw."companyId" = c.id AND cw."userId" = ${userId}
+      LEFT JOIN company_intelligence ci ON ci."companyId" = c.id
       WHERE (${indiaOnly}::boolean = false OR j.country = 'IN' OR j."workMode" = 'REMOTE')
       ORDER BY je.vector <=> re.vector
-      LIMIT ${limit}
+      LIMIT ${pool}
     `;
 
-    return {
-      resumeReady: true,
-      items: rows.map((r) => ({
-        jobId: r.id,
-        title: r.title,
-        company: r.company,
-        location: r.location,
-        workMode: r.workMode,
-        url: r.url,
-        country: r.country,
-        postedAt: r.postedAt,
-        ageDays: Math.floor((Date.now() - new Date(r.firstSeenAt).getTime()) / 86_400_000),
-        fit: Math.round(r.similarity * 100),
-        applied: r.applied,
-        verdict: r.verdict,
-      })),
-    };
+    const items = rows
+      .map((r) => {
+        const ageDays = Math.floor((Date.now() - new Date(r.firstSeenAt).getTime()) / 86_400_000);
+        const opp = opportunityScore({
+          resumeFit: r.similarity * 100,
+          ageDays,
+          referral: r.ref_contacted ? 'CONTACTED' : r.ref_found ? 'FOUND' : 'NONE',
+          watched: r.watched,
+          hiringTrend: (r.hiring_trend as HiringTrend) ?? null,
+          applied: r.applied,
+        });
+        return {
+          jobId: r.id,
+          title: r.title,
+          company: r.company,
+          location: r.location,
+          workMode: r.workMode,
+          url: r.url,
+          country: r.country,
+          postedAt: r.postedAt,
+          ageDays,
+          fit: Math.round(r.similarity * 100),
+          applied: r.applied,
+          verdict: r.verdict,
+          opportunity: opp.score,
+          competition: opp.competition,
+          factors: opp.factors,
+          watched: r.watched,
+          referral: r.ref_contacted ? 'CONTACTED' : r.ref_found ? 'FOUND' : 'NONE',
+        };
+      })
+      .sort((a, b) => b.opportunity - a.opportunity)
+      .slice(0, limit);
+
+    return { resumeReady: true, items };
   }
 
   /**
