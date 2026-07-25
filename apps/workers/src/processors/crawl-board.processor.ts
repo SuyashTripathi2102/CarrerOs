@@ -4,14 +4,16 @@ import { createRedisConnection } from '../queues/connection';
 import { ApiClient } from '../api-client';
 import { fetchRemoteOkJobs } from '../adapters/remoteok';
 import { fetchHnWhoIsHiring } from '../adapters/hn-whoishiring';
+import { fetchAdzunaJobs } from '../adapters/adzuna';
 
 export interface CrawlBoardJobData {
-  board: 'remoteok' | 'hn-hiring';
+  board: 'remoteok' | 'hn-hiring' | 'adzuna';
 }
 
 const BOARDS = {
   remoteok: fetchRemoteOkJobs,
   'hn-hiring': fetchHnWhoIsHiring,
+  adzuna: fetchAdzunaJobs,
 } as const;
 
 export function startCrawlBoardWorker(api: ApiClient): Worker<CrawlBoardJobData> {
@@ -43,6 +45,12 @@ export async function ensureBoardSchedules(): Promise<void> {
     { pattern: '0 5 * * 2' }, // Tuesdays 05:00 UTC
     { name: 'scheduled', data: { board: 'hn-hiring' }, opts: { attempts: 2, removeOnComplete: true, removeOnFail: true } },
   );
+  // Adzuna India dev jobs — daily (India roles post every day; ingest is idempotent).
+  await queue.upsertJobScheduler(
+    'adzuna-daily',
+    { pattern: '0 2 * * *' }, // 02:00 UTC = 07:30 IST
+    { name: 'scheduled', data: { board: 'adzuna' }, opts: { attempts: 2, removeOnComplete: true, removeOnFail: true } },
+  );
   await queue.close();
-  console.log('[scheduler] hn-whoishiring: weekly (Tue)');
+  console.log('[scheduler] hn-whoishiring: weekly (Tue) · adzuna: daily (07:30 IST)');
 }

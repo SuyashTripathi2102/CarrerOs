@@ -151,6 +151,10 @@ services:
       API_URL: http://api:3001/api
       # City-based company discovery via Places API (optional — skips if unset)
       PLACES_API_KEY: ${PLACES_API_KEY:-}
+      # Adzuna job-aggregator API — real India job volume (optional; free key at
+      # developer.adzuna.com). Without it the daily Adzuna sweep just no-ops.
+      ADZUNA_APP_ID: ${ADZUNA_APP_ID:-}
+      ADZUNA_APP_KEY: ${ADZUNA_APP_KEY:-}
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
       # 1 vCPU: modest parallelism beats thrash. Raise on a bigger box.
       CRAWL_CONCURRENCY: 2
