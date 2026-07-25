@@ -24,6 +24,7 @@ import { RolesGuard } from './common/guards/roles.guard';
 import { ReferralsModule } from './modules/referrals/referrals.module';
 import { ResumesModule } from './modules/resumes/resumes.module';
 import { TodayModule } from './modules/today/today.module';
+import { WatchlistModule } from './modules/watchlist/watchlist.module';
 import { StorageModule } from './modules/storage/storage.module';
 import { UsersModule } from './modules/users/users.module';
 
@@ -55,6 +56,7 @@ import { UsersModule } from './modules/users/users.module';
     ReviewModule,
     ReferralsModule,
     TodayModule,
+    WatchlistModule,
   ],
   controllers: [AppController],
   providers: [

@@ -200,6 +200,9 @@ export default function MissionControl() {
           <a href="/browse" className="text-sm text-neutral-400 hover:text-neutral-200">
             Browse
           </a>
+          <a href="/watchlist" className="text-sm text-neutral-400 hover:text-neutral-200">
+            Watchlist
+          </a>
           <a href="/resumes" className="text-sm text-neutral-400 hover:text-neutral-200">
             Resume
           </a>

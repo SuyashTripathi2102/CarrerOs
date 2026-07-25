@@ -141,21 +141,30 @@ export async function fetchAdzunaJobs(): Promise<BoardJob[]> {
   const auth = `app_id=${appId}&app_key=${appKey}`;
   const all: BoardJob[] = [];
   const seen = new Set<string>();
+  // A few pages per role (50 each) — ~3–5× the volume, still ~18 calls/sweep
+  // (well within the free tier). Stops early when a role runs out of results.
+  const PAGES = 3;
   for (const what of QUERIES) {
-    const url =
-      `${BASE}/in/search/1?${auth}&results_per_page=50&max_days_old=21&sort_by=date` +
-      `&what=${encodeURIComponent(what)}&content-type=application/json`;
-    try {
-      const res = await getJson<AdzunaResponse>(url);
-      for (const job of mapAdzunaResults(res.results ?? [])) {
+    for (let page = 1; page <= PAGES; page++) {
+      const url =
+        `${BASE}/in/search/${page}?${auth}&results_per_page=50&max_days_old=28&sort_by=date` +
+        `&what=${encodeURIComponent(what)}&content-type=application/json`;
+      let batch: BoardJob[] = [];
+      try {
+        const res = await getJson<AdzunaResponse>(url);
+        batch = mapAdzunaResults(res.results ?? []);
+      } catch (err) {
+        console.log(`[adzuna] query "${what}" p${page} failed: ${String(err)}`);
+        break;
+      }
+      if (batch.length === 0) break; // no more pages for this role
+      for (const job of batch) {
         if (seen.has(job.job.externalId)) continue;
         seen.add(job.job.externalId);
         all.push(job);
       }
-    } catch (err) {
-      console.log(`[adzuna] query "${what}" failed: ${String(err)}`);
+      await new Promise((r) => setTimeout(r, 1200)); // gentle on the free tier
     }
-    await new Promise((r) => setTimeout(r, 1500)); // gentle on the free tier
   }
   console.log(`[adzuna] fetched ${all.length} India dev jobs across ${QUERIES.length} role queries`);
   return all;

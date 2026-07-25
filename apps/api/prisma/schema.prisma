@@ -138,6 +138,7 @@ model User {
   careerPreferences CareerPreference[]
   companyResumes    CompanyResume[]
   referralContacts  ReferralContact[]
+  companyWatches    CompanyWatch[]
 
   @@map("users")
 }
@@ -340,6 +341,7 @@ model Company {
   jobs         Job[]
   crawlRuns    CrawlRun[]
   intelligence CompanyIntelligence?
+  watches      CompanyWatch[]
 
   // One company per ATS board — prevents two rows crawling the same source.
   @@unique([atsProvider, atsIdentifier])
@@ -672,6 +674,26 @@ model ReferralContact {
   @@index([userId, companyName])
   @@index([userId, status])
   @@map("referral_contacts")
+}
+
+/**
+ * A company the user is actively monitoring — the Dream Company Watchlist.
+ * Watching bumps the company to HOT crawl tier so its career page is checked
+ * frequently, and surfaces its open roles ranked by resume fit. This is the
+ * "company-first" view: pick the companies you want, and CareerOS watches them.
+ */
+model CompanyWatch {
+  id        String   @id @default(cuid())
+  userId    String
+  companyId String
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, companyId])
+  @@index([userId])
+  @@map("company_watches")
 }
 
 model JobReviewFeedback {
