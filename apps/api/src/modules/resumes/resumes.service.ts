@@ -14,6 +14,7 @@ import { PDFParse } from 'pdf-parse';
 import { checkAts } from './ats-check';
 import { classifySkillOrigins, isNamedInResume, manuallyAdded } from './skill-provenance';
 import { buildMasterHtml, scoreResume, tailorForJob, type ResumeChange } from './resume-builder';
+import { resumeQualityGate } from './resume-quality-gate';
 import { atsKeywordAudit } from '../matching/ats-keywords';
 import { MatchingService } from '../matching/matching.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -368,6 +369,13 @@ export class ResumesService {
         requiredMatchPct: audit.requiredMatchPct,
         addExact: audit.addExact,
       },
+      // Deterministic guardrails before you send: confabulated metrics, filler,
+      // ATS formatting, duplicate bullets, keyword stuffing. No LLM.
+      qualityGate: resumeQualityGate({
+        masterText: effectiveText,
+        tailoredText: htmlToText(companyHtml),
+        tailoredHtml: companyHtml,
+      }),
       scores: { before, after },
     };
   }

@@ -24,6 +24,17 @@ interface Ats {
   requiredMatchPct: number | null;
   addExact: string[];
 }
+interface GateCheck {
+  name: string;
+  status: 'PASS' | 'WARN' | 'FAIL';
+  detail: string;
+  items?: string[];
+}
+interface QualityGate {
+  score: number;
+  verdict: 'SEND' | 'REVIEW' | 'FIX';
+  checks: GateCheck[];
+}
 interface Tailored {
   jobTitle: string;
   company: string;
@@ -33,6 +44,7 @@ interface Tailored {
   changes: Change[];
   missingRequired: string[];
   ats: Ats;
+  qualityGate: QualityGate;
   scores: { before: Scores; after: Scores };
 }
 
@@ -210,6 +222,9 @@ export default function TailorPage() {
         </section>
       )}
 
+      {/* Deterministic quality gate — guardrails before you send. */}
+      {data.qualityGate && <QualityGateCard gate={data.qualityGate} />}
+
       {/* The tailored resume, rendered. */}
       <div className="mt-6 flex items-center justify-between">
         <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-400">Preview</h2>
@@ -245,6 +260,49 @@ const KW_ICON: Record<KeywordItem['status'], string> = {
   ADD_EXACT: '+',
   MISSING: '✕',
 };
+
+const GATE_VERDICT: Record<QualityGate['verdict'], { label: string; cls: string }> = {
+  SEND: { label: 'Ready to send', cls: 'border-emerald-800 bg-emerald-950/40 text-emerald-300' },
+  REVIEW: { label: 'Review first', cls: 'border-amber-800 bg-amber-950/40 text-amber-200' },
+  FIX: { label: 'Fix before sending', cls: 'border-red-900 bg-red-950/40 text-red-300' },
+};
+const STATUS_ICON: Record<GateCheck['status'], string> = { PASS: '✓', WARN: '⚠', FAIL: '✕' };
+const STATUS_COLOR: Record<GateCheck['status'], string> = {
+  PASS: 'text-emerald-400',
+  WARN: 'text-amber-400',
+  FAIL: 'text-red-400',
+};
+
+function QualityGateCard({ gate }: { gate: QualityGate }) {
+  const v = GATE_VERDICT[gate.verdict];
+  return (
+    <section className="mt-5 rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-400">Quality gate</h2>
+        <div className="flex items-center gap-2">
+          <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${v.cls}`}>{v.label}</span>
+          <span className="text-[12px] tabular-nums text-neutral-400">{gate.score}/100</span>
+        </div>
+      </div>
+      <ul className="mt-3 space-y-1.5">
+        {gate.checks.map((c) => (
+          <li key={c.name} className="text-[12.5px]">
+            <span className={`mr-1.5 ${STATUS_COLOR[c.status]}`}>{STATUS_ICON[c.status]}</span>
+            <span className="text-neutral-200">{c.name}</span>
+            {c.status !== 'PASS' && <span className="text-neutral-400"> — {c.detail}</span>}
+            {c.items && c.items.length > 0 && (
+              <span className="text-neutral-500"> ({c.items.join(', ')})</span>
+            )}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 text-[11px] text-neutral-500">
+        Deterministic checks — no AI. The key one: every number traces to your master resume, so
+        nothing is fabricated.
+      </p>
+    </section>
+  );
+}
 
 function KeywordChip({ k }: { k: KeywordItem }) {
   return (
