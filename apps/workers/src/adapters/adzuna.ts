@@ -1,5 +1,43 @@
+import { get } from 'node:https';
 import type { BoardJob } from '@careeros/shared';
-import { capDescription, fetchJson, workModeFromText } from './types';
+import { capDescription, workModeFromText } from './types';
+
+/**
+ * IPv4-forced JSON GET. The prod box's IPv6 egress is broken and Adzuna's host
+ * resolves to AWS IPv6 addresses first, so global fetch/undici hangs with
+ * ETIMEDOUT. family:4 pins the socket to IPv4 (verified reachable).
+ */
+function getJson<T>(url: string, timeoutMs = 12_000): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const req = get(
+      url,
+      {
+        family: 4,
+        headers: { 'user-agent': 'CareerOS/0.1 (personal job-search agent)', accept: 'application/json' },
+      },
+      (res) => {
+        const status = res.statusCode ?? 0;
+        if (status >= 400) {
+          res.resume();
+          reject(new Error(`GET -> ${status}`));
+          return;
+        }
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (c) => (body += c));
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(body) as T);
+          } catch (e) {
+            reject(e);
+          }
+        });
+      },
+    );
+    req.setTimeout(timeoutMs, () => req.destroy(new Error('timeout')));
+    req.on('error', reject);
+  });
+}
 
 /**
  * Adzuna — a permitted job-aggregator API (register a free app_id/app_key at
@@ -108,7 +146,7 @@ export async function fetchAdzunaJobs(): Promise<BoardJob[]> {
       `${BASE}/in/search/1?${auth}&results_per_page=50&max_days_old=21&sort_by=date` +
       `&what=${encodeURIComponent(what)}&content-type=application/json`;
     try {
-      const res = await fetchJson<AdzunaResponse>(url);
+      const res = await getJson<AdzunaResponse>(url);
       for (const job of mapAdzunaResults(res.results ?? [])) {
         if (seen.has(job.job.externalId)) continue;
         seen.add(job.job.externalId);
