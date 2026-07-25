@@ -57,4 +57,10 @@ export class DiscoveryController {
   stats() {
     return this.discovery.funnelStats();
   }
+
+  /** Per-city discovery coverage — where we're strong and where we're blind. */
+  @Get('coverage')
+  coverage() {
+    return this.discovery.cityCoverage();
+  }
 }

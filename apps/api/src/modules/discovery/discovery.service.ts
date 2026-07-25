@@ -315,4 +315,65 @@ export class DiscoveryService {
       bySource,
     };
   }
+
+  /**
+   * Discovery coverage per city — the observability the funnel was missing.
+   * For each city we know: companies discovered → career pages found → ATS
+   * detected → monitored → actually hiring → engineering roles open. Coverage %
+   * is monitored/known: it shows exactly where we're blind, not just a total.
+   */
+  async cityCoverage() {
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        city: string;
+        companies: bigint;
+        career_pages: bigint;
+        ats_detected: bigint;
+        monitored: bigint;
+        hiring: bigint;
+        active_jobs: bigint;
+        dev_jobs: bigint;
+      }>
+    >`
+      SELECT c.city AS city,
+             count(*) AS companies,
+             count(*) FILTER (WHERE c."careerPageUrl" IS NOT NULL) AS career_pages,
+             count(*) FILTER (WHERE c."atsProvider" <> 'UNKNOWN') AS ats_detected,
+             count(*) FILTER (WHERE c."discoveryStage" = 'MONITORED') AS monitored,
+             count(*) FILTER (WHERE COALESCE(j.active_jobs, 0) > 0) AS hiring,
+             COALESCE(sum(j.active_jobs), 0) AS active_jobs,
+             COALESCE(sum(j.dev_jobs), 0) AS dev_jobs
+      FROM companies c
+      LEFT JOIN (
+        SELECT "companyId",
+               count(*) FILTER (WHERE status = 'ACTIVE') AS active_jobs,
+               count(*) FILTER (
+                 WHERE status = 'ACTIVE'
+                   AND title ~* 'full.?stack|node|react|mern|back.?end|software|developer|engineer'
+               ) AS dev_jobs
+        FROM jobs GROUP BY "companyId"
+      ) j ON j."companyId" = c.id
+      WHERE c.city IS NOT NULL AND c.city <> ''
+      GROUP BY c.city
+      HAVING count(*) >= 3
+      ORDER BY companies DESC
+      LIMIT 30
+    `;
+
+    return rows.map((r) => {
+      const companies = Number(r.companies);
+      const monitored = Number(r.monitored);
+      return {
+        city: r.city,
+        companies,
+        careerPages: Number(r.career_pages),
+        atsDetected: Number(r.ats_detected),
+        monitored,
+        hiring: Number(r.hiring),
+        activeJobs: Number(r.active_jobs),
+        devJobs: Number(r.dev_jobs),
+        coverage: companies > 0 ? Math.round((monitored / companies) * 100) : 0,
+      };
+    });
+  }
 }

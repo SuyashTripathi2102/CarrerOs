@@ -35,6 +35,18 @@ interface SourceFunnel {
   targetRolePer100Companies: number;
 }
 
+interface CityCoverage {
+  city: string;
+  companies: number;
+  careerPages: number;
+  atsDetected: number;
+  monitored: number;
+  hiring: number;
+  activeJobs: number;
+  devJobs: number;
+  coverage: number;
+}
+
 function Tile({ label, value, hint }: { label: string; value: number; hint?: string }) {
   return (
     <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
@@ -59,12 +71,16 @@ function PipeStat({ label, value, tone }: { label: string; value: number; tone?:
 export default function InsightsPage() {
   const [data, setData] = useState<Insights | null>(null);
   const [sources, setSources] = useState<SourceFunnel[] | null>(null);
+  const [cities, setCities] = useState<CityCoverage[] | null>(null);
 
   useEffect(() => {
     apiGet<Insights>('/dashboard').then(setData);
     apiGet<SourceFunnel[]>('/dashboard/sources')
       .then(setSources)
       .catch(() => setSources([]));
+    apiGet<CityCoverage[]>('/discovery/coverage')
+      .then(setCities)
+      .catch(() => setCities([]));
   }, []);
 
   return (
@@ -180,6 +196,54 @@ export default function InsightsPage() {
                 <p className="mt-3 text-[11px] text-neutral-500">
                   Target-role India jobs (≤30 days) per 100 companies discovered. Adding companies to
                   a low-yield source does not add opportunities.
+                </p>
+              </section>
+            )}
+
+            {cities && cities.length > 0 && (
+              <section className="mt-8 rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+                <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-400">
+                  City coverage
+                </h2>
+                <div className="mt-3 overflow-x-auto">
+                  <table className="w-full min-w-[560px] text-sm">
+                    <thead>
+                      <tr className="text-left text-[10px] uppercase tracking-wide text-neutral-500">
+                        <th className="pb-2 font-medium">City</th>
+                        <th className="pb-2 text-right font-medium">Known</th>
+                        <th className="pb-2 text-right font-medium">Career pages</th>
+                        <th className="pb-2 text-right font-medium">Monitored</th>
+                        <th className="pb-2 text-right font-medium">Dev jobs</th>
+                        <th className="pb-2 text-right font-medium">Coverage</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cities.map((c) => (
+                        <tr key={c.city} className="border-t border-neutral-800">
+                          <td className="py-2 text-neutral-200">{c.city}</td>
+                          <td className="py-2 text-right tabular-nums text-neutral-400">{c.companies}</td>
+                          <td className="py-2 text-right tabular-nums text-neutral-400">{c.careerPages}</td>
+                          <td className="py-2 text-right tabular-nums text-neutral-400">{c.monitored}</td>
+                          <td className="py-2 text-right tabular-nums text-neutral-200">{c.devJobs}</td>
+                          <td
+                            className={`py-2 text-right tabular-nums font-medium ${
+                              c.coverage >= 50
+                                ? 'text-emerald-400'
+                                : c.coverage >= 20
+                                  ? 'text-amber-400'
+                                  : 'text-red-400'
+                            }`}
+                          >
+                            {c.coverage}%
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="mt-3 text-[11px] text-neutral-500">
+                  Coverage = monitored ÷ known. The gap between career pages found and monitored is
+                  the custom/JavaScript career-page wall — pages we found but can&apos;t yet parse.
                 </p>
               </section>
             )}
