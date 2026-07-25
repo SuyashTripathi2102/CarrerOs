@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { MatchingService } from '../matching/matching.service';
 import { nextOutreachAction } from '../referrals/referral-followup';
 import {
   competitionChips,
@@ -55,7 +56,10 @@ const DAY = 86_400_000;
  */
 @Injectable()
 export class TodayService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly matching: MatchingService,
+  ) {}
 
   async today(userId: string, name?: string | null) {
     const activeVersion = await this.prisma.resumeVersion.findFirst({
@@ -82,25 +86,18 @@ export class TodayService {
       ['OA', 'INTERVIEW', 'OFFER'].includes(a.status),
     ).length;
 
-    const matches = activeVersionId
+    // Apply candidates come from the unified Opportunity Score feed (fit +
+    // referral + freshness + watchlist + hiring) — not the sparse LLM verdicts.
+    const feed = await this.matching.browseByFit(userId, { limit: 12 });
+    const applyCandidates = feed.items.filter((i) => !i.applied && !appliedJobIds.has(i.jobId));
+
+    // Missing-skill signal for the LEARN action (the feed doesn't carry it).
+    const learnMatches = activeVersionId
       ? await this.prisma.jobMatch.findMany({
-          where: {
-            userId,
-            resumeVersionId: activeVersionId,
-            verdict: 'APPLY',
-            job: { status: 'ACTIVE' },
-          },
-          orderBy: { opportunityScore: 'desc' },
-          take: 15,
-          select: {
-            jobId: true,
-            opportunityScore: true,
-            missingSkills: true,
-            job: { select: { firstSeenAt: true, company: { select: { name: true } } } },
-          },
+          where: { userId, resumeVersionId: activeVersionId, verdict: { in: ['APPLY', 'CONSIDER'] } },
+          select: { missingSkills: true },
         })
       : [];
-    const applyCandidates = matches.filter((m) => !appliedJobIds.has(m.jobId));
 
     const contacts = await this.prisma.referralContact.findMany({
       where: { userId },
@@ -114,9 +111,6 @@ export class TodayService {
         lastFollowUpAt: true,
       },
     });
-    const contactedCompanies = new Set(
-      contacts.filter((c) => c.status === 'CONTACTED' || c.status === 'REPLIED').map((c) => c.companyName),
-    );
     const repliesInFlight = contacts.filter((c) => c.status === 'REPLIED').length;
     const outreachInFlight = contacts.filter((c) => c.status === 'CONTACTED').length;
 
@@ -156,26 +150,22 @@ export class TodayService {
       });
     }
 
-    // 2) Apply to your strongest, freshest matches you haven't applied to.
+    // 2) Apply to your highest-Opportunity-Score jobs you haven't applied to.
     let freshApplyMatches = 0;
     const top = applyCandidates[0] ?? null;
     for (const m of applyCandidates.slice(0, 2)) {
-      const ageDays = Math.floor((Date.now() - m.job.firstSeenAt.getTime()) / DAY);
-      if (ageDays <= 3) freshApplyMatches++;
-      const chips = [...competitionChips(ageDays), `fit ${Math.round(m.opportunityScore ?? 0)}`];
-      if (contactedCompanies.has(m.job.company.name)) chips.push('referral in flight');
+      if (m.ageDays <= 3) freshApplyMatches++;
+      const chips = [...competitionChips(m.ageDays), `opp ${m.opportunity}`];
+      if (m.referral !== 'NONE') chips.push('referral in flight');
+      if (m.watched) chips.push('★ watchlist');
       if (tailoredJobs.has(m.jobId)) chips.push('resume ready');
-      const why = [
-        ageDays <= 0 ? 'Posted today' : `Posted ${ageDays} day${ageDays === 1 ? '' : 's'} ago`,
-        ...(ageDays <= 3 ? ['Low competition — early applicants get screened first'] : []),
-        `Strong fit for your resume (${Math.round(m.opportunityScore ?? 0)})`,
-        ...(tailoredJobs.has(m.jobId) ? ['Your tailored resume is ready'] : []),
-        ...(contactedCompanies.has(m.job.company.name) ? ['A referral is already in flight'] : []),
-      ];
+      // The explanation is the Opportunity Score's own factors — one shared
+      // Recommendation object surfaced everywhere (Today / Browse / Telegram).
+      const why = m.factors.filter((f) => f.delta > 0).map((f) => f.label);
       actions.push({
         kind: 'APPLY',
-        title: `Apply to ${m.job.company.name}`,
-        detail: "Strong match — get in while it's fresh; early applicants get screened first.",
+        title: `Apply to ${m.company}`,
+        detail: `Opportunity ${m.opportunity} · ${m.competition.toLowerCase()} competition — get in while it's fresh.`,
         chips,
         stars: 5,
         minutes: 10,
@@ -189,7 +179,7 @@ export class TodayService {
       if (!tailoredJobs.has(top.jobId)) {
         actions.push({
           kind: 'TAILOR',
-          title: `Tailor your resume for ${top.job.company.name}`,
+          title: `Tailor your resume for ${top.company}`,
           detail: 'Match the JD keywords (ATS) before you apply — from your real content.',
           chips: ['1 click', 'ATS keywords'],
           stars: 4,
@@ -197,10 +187,10 @@ export class TodayService {
           href: `/resumes/tailor/${top.jobId}`,
         });
       }
-      if (!contactedCompanies.has(top.job.company.name)) {
+      if (top.referral === 'NONE') {
         actions.push({
           kind: 'REFERRAL',
-          title: `Find a referral at ${top.job.company.name}`,
+          title: `Find a referral at ${top.company}`,
           detail: 'A warm intro is the single biggest lever on getting seen.',
           chips: ['public sources'],
           stars: 4,
@@ -225,7 +215,7 @@ export class TodayService {
 
     // 6) Highest-ROI skill to learn — the most common gap across strong matches.
     const skillCounts = new Map<string, number>();
-    for (const m of applyCandidates) {
+    for (const m of learnMatches) {
       for (const s of m.missingSkills) {
         const k = s.trim();
         if (k) skillCounts.set(k, (skillCounts.get(k) ?? 0) + 1);
