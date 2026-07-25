@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { activeVersionSql, notActedOnSql } from '../matching/active-resume.sql';
 import { locationTags } from '../matching/location-filter';
+import { opportunityScore, type HiringTrend } from '../matching/opportunity-score';
 import { TelegramChannel } from './channels';
 
 /**
@@ -128,6 +129,7 @@ export class DailyBriefService {
     // Matches from superseded resume versions stay in the table for outcome
     // analytics; nothing user-facing may read them.
     const activeVersionId = await this.activeVersionId(userId);
+    const topOpps = activeVersionId ? await this.topOpportunities(userId, activeVersionId, 5) : [];
 
     const [newJobs24h, indiaNew24h, recommended24h, mustApply, worthALook, trending, skills] =
       await Promise.all([
@@ -224,6 +226,7 @@ export class DailyBriefService {
       newJobs24h,
       indiaNew24h: Number(indiaNew24h[0]?.n ?? 0),
       recommended24h,
+      topOpps,
       mustApply: mustApply.map((j) => ({ ...j, score: Number(j.score) })),
       worthALook: worthALook.map((j) => ({ ...j, score: Number(j.score) })),
       trending: trending.map((t) => ({ company: t.company, newJobs7d: Number(t.n) })),
@@ -237,46 +240,27 @@ export class DailyBriefService {
   }
 
   private async compose(userId: string, name: string | null): Promise<string> {
-    const {
-      newJobs24h,
-      indiaNew24h,
-      recommended24h,
-      mustApply,
-      worthALook,
-      trending,
-      missingSkills,
-      followUps,
-    } = await this.data(userId);
+    const { newJobs24h, indiaNew24h, topOpps, trending, missingSkills, followUps } =
+      await this.data(userId);
 
     const lines: string[] = [
       `☀️ <b>Daily Brief — ${new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}</b>`,
       `Good morning${name ? ` ${escapeHtml(name.split(' ')[0])}` : ''} 👋`,
       ``,
       `📥 New jobs (24h): <b>${newJobs24h}</b> · 🇮🇳 India: <b>${indiaNew24h}</b>`,
-      `🎯 Recommended for you (24h): <b>${recommended24h}</b>`,
     ];
 
-    if (mustApply.length > 0) {
-      lines.push(``, `🔥 <b>Apply today</b>`);
-      mustApply.forEach((j, i) => {
+    if (topOpps.length > 0) {
+      lines.push(``, `🎯 <b>Today's top opportunities</b> (ranked by fit + referral + freshness)`);
+      topOpps.forEach((j, i) => {
         const tags = locationTags(j.location, j.workMode);
+        const why = j.why.length ? ` · <i>${escapeHtml(j.why.join(', '))}</i>` : '';
+        const age = j.ageDays <= 0 ? 'today' : `${j.ageDays}d ago`;
         lines.push(
-          `${i + 1}. 🟢 ${j.score} · <b>${escapeHtml(j.title)}</b> — ${escapeHtml(j.company)}${tags ? ' · ' + escapeHtml(tags) : ''}`,
+          `${i + 1}. <b>${j.score}</b> · <b>${escapeHtml(j.title)}</b> — ${escapeHtml(j.company)}${tags ? ' · ' + escapeHtml(tags) : ''} · ${age}${why}`,
         );
       });
-    }
-
-    if (worthALook.length > 0) {
-      lines.push(``, `🟡 <b>Consider</b>`);
-      for (const j of worthALook) {
-        const tags = locationTags(j.location, j.workMode);
-        lines.push(
-          `• 🟡 ${j.score} · ${escapeHtml(j.title)} — ${escapeHtml(j.company)}${tags ? ' · ' + escapeHtml(tags) : ''}`,
-        );
-      }
-    }
-
-    if (mustApply.length === 0 && worthALook.length === 0) {
+    } else {
       lines.push(``, `No qualified opportunities today — the bar stays high on purpose.`);
     }
 
@@ -302,6 +286,87 @@ export class DailyBriefService {
     }
 
     return lines.join('\n');
+  }
+
+  /**
+   * The morning "top opportunities" — ranked by the SAME Opportunity Score as
+   * Browse (fit + freshness + referral + watchlist + hiring), not the sparse LLM
+   * verdicts. This is why the brief now leads with real, ranked, explained picks
+   * instead of "0 recommended". Pulls a similarity pool, then re-ranks in JS.
+   */
+  private async topOpportunities(userId: string, versionId: string, limit = 5) {
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        jobId: string;
+        title: string;
+        company: string;
+        location: string | null;
+        workMode: string | null;
+        url: string;
+        firstSeenAt: Date;
+        similarity: number;
+        applied: boolean;
+        ref_contacted: boolean;
+        ref_found: boolean;
+        watched: boolean;
+        hiring_trend: string | null;
+      }>
+    >`
+      SELECT j.id AS "jobId", j.title, c.name AS company, j.location,
+             j."workMode"::text AS "workMode", j.url, j."firstSeenAt",
+             (1 - (je.vector <=> re.vector))::float8 AS similarity,
+             (a.id IS NOT NULL) AS applied,
+             COALESCE(ref.contacted, false) AS ref_contacted,
+             COALESCE(ref.found, false) AS ref_found,
+             (cw.id IS NOT NULL) AS watched,
+             ci."hiringTrend" AS hiring_trend
+      FROM job_embeddings je
+      JOIN jobs j ON j.id = je."jobId" AND j.status = 'ACTIVE'
+      JOIN companies c ON c.id = j."companyId"
+      CROSS JOIN (SELECT vector FROM resume_embeddings WHERE "resumeVersionId" = ${versionId}) re
+      LEFT JOIN applications a ON a."jobId" = j.id AND a."userId" = ${userId}
+      LEFT JOIN LATERAL (
+        SELECT bool_or(rc.status IN ('CONTACTED', 'REPLIED')) AS contacted, count(*) > 0 AS found
+        FROM referral_contacts rc WHERE rc."userId" = ${userId} AND rc."companyName" = c.name
+      ) ref ON true
+      LEFT JOIN company_watches cw ON cw."companyId" = c.id AND cw."userId" = ${userId}
+      LEFT JOIN company_intelligence ci ON ci."companyId" = c.id
+      WHERE (j.country = 'IN' OR j.location ~* 'india|bengaluru|bangalore|mumbai|pune|delhi|hyderabad|chennai|noida|gurgaon|gurugram|indore|ahmedabad|kolkata')
+        AND COALESCE(j."postedAt", j."firstSeenAt") >= now() - interval '30 days'
+      ORDER BY je.vector <=> re.vector
+      LIMIT 60
+    `;
+
+    return rows
+      .filter((r) => !r.applied)
+      .map((r) => {
+        const ageDays = Math.floor((Date.now() - new Date(r.firstSeenAt).getTime()) / 86_400_000);
+        const opp = opportunityScore({
+          resumeFit: r.similarity * 100,
+          ageDays,
+          referral: r.ref_contacted ? 'CONTACTED' : r.ref_found ? 'FOUND' : 'NONE',
+          watched: r.watched,
+          hiringTrend: (r.hiring_trend as HiringTrend) ?? null,
+          applied: false,
+        });
+        const why = opp.factors
+          .filter((f) => f.delta > 0 && !/resume fit/i.test(f.label))
+          .slice(0, 2)
+          .map((f) => f.label.toLowerCase());
+        return {
+          jobId: r.jobId,
+          title: r.title,
+          company: r.company,
+          location: r.location,
+          workMode: r.workMode,
+          url: r.url,
+          score: opp.score,
+          ageDays,
+          why,
+        };
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
   }
 
   /** Newest activated version of the primary resume; '' when none is active. */
