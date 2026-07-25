@@ -155,6 +155,8 @@ services:
       # developer.adzuna.com). Without it the daily Adzuna sweep just no-ops.
       ADZUNA_APP_ID: ${ADZUNA_APP_ID:-}
       ADZUNA_APP_KEY: ${ADZUNA_APP_KEY:-}
+      # Jooble aggregator API — another India source (free key, ~500 req/day).
+      JOOBLE_API_KEY: ${JOOBLE_API_KEY:-}
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
       # 1 vCPU: modest parallelism beats thrash. Raise on a bigger box.
       CRAWL_CONCURRENCY: 2

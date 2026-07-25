@@ -5,15 +5,17 @@ import { ApiClient } from '../api-client';
 import { fetchRemoteOkJobs } from '../adapters/remoteok';
 import { fetchHnWhoIsHiring } from '../adapters/hn-whoishiring';
 import { fetchAdzunaJobs } from '../adapters/adzuna';
+import { fetchJoobleJobs } from '../adapters/jooble';
 
 export interface CrawlBoardJobData {
-  board: 'remoteok' | 'hn-hiring' | 'adzuna';
+  board: 'remoteok' | 'hn-hiring' | 'adzuna' | 'jooble';
 }
 
 const BOARDS = {
   remoteok: fetchRemoteOkJobs,
   'hn-hiring': fetchHnWhoIsHiring,
   adzuna: fetchAdzunaJobs,
+  jooble: fetchJoobleJobs,
 } as const;
 
 export function startCrawlBoardWorker(api: ApiClient): Worker<CrawlBoardJobData> {
@@ -51,6 +53,12 @@ export async function ensureBoardSchedules(): Promise<void> {
     { pattern: '0 2 * * *' }, // 02:00 UTC = 07:30 IST
     { name: 'scheduled', data: { board: 'adzuna' }, opts: { attempts: 2, removeOnComplete: true, removeOnFail: true } },
   );
+  // Jooble India dev jobs — daily, offset from Adzuna (500 req/day budget).
+  await queue.upsertJobScheduler(
+    'jooble-daily',
+    { pattern: '30 2 * * *' }, // 02:30 UTC = 08:00 IST
+    { name: 'scheduled', data: { board: 'jooble' }, opts: { attempts: 2, removeOnComplete: true, removeOnFail: true } },
+  );
   await queue.close();
-  console.log('[scheduler] hn-whoishiring: weekly (Tue) · adzuna: daily (07:30 IST)');
+  console.log('[scheduler] hn: weekly · adzuna: daily 07:30 IST · jooble: daily 08:00 IST');
 }
