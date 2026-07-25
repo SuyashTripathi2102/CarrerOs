@@ -197,6 +197,9 @@ export default function MissionControl() {
           <a href="/today" className="text-sm font-medium text-sky-300 hover:text-sky-200">
             Today
           </a>
+          <a href="/browse" className="text-sm text-neutral-400 hover:text-neutral-200">
+            Browse
+          </a>
           <a href="/resumes" className="text-sm text-neutral-400 hover:text-neutral-200">
             Resume
           </a>

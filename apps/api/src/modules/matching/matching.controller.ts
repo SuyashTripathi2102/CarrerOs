@@ -86,6 +86,15 @@ export class MatchingController {
     return this.matching.list(user.id, minScore);
   }
 
+  /** Browse jobs ranked by resume fit — instant, no LLM scoring wait. */
+  @Get('browse')
+  browse(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('limit', new DefaultValuePipe(60), ParseIntPipe) limit: number,
+  ) {
+    return this.matching.browseByFit(user.id, { limit });
+  }
+
   /** Recompute opportunity scores (no LLM) + run the notification gate. */
   @Post('rescore')
   rescore(@CurrentUser() user: AuthenticatedUser) {

@@ -804,6 +804,73 @@ export class MatchingService {
   }
 
   /**
+   * Browse jobs ranked by resume-embedding similarity — NO LLM, instant. This
+   * exists because verdict scoring is throttled (free-tier LLM): a job can be
+   * in the index, embedded, and relevant, yet unscored for days. Cosine
+   * similarity is already computed for every job and the resume, so we can
+   * surface the whole relevant feed immediately. Verdicts (when present) badge
+   * the row; their absence never hides it.
+   */
+  async browseByFit(userId: string, opts: { limit?: number; indiaOnly?: boolean } = {}) {
+    const versionId = await this.activeResumeVersionId(userId);
+    if (!versionId) return { items: [], resumeReady: false };
+
+    const limit = Math.min(120, Math.max(1, opts.limit ?? 60));
+    const indiaOnly = opts.indiaOnly ?? true;
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        title: string;
+        company: string;
+        location: string | null;
+        workMode: string | null;
+        url: string;
+        country: string | null;
+        postedAt: Date | null;
+        firstSeenAt: Date;
+        similarity: number;
+        applied: boolean;
+        verdict: string | null;
+      }>
+    >`
+      SELECT j.id, j.title, j.location, j."workMode", j.url, j.country,
+             j."postedAt", j."firstSeenAt", c.name AS company,
+             (1 - (je.vector <=> re.vector))::float8 AS similarity,
+             (a.id IS NOT NULL) AS applied,
+             m.verdict
+      FROM job_embeddings je
+      JOIN jobs j ON j.id = je."jobId" AND j.status = 'ACTIVE'
+      JOIN companies c ON c.id = j."companyId"
+      CROSS JOIN (SELECT vector FROM resume_embeddings WHERE "resumeVersionId" = ${versionId}) re
+      LEFT JOIN applications a ON a."jobId" = j.id AND a."userId" = ${userId}
+      LEFT JOIN job_matches m
+        ON m."jobId" = j.id AND m."userId" = ${userId} AND m."resumeVersionId" = ${versionId}
+      WHERE (${indiaOnly}::boolean = false OR j.country = 'IN' OR j."workMode" = 'REMOTE')
+      ORDER BY je.vector <=> re.vector
+      LIMIT ${limit}
+    `;
+
+    return {
+      resumeReady: true,
+      items: rows.map((r) => ({
+        jobId: r.id,
+        title: r.title,
+        company: r.company,
+        location: r.location,
+        workMode: r.workMode,
+        url: r.url,
+        country: r.country,
+        postedAt: r.postedAt,
+        ageDays: Math.floor((Date.now() - new Date(r.firstSeenAt).getTime()) / 86_400_000),
+        fit: Math.round(r.similarity * 100),
+        applied: r.applied,
+        verdict: r.verdict,
+      })),
+    };
+  }
+
+  /**
    * Everything the job detail page shows, for THIS user: the stored canonical
    * verdict and its four separated dimensions, the objective classification,
    * and the specialization breakdown (strong / transferable / missing) computed
