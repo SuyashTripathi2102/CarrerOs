@@ -73,6 +73,64 @@ interface SourceTrust {
   jobsFresh: number;
 }
 
+interface Pipeline {
+  window: string;
+  runs: number;
+  funnel: {
+    queued: number;
+    fetched: number;
+    fetchFailed: number;
+    parsed: number;
+    accepted: number;
+    ingested: number;
+    duplicates: number;
+    snapshotted: number;
+  };
+  quality: {
+    avgConfidence: number;
+    jobsPerPage: number;
+    avgFetchMs: number;
+    avgParseMs: number;
+    topRejections: { reason: string; count: number }[];
+  };
+  stages: { activeJobs: number; embedded: number; ranked: number };
+}
+
+/** One stage in the horizontal funnel, with the drop-off from the previous stage. */
+function FunnelStep({
+  label,
+  value,
+  prev,
+  tone,
+}: {
+  label: string;
+  value: number;
+  prev?: number;
+  tone?: 'good' | 'mid' | 'bad';
+}) {
+  const dropPct =
+    prev && prev > 0 && value <= prev ? Math.round(((prev - value) / prev) * 100) : null;
+  const color =
+    tone === 'good'
+      ? 'text-emerald-400'
+      : tone === 'mid'
+        ? 'text-amber-400'
+        : tone === 'bad'
+          ? 'text-red-400'
+          : 'text-neutral-100';
+  return (
+    <div className="flex min-w-[84px] flex-1 flex-col items-center">
+      <div className={`text-2xl font-semibold tabular-nums ${color}`}>{value.toLocaleString()}</div>
+      <div className="mt-1 text-center text-[10px] uppercase tracking-wide text-neutral-500">
+        {label}
+      </div>
+      {dropPct != null && dropPct > 0 && (
+        <div className="text-[10px] text-neutral-600">−{dropPct}%</div>
+      )}
+    </div>
+  );
+}
+
 function Tile({ label, value, hint }: { label: string; value: number; hint?: string }) {
   return (
     <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
@@ -101,6 +159,7 @@ export default function InsightsPage() {
   const [extraction, setExtraction] = useState<Extraction | null>(null);
   const [replay, setReplay] = useState<Replay | null>(null);
   const [trust, setTrust] = useState<SourceTrust[] | null>(null);
+  const [pipeline, setPipeline] = useState<Pipeline | null>(null);
 
   useEffect(() => {
     apiGet<Insights>('/dashboard').then(setData);
@@ -119,6 +178,9 @@ export default function InsightsPage() {
     apiGet<SourceTrust[]>('/source-trust')
       .then(setTrust)
       .catch(() => setTrust([]));
+    apiGet<Pipeline>('/discovery/pipeline')
+      .then(setPipeline)
+      .catch(() => setPipeline(null));
   }, []);
 
   return (
@@ -189,6 +251,75 @@ export default function InsightsPage() {
                 </p>
               )}
             </section>
+
+            {pipeline && pipeline.runs > 0 && (
+              <section className="mt-8 rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+                <div className="flex items-baseline justify-between">
+                  <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-400">
+                    Extraction pipeline
+                  </h2>
+                  <span className="text-[11px] text-neutral-500">
+                    {pipeline.runs} runs · last {pipeline.window}
+                  </span>
+                </div>
+
+                <div className="mt-4 flex items-stretch gap-1 overflow-x-auto">
+                  <FunnelStep label="Queued" value={pipeline.funnel.queued} />
+                  <FunnelStep
+                    label="Fetched"
+                    value={pipeline.funnel.fetched}
+                    prev={pipeline.funnel.queued}
+                  />
+                  <FunnelStep
+                    label="Parsed"
+                    value={pipeline.funnel.parsed}
+                    prev={pipeline.funnel.fetched}
+                  />
+                  <FunnelStep
+                    label="Accepted"
+                    value={pipeline.funnel.accepted}
+                    prev={pipeline.funnel.parsed}
+                    tone="good"
+                  />
+                  <FunnelStep
+                    label="Ingested"
+                    value={pipeline.funnel.ingested}
+                    prev={pipeline.funnel.accepted}
+                    tone="good"
+                  />
+                  <FunnelStep label="Embedded" value={pipeline.stages.embedded} tone="mid" />
+                  <FunnelStep label="Ranked" value={pipeline.stages.ranked} tone="mid" />
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-2 text-sm sm:grid-cols-5">
+                  <PipeStat label="Avg conf" value={pipeline.quality.avgConfidence} tone="good" />
+                  <PipeStat label="Jobs/page" value={pipeline.quality.jobsPerPage} />
+                  <PipeStat label="Dup collapsed" value={pipeline.funnel.duplicates} tone="mid" />
+                  <PipeStat label="Fetch ms" value={pipeline.quality.avgFetchMs} />
+                  <PipeStat label="Parse ms" value={pipeline.quality.avgParseMs} />
+                </div>
+
+                {pipeline.quality.topRejections.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <span className="text-[11px] uppercase tracking-wide text-neutral-500">
+                      Top rejections:
+                    </span>
+                    {pipeline.quality.topRejections.map((r) => (
+                      <span
+                        key={r.reason}
+                        className="rounded-full bg-neutral-950/70 px-2 py-0.5 text-[11px] text-neutral-400"
+                      >
+                        {r.reason} · {r.count.toLocaleString()}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <p className="mt-3 text-[11px] text-neutral-500">
+                  Queued → fetched → parsed (page yielded ≥1 job) → accepted → ingested, then the
+                  global embed → rank stages. A big drop between two stages is exactly where to look.
+                </p>
+              </section>
+            )}
 
             {sources && sources.length > 0 && (
               <section className="mt-8 rounded-xl border border-neutral-800 bg-neutral-900 p-4">

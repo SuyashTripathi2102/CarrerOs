@@ -422,6 +422,129 @@ export class DiscoveryService {
     };
   }
 
+  /** Persist one extraction/replay run's telemetry — the pipeline dashboard's source. */
+  async recordExtractionRun(m: {
+    kind: string;
+    extractorVersion: string;
+    companiesQueued: number;
+    fetched: number;
+    fetchFailed: number;
+    pagesWithJobs: number;
+    jobsExtracted: number;
+    jobsIngested: number;
+    duplicates: number;
+    snapshotted: number;
+    avgConfidence: number;
+    avgFetchMs: number;
+    avgParseMs: number;
+    totalMs: number;
+    rejections: Record<string, number>;
+  }) {
+    await this.prisma.extractionRun.create({
+      data: { ...m, rejections: m.rejections as object },
+    });
+    return { ok: true };
+  }
+
+  /**
+   * The whole discovery pipeline as one picture: the extraction funnel
+   * (queued → fetched → parsed → accepted → ingested) and quality (avg
+   * confidence, jobs/page, duplicates, latency, top rejection reasons) over the
+   * last 7 days, plus the global embed → rank stages. This is where a bottleneck
+   * becomes obvious instead of hypothetical.
+   */
+  async pipelineMetrics() {
+    const [agg] = await this.prisma.$queryRaw<
+      [
+        {
+          runs: bigint;
+          queued: bigint;
+          fetched: bigint;
+          fetch_failed: bigint;
+          with_jobs: bigint;
+          accepted: bigint;
+          ingested: bigint;
+          duplicates: bigint;
+          snapshotted: bigint;
+          avg_conf: number | null;
+          avg_fetch: number | null;
+          avg_parse: number | null;
+        },
+      ]
+    >`
+      SELECT count(*) AS runs,
+             COALESCE(sum("companiesQueued"), 0) AS queued,
+             COALESCE(sum(fetched), 0) AS fetched,
+             COALESCE(sum("fetchFailed"), 0) AS fetch_failed,
+             COALESCE(sum("pagesWithJobs"), 0) AS with_jobs,
+             COALESCE(sum("jobsExtracted"), 0) AS accepted,
+             COALESCE(sum("jobsIngested"), 0) AS ingested,
+             COALESCE(sum(duplicates), 0) AS duplicates,
+             COALESCE(sum(snapshotted), 0) AS snapshotted,
+             round(avg(NULLIF("avgConfidence", 0))) AS avg_conf,
+             round(avg(NULLIF("avgFetchMs", 0))) AS avg_fetch,
+             round(avg(NULLIF("avgParseMs", 0))) AS avg_parse
+      FROM extraction_runs
+      WHERE "createdAt" > now() - interval '7 days'
+    `;
+
+    // Merge rejection maps across recent runs in JS — small, and JSONB summing
+    // in SQL is not worth the ceremony at this volume.
+    const recent = await this.prisma.extractionRun.findMany({
+      where: { createdAt: { gt: new Date(Date.now() - 7 * 86_400_000) } },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+      select: { rejections: true },
+    });
+    const rejMap: Record<string, number> = {};
+    for (const r of recent) {
+      const rej = (r.rejections ?? {}) as Record<string, number>;
+      for (const [k, v] of Object.entries(rej)) rejMap[k] = (rejMap[k] ?? 0) + Number(v);
+    }
+    const topRejections = Object.entries(rejMap)
+      .map(([reason, count]) => ({ reason, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 6);
+
+    const [stages] = await this.prisma.$queryRaw<
+      [{ active_jobs: bigint; embedded: bigint; ranked: bigint }]
+    >`
+      SELECT
+        (SELECT count(*) FROM jobs WHERE status = 'ACTIVE') AS active_jobs,
+        (SELECT count(*) FROM job_embeddings je JOIN jobs j ON j.id = je."jobId" AND j.status = 'ACTIVE') AS embedded,
+        (SELECT count(DISTINCT "jobId") FROM job_matches) AS ranked
+    `;
+
+    const withJobs = Number(agg.with_jobs);
+    const accepted = Number(agg.accepted);
+    return {
+      window: '7d',
+      runs: Number(agg.runs),
+      funnel: {
+        queued: Number(agg.queued),
+        fetched: Number(agg.fetched),
+        fetchFailed: Number(agg.fetch_failed),
+        parsed: withJobs, // pages that produced >=1 accepted job
+        accepted,
+        ingested: Number(agg.ingested),
+        duplicates: Number(agg.duplicates),
+        snapshotted: Number(agg.snapshotted),
+      },
+      quality: {
+        avgConfidence: agg.avg_conf == null ? 0 : Number(agg.avg_conf),
+        jobsPerPage: withJobs > 0 ? Math.round((accepted / withJobs) * 10) / 10 : 0,
+        avgFetchMs: agg.avg_fetch == null ? 0 : Number(agg.avg_fetch),
+        avgParseMs: agg.avg_parse == null ? 0 : Number(agg.avg_parse),
+        topRejections,
+      },
+      stages: {
+        activeJobs: Number(stages.active_jobs),
+        embedded: Number(stages.embedded),
+        ranked: Number(stages.ranked),
+      },
+    };
+  }
+
   /** Operational health of the deterministic career-page extractor. */
   async extractionHealth() {
     const [runs] = await this.prisma.$queryRaw<

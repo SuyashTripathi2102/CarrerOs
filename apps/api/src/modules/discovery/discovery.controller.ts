@@ -31,6 +31,24 @@ const SnapshotBodySchema = z.object({
   candidateCount: z.number().int().min(0).default(0),
 });
 
+const ExtractionRunSchema = z.object({
+  kind: z.enum(['live', 'replay']),
+  extractorVersion: z.string().min(1),
+  companiesQueued: z.number().int().min(0).default(0),
+  fetched: z.number().int().min(0).default(0),
+  fetchFailed: z.number().int().min(0).default(0),
+  pagesWithJobs: z.number().int().min(0).default(0),
+  jobsExtracted: z.number().int().min(0).default(0),
+  jobsIngested: z.number().int().min(0).default(0),
+  duplicates: z.number().int().min(0).default(0),
+  snapshotted: z.number().int().min(0).default(0),
+  avgConfidence: z.number().int().min(0).max(100).default(0),
+  avgFetchMs: z.number().int().min(0).default(0),
+  avgParseMs: z.number().int().min(0).default(0),
+  totalMs: z.number().int().min(0).default(0),
+  rejections: z.record(z.string(), z.number()).default({}),
+});
+
 /** Internal (worker-facing) endpoints of the Company Discovery Engine. */
 @Public()
 @UseGuards(InternalTokenGuard)
@@ -74,6 +92,14 @@ export class DiscoveryInternalController {
     return this.discovery.snapshotsReplayDue(version, limit);
   }
 
+  /** Record one extraction/replay run's telemetry. */
+  @Post('extraction-run')
+  extractionRun(@Body() body: unknown) {
+    const parsed = ExtractionRunSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
+    return this.discovery.recordExtractionRun(parsed.data);
+  }
+
   @Post(':companyId/result')
   result(@Param('companyId') companyId: string, @Body() body: unknown) {
     const parsed = DiscoveryResultSchema.safeParse(body);
@@ -108,5 +134,11 @@ export class DiscoveryController {
   @Get('replay')
   replay(@Query('version') version?: string) {
     return this.discovery.replayStatus(version || 'deterministic-v1');
+  }
+
+  /** The whole pipeline as one funnel + quality panel — the bottleneck finder. */
+  @Get('pipeline')
+  pipeline() {
+    return this.discovery.pipelineMetrics();
   }
 }

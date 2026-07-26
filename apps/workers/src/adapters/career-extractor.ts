@@ -96,16 +96,21 @@ export interface Extraction {
   jobs: ExtractedJob[]; // clean jobs at/above threshold
   confidence: number; // page-level 0–100
   reasons: string[]; // explainable page verdict
+  rejections: Record<string, number>; // why candidate titles were dropped — quality signal
   boardJobs: BoardJob[];
 }
 
-/** Stage 3+4 — features + classification into an explainable score. */
-function classify(c: Candidate, baseUrl: string): ExtractedJob | null {
+type Classified = { job: ExtractedJob } | { reject: string };
+
+/** Stage 3+4 — features + classification into an explainable score. A rejection
+ *  carries a reason so the pipeline can report WHY recall is what it is. */
+function classify(c: Candidate, baseUrl: string): Classified {
   const title = c.title;
   const words = title.split(/\s+/);
-  if (words.length < 2 || words.length > 9 || title.length < 4 || title.length > 90) return null;
-  if (NEGATIVE.test(title)) return null; // reject certs/services/nav outright
-  if (!ROLE.test(title)) return null; // a job title names a role
+  if (words.length < 2 || words.length > 9 || title.length < 4 || title.length > 90)
+    return { reject: 'bad-length' };
+  if (NEGATIVE.test(title)) return { reject: 'negative-signal' }; // certs/services/nav
+  if (!ROLE.test(title)) return { reject: 'no-role' }; // a job title names a role
 
   const evidence: string[] = ['title'];
   let score = 45; // a role-shaped, non-negative title
@@ -149,9 +154,9 @@ function classify(c: Candidate, baseUrl: string): ExtractedJob | null {
   }
 
   // A bare role title with NO supporting signal is probably prose, not a posting.
-  if (evidence.length < 2) return null;
+  if (evidence.length < 2) return { reject: 'insufficient-evidence' };
 
-  return { title, url, location: loc, score: Math.min(100, score), evidence };
+  return { job: { title, url, location: loc, score: Math.min(100, score), evidence } };
 }
 
 const externalIdFor = (url: string | null, title: string): string => {
@@ -174,11 +179,19 @@ export function extractCareerPage(
   const pre = preprocess(html);
   const seen = new Set<string>();
   const jobs: ExtractedJob[] = [];
+  const rejections: Record<string, number> = {};
   for (const c of candidates(pre)) {
-    const job = classify(c, baseUrl);
-    if (!job) continue;
+    const result = classify(c, baseUrl);
+    if ('reject' in result) {
+      rejections[result.reject] = (rejections[result.reject] ?? 0) + 1;
+      continue;
+    }
+    const job = result.job;
     const key = job.title.toLowerCase();
-    if (seen.has(key)) continue;
+    if (seen.has(key)) {
+      rejections['duplicate-title'] = (rejections['duplicate-title'] ?? 0) + 1;
+      continue;
+    }
     seen.add(key);
     jobs.push(job);
   }
@@ -206,5 +219,5 @@ export function extractCareerPage(
     },
   }));
 
-  return { jobs, confidence, reasons, boardJobs };
+  return { jobs, confidence, reasons, rejections, boardJobs };
 }

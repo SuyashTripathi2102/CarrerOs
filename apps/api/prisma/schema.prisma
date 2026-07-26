@@ -777,6 +777,33 @@ model ExtractionSnapshot {
   @@map("extraction_snapshots")
 }
 
+// One row per extraction/replay run — the pipeline's per-run telemetry. Powers
+// the Discovery Health funnel (queued → fetched → parsed → accepted → ingested)
+// and the quality panel (avg confidence, jobs/page, duplicates, reject reasons,
+// fetch/parse latency). Bounded history — old rows can be pruned.
+model ExtractionRun {
+  id               String   @id @default(cuid())
+  kind             String // "live" | "replay"
+  extractorVersion String
+  companiesQueued  Int      @default(0)
+  fetched          Int      @default(0)
+  fetchFailed      Int      @default(0)
+  pagesWithJobs    Int      @default(0)
+  jobsExtracted    Int      @default(0) // accepted candidates (pre-ingest)
+  jobsIngested     Int      @default(0) // created at ingest
+  duplicates       Int      @default(0) // cross-source fingerprint collisions collapsed
+  snapshotted      Int      @default(0)
+  avgConfidence    Int      @default(0)
+  avgFetchMs       Int      @default(0)
+  avgParseMs       Int      @default(0)
+  totalMs          Int      @default(0)
+  rejections       Json? // { reason: count } aggregated across pages
+  createdAt        DateTime @default(now())
+
+  @@index([kind, createdAt])
+  @@map("extraction_runs")
+}
+
 // Per-source trust: a curated baseline nudged by observed listing quality. Feeds
 // a small, bounded adjustment into the Opportunity Score, and the source-yield
 // dashboard. Recomputed daily from live job data. See source-trust.service.ts.

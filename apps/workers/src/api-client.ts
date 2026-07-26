@@ -65,6 +65,10 @@ export class ApiClient {
     );
   }
 
+  recordExtractionRun(metrics: ExtractionRunMetrics): Promise<{ ok: boolean }> {
+    return this.request('POST', '/internal/discovery/extraction-run', metrics);
+  }
+
   applyDiscoveryResult(companyId: string, result: DiscoveryResult): Promise<{ stage: string }> {
     return this.request('POST', `/internal/discovery/${companyId}/result`, result);
   }
@@ -141,6 +145,24 @@ export interface ReplaySnapshot {
   html: string;
 }
 
+export interface ExtractionRunMetrics {
+  kind: 'live' | 'replay';
+  extractorVersion: string;
+  companiesQueued: number;
+  fetched: number;
+  fetchFailed: number;
+  pagesWithJobs: number;
+  jobsExtracted: number;
+  jobsIngested: number;
+  duplicates: number;
+  snapshotted: number;
+  avgConfidence: number;
+  avgFetchMs: number;
+  avgParseMs: number;
+  totalMs: number;
+  rejections: Record<string, number>;
+}
+
 export interface CompanyDue {
   id: string;
   name: string;
@@ -154,4 +176,5 @@ export interface SyncResult {
   created: number;
   updated: number;
   removed: number;
+  duplicates?: number;
 }

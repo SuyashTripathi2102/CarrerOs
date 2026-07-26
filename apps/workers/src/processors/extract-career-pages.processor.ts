@@ -85,20 +85,36 @@ export function startCareerExtractWorker(api: ApiClient): Worker {
       let pagesWithJobs = 0;
       const all: BoardJob[] = [];
 
+      // Telemetry accumulators — the pipeline dashboard's raw material.
+      let fetchMsTotal = 0;
+      let parseMsTotal = 0;
+      let confidenceTotal = 0;
+      let confidencePages = 0;
+      const rejections: Record<string, number> = {};
+
       let snapshotted = 0;
       for (const company of due) {
         processed++;
+        const t0 = Date.now();
         const html = await fetchHtmlV4(company.careerPageUrl);
+        fetchMsTotal += Date.now() - t0;
         if (!html) {
           fetchFailed++;
           continue;
         }
-        const { boardJobs, jobs, confidence } = extractCareerPage(
+        const t1 = Date.now();
+        const { boardJobs, jobs, confidence, rejections: rej } = extractCareerPage(
           html,
           company.careerPageUrl,
           company.name,
           CONFIDENCE_THRESHOLD,
         );
+        parseMsTotal += Date.now() - t1;
+        for (const [k, v] of Object.entries(rej)) rejections[k] = (rejections[k] ?? 0) + v;
+        if (jobs.length > 0) {
+          confidenceTotal += confidence;
+          confidencePages++;
+        }
         const clean = boardJobs.filter(valid);
         if (clean.length > 0) {
           pagesWithJobs++;
@@ -127,14 +143,42 @@ export function startCareerExtractWorker(api: ApiClient): Worker {
         await new Promise((r) => setTimeout(r, 400)); // pace
       }
 
-      let ingested = { found: 0, created: 0 };
+      let ingested: { found: number; created: number; duplicates?: number } = {
+        found: 0,
+        created: 0,
+      };
       if (all.length > 0) {
         ingested = await api.ingestBoardJobs(`career-page-${EXTRACTOR_VERSION}`, all);
       }
+      const totalMs = Date.now() - started;
       console.log(
         `[career-extract] ${processed} pages · ${fetchFailed} fetch-failed · ${pagesWithJobs} with jobs · ` +
-          `${snapshotted} snapshotted · ${all.length} extracted · ${ingested.created} new · ${Date.now() - started}ms`,
+          `${snapshotted} snapshotted · ${all.length} extracted · ${ingested.created} new · ${totalMs}ms`,
       );
+
+      // Persist run telemetry — a failure here must not fail the extraction run.
+      try {
+        await api.recordExtractionRun({
+          kind: 'live',
+          extractorVersion: EXTRACTOR_VERSION,
+          companiesQueued: due.length,
+          fetched: processed - fetchFailed,
+          fetchFailed,
+          pagesWithJobs,
+          jobsExtracted: all.length,
+          jobsIngested: ingested.created,
+          duplicates: ingested.duplicates ?? 0,
+          snapshotted,
+          avgConfidence: confidencePages ? Math.round(confidenceTotal / confidencePages) : 0,
+          avgFetchMs: processed ? Math.round(fetchMsTotal / processed) : 0,
+          avgParseMs: confidencePages ? Math.round(parseMsTotal / Math.max(1, processed - fetchFailed)) : 0,
+          totalMs,
+          rejections,
+        });
+      } catch (err) {
+        console.warn(`[career-extract] metrics record failed: ${err}`);
+      }
+
       return {
         processed,
         fetchFailed,
@@ -175,18 +219,33 @@ export function startReplayExtractWorker(api: ApiClient): Worker {
       const started = Date.now();
       const due = await api.getReplayDue(EXTRACTOR_VERSION, REPLAY_BATCH);
       let reprocessed = 0;
+      let pagesWithJobs = 0;
+      let parseMsTotal = 0;
+      let confidenceTotal = 0;
+      let confidencePages = 0;
+      const rejections: Record<string, number> = {};
       const all: BoardJob[] = [];
 
       for (const snap of due) {
         reprocessed++;
-        const { boardJobs, jobs, confidence } = extractCareerPage(
+        const t0 = Date.now();
+        const { boardJobs, jobs, confidence, rejections: rej } = extractCareerPage(
           snap.html,
           snap.url,
           snap.name,
           CONFIDENCE_THRESHOLD,
         );
+        parseMsTotal += Date.now() - t0;
+        for (const [k, v] of Object.entries(rej)) rejections[k] = (rejections[k] ?? 0) + v;
+        if (jobs.length > 0) {
+          confidenceTotal += confidence;
+          confidencePages++;
+        }
         const clean = boardJobs.filter(valid);
-        if (clean.length > 0) all.push(...clean);
+        if (clean.length > 0) {
+          pagesWithJobs++;
+          all.push(...clean);
+        }
         // Re-store under the current version so it exits the replay backlog. The
         // html is unchanged (from the snapshot itself) so no re-crawl happens.
         try {
@@ -204,14 +263,43 @@ export function startReplayExtractWorker(api: ApiClient): Worker {
         }
       }
 
-      let ingested = { found: 0, created: 0 };
+      let ingested: { found: number; created: number; duplicates?: number } = {
+        found: 0,
+        created: 0,
+      };
       if (all.length > 0) {
         ingested = await api.ingestBoardJobs(`career-replay-${EXTRACTOR_VERSION}`, all);
       }
+      const totalMs = Date.now() - started;
       console.log(
         `[replay-extract] ${reprocessed} snapshots · ${all.length} extracted · ` +
-          `${ingested.created} new · ${Date.now() - started}ms`,
+          `${ingested.created} new · ${totalMs}ms`,
       );
+
+      if (reprocessed > 0) {
+        try {
+          await api.recordExtractionRun({
+            kind: 'replay',
+            extractorVersion: EXTRACTOR_VERSION,
+            companiesQueued: due.length,
+            fetched: reprocessed, // from storage, not network — but the "processed" count
+            fetchFailed: 0,
+            pagesWithJobs,
+            jobsExtracted: all.length,
+            jobsIngested: ingested.created,
+            duplicates: ingested.duplicates ?? 0,
+            snapshotted: 0,
+            avgConfidence: confidencePages ? Math.round(confidenceTotal / confidencePages) : 0,
+            avgFetchMs: 0, // replay does no network fetch
+            avgParseMs: reprocessed ? Math.round(parseMsTotal / reprocessed) : 0,
+            totalMs,
+            rejections,
+          });
+        } catch (err) {
+          console.warn(`[replay-extract] metrics record failed: ${err}`);
+        }
+      }
+
       return { reprocessed, extracted: all.length, ...ingested };
     },
     { connection: createRedisConnection(), concurrency: 1 },
