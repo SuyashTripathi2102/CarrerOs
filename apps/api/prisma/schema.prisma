@@ -752,10 +752,20 @@ model CompanyIntelligence {
   hiringVelocity  Json? // { months: [{month, newJobs}], changePct }
   hiringTrend     HiringTrend @default(INSUFFICIENT_DATA)
 
+  // Phase 5 — deterministic, corpus-wide signals (SQL only, refreshed daily for
+  // EVERY monitored company, unlike the LLM fields above which are throttled).
+  growthScore       Int? // 0-100 hiring momentum (scale + frequency + trend + recency)
+  newRoles30d       Int       @default(0) // roles opened in the last 30 days
+  referralContacts  Int       @default(0) // referral density — contacts we hold here
+  departmentsHiring Json? // { backend, frontend, fullstack, data, devops, design }
+  lastJobAt         DateTime? // most recent role first seen — pipeline warmth
+  signalsAt         DateTime? // when the deterministic signals were last computed
+
   derivedAt DateTime @default(now())
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
+  @@index([growthScore])
   @@map("company_intelligence")
 }
 

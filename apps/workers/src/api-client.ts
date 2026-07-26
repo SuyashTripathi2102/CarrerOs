@@ -36,6 +36,10 @@ export class ApiClient {
     return this.request('POST', '/internal/source-trust/recompute');
   }
 
+  deriveCompanySignals(): Promise<{ companies: number }> {
+    return this.request('POST', '/internal/intelligence/derive-signals');
+  }
+
   syncCompanyJobs(companyId: string, source: string, jobs: NormalizedJob[]): Promise<SyncResult> {
     return this.request('POST', `/internal/companies/${companyId}/jobs/sync`, { source, jobs });
   }

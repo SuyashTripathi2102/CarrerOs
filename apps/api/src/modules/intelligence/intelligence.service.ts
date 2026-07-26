@@ -3,6 +3,7 @@ import { DiscoveryStage, HiringTrend, JobStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LLM_PROVIDER } from '../ai/llm.provider';
 import type { LlmProvider } from '../ai/llm.provider';
+import { companyGrowthScore, trendFrom, type Trend } from './company-growth';
 
 interface ExtractedProfile {
   techStack: string[];
@@ -127,6 +128,138 @@ export class IntelligenceService {
       }
     }
     return done;
+  }
+
+  /**
+   * Phase 5 — the fast, deterministic company-signal pass. For EVERY monitored
+   * company with live jobs, compute hiring frequency, momentum, department mix,
+   * recency, referral density and a 0-100 growth score from data we already
+   * store — all SQL, no LLM, so the whole corpus refreshes daily (the LLM
+   * profiler only ever reaches ~10/week). Field ownership is clean: this pass
+   * owns the cheap facts (activeJobs, hiringTrend, growthScore, newRoles30d,
+   * departmentsHiring, referralContacts, lastJobAt); the LLM pass owns techStack/
+   * roleMix/salary and never has them clobbered here.
+   */
+  async deriveSignalsCorpus(limit = 2000): Promise<{ companies: number }> {
+    // One grouped pass over jobs: scale, two 30-day windows, recency, history,
+    // and a department breakdown by title — per company, in a single query.
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        companyId: string;
+        active: bigint;
+        new30: bigint;
+        prev30: bigint;
+        last_job: Date | null;
+        first_job: Date | null;
+        backend: bigint;
+        frontend: bigint;
+        fullstack: bigint;
+        data: bigint;
+        devops: bigint;
+        design: bigint;
+      }>
+    >`
+      SELECT j."companyId" AS "companyId",
+             count(*) FILTER (WHERE status = 'ACTIVE') AS active,
+             count(*) FILTER (WHERE COALESCE("postedAt", "firstSeenAt") > now() - interval '30 days') AS new30,
+             count(*) FILTER (WHERE COALESCE("postedAt", "firstSeenAt") BETWEEN now() - interval '60 days' AND now() - interval '30 days') AS prev30,
+             max("firstSeenAt") AS last_job,
+             min("firstSeenAt") AS first_job,
+             count(*) FILTER (WHERE status='ACTIVE' AND title ~* 'back.?end|node|java|python|golang|\\.net|api|server') AS backend,
+             count(*) FILTER (WHERE status='ACTIVE' AND title ~* 'front.?end|react|angular|vue|\\bui\\b') AS frontend,
+             count(*) FILTER (WHERE status='ACTIVE' AND title ~* 'full.?stack|mern|mean') AS fullstack,
+             count(*) FILTER (WHERE status='ACTIVE' AND title ~* 'data|\\bml\\b|machine learning|\\bai\\b|analyst|scientist') AS data,
+             count(*) FILTER (WHERE status='ACTIVE' AND title ~* 'devops|\\bsre\\b|infra|platform|cloud') AS devops,
+             count(*) FILTER (WHERE status='ACTIVE' AND title ~* 'design|\\bux\\b|\\bui\\b') AS design
+      FROM jobs j
+      GROUP BY j."companyId"
+      HAVING count(*) FILTER (WHERE status = 'ACTIVE') > 0
+      LIMIT ${Math.max(1, limit)}
+    `;
+
+    // Referral density: how many referral contacts we hold per company name.
+    const refRows = await this.prisma.$queryRaw<Array<{ companyName: string; n: bigint }>>`
+      SELECT "companyName", count(*) AS n FROM referral_contacts GROUP BY "companyName"
+    `;
+    const refByName = new Map(refRows.map((r) => [r.companyName.toLowerCase(), Number(r.n)]));
+
+    // Company names (for the referral join) fetched once for this batch.
+    const ids = rows.map((r) => r.companyId);
+    const names = await this.prisma.company.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true },
+    });
+    const nameById = new Map(names.map((c) => [c.id, c.name]));
+
+    const now = Date.now();
+    let done = 0;
+    for (const r of rows) {
+      const activeJobs = Number(r.active);
+      const new30 = Number(r.new30);
+      const prev30 = Number(r.prev30);
+      const enoughHistory =
+        !!r.first_job && now - new Date(r.first_job).getTime() > 45 * 86_400_000;
+      const trend: Trend = trendFrom(new30, prev30, enoughHistory);
+      const daysSinceLastJob = r.last_job
+        ? Math.floor((now - new Date(r.last_job).getTime()) / 86_400_000)
+        : null;
+      const growthScore = companyGrowthScore({ activeJobs, newRoles30d: new30, trend, daysSinceLastJob });
+
+      const departmentsHiring = {
+        backend: Number(r.backend),
+        frontend: Number(r.frontend),
+        fullstack: Number(r.fullstack),
+        data: Number(r.data),
+        devops: Number(r.devops),
+        design: Number(r.design),
+      };
+      const referralContacts = refByName.get((nameById.get(r.companyId) ?? '').toLowerCase()) ?? 0;
+
+      const fields = {
+        activeJobs,
+        hiringTrend: trend as HiringTrend,
+        growthScore,
+        newRoles30d: new30,
+        referralContacts,
+        departmentsHiring: departmentsHiring as Prisma.InputJsonValue,
+        lastJobAt: r.last_job,
+        signalsAt: new Date(),
+      };
+      await this.prisma.companyIntelligence.upsert({
+        where: { companyId: r.companyId },
+        create: { companyId: r.companyId, ...fields },
+        update: fields,
+      });
+      done++;
+    }
+    this.logger.log(`deriveSignalsCorpus: refreshed ${done} companies (deterministic)`);
+    return { companies: done };
+  }
+
+  /** Companies with the most hiring momentum right now — the dashboard's mover list. */
+  async topGrowing(limit = 12) {
+    const rows = await this.prisma.companyIntelligence.findMany({
+      where: { growthScore: { not: null }, activeJobs: { gt: 0 } },
+      orderBy: [{ growthScore: 'desc' }, { newRoles30d: 'desc' }],
+      take: Math.min(50, limit),
+      select: {
+        growthScore: true,
+        newRoles30d: true,
+        activeJobs: true,
+        hiringTrend: true,
+        referralContacts: true,
+        company: { select: { name: true, city: true } },
+      },
+    });
+    return rows.map((r) => ({
+      company: r.company.name,
+      city: r.company.city,
+      growthScore: r.growthScore,
+      newRoles30d: r.newRoles30d,
+      activeJobs: r.activeJobs,
+      hiringTrend: r.hiringTrend,
+      referralContacts: r.referralContacts,
+    }));
   }
 
   async get(companyId: string) {

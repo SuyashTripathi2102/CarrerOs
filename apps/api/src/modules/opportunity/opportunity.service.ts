@@ -69,6 +69,8 @@ interface ScoringContext {
     hiringTrend: HiringTrend | null;
     /** Jobs this company added in the last 14 days — live hiring activity. */
     recentJobs14d: number;
+    /** Phase 5 deterministic hiring-momentum score (0-100), null if not derived. */
+    growthScore: number | null;
   };
 }
 
@@ -136,6 +138,7 @@ export class OpportunityService {
         name: match.job.company.name,
         confidence: match.job.company.confidence,
         hiringTrend: match.job.company.intelligence?.hiringTrend ?? null,
+        growthScore: match.job.company.intelligence?.growthScore ?? null,
         // Prefer postedAt: firstSeenAt spikes on a company's FIRST crawl
         // (whole board looks "new"), inflating the hiring-activity signal.
         recentJobs14d: await this.prisma.job.count({
@@ -349,9 +352,22 @@ export class OpportunityService {
     });
 
     // 7. Hiring velocity — a growing team reads more applications. Prefer the
-    // derived intelligence trend; fall back to the LIVE signal (jobs added in
-    // the last 14 days) so this module never silently drops out.
-    if (ctx.company.hiringTrend && ctx.company.hiringTrend !== HiringTrend.INSUFFICIENT_DATA) {
+    // Phase-5 deterministic growth score (scale + frequency + momentum + recency,
+    // refreshed daily for the whole corpus); fall back to the derived trend, then
+    // to the LIVE 14-day signal, so this module never silently drops out.
+    if (ctx.company.growthScore != null) {
+      modules.push({
+        module: 'hiringVelocity',
+        score: ctx.company.growthScore,
+        weight: WEIGHTS.hiringVelocity,
+        reason:
+          ctx.company.growthScore >= 70
+            ? `strong hiring momentum (${ctx.company.growthScore}/100)`
+            : ctx.company.growthScore >= 40
+              ? `moderate hiring momentum (${ctx.company.growthScore}/100)`
+              : `low hiring momentum (${ctx.company.growthScore}/100)`,
+      });
+    } else if (ctx.company.hiringTrend && ctx.company.hiringTrend !== HiringTrend.INSUFFICIENT_DATA) {
       const score =
         ctx.company.hiringTrend === HiringTrend.GROWING
           ? 100

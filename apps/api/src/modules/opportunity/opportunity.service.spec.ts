@@ -38,6 +38,7 @@ function ctx(overrides: Partial<Parameters<OpportunityService['compute']>[0]> = 
       confidence: 90,
       hiringTrend: HiringTrend.GROWING,
       recentJobs14d: 6,
+      growthScore: null,
       ...(overrides.company ?? {}),
     },
   };
@@ -117,6 +118,17 @@ describe('OpportunityService.compute', () => {
     );
     expect(unverified.opportunityScore).toBeLessThan(trusted.opportunityScore * 0.9);
     expect(unverified.breakdown.some((m) => m.module === 'verification')).toBe(true);
+  });
+
+  it('uses the Phase-5 growth score for hiring velocity when present', () => {
+    const strong = service.compute(ctx({ company: { growthScore: 95 } as never }));
+    const weak = service.compute(ctx({ company: { growthScore: 10 } as never }));
+    const vStrong = strong.breakdown.find((m) => m.module === 'hiringVelocity')!;
+    const vWeak = weak.breakdown.find((m) => m.module === 'hiringVelocity')!;
+    expect(vStrong.score).toBe(95);
+    expect(vStrong.reason).toContain('strong hiring momentum');
+    expect(vWeak.score).toBe(10);
+    expect(strong.opportunityScore).toBeGreaterThan(weak.opportunityScore);
   });
 
   it('nudges the score by source trust, bounded and explainable', () => {

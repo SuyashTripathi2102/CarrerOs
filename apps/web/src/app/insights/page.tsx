@@ -90,6 +90,16 @@ interface RenderHealth {
   renderedPct: number;
 }
 
+interface GrowingCompany {
+  company: string;
+  city: string | null;
+  growthScore: number;
+  newRoles30d: number;
+  activeJobs: number;
+  hiringTrend: string;
+  referralContacts: number;
+}
+
 interface Pipeline {
   window: string;
   runs: number;
@@ -179,6 +189,7 @@ export default function InsightsPage() {
   const [pipeline, setPipeline] = useState<Pipeline | null>(null);
   const [schedule, setSchedule] = useState<CrawlSchedule | null>(null);
   const [render, setRender] = useState<RenderHealth | null>(null);
+  const [growing, setGrowing] = useState<GrowingCompany[] | null>(null);
 
   useEffect(() => {
     apiGet<Insights>('/dashboard').then(setData);
@@ -206,6 +217,9 @@ export default function InsightsPage() {
     apiGet<RenderHealth>('/discovery/render')
       .then(setRender)
       .catch(() => setRender(null));
+    apiGet<GrowingCompany[]>('/intelligence/top-growing?limit=10')
+      .then(setGrowing)
+      .catch(() => setGrowing([]));
   }, []);
 
   return (
@@ -276,6 +290,68 @@ export default function InsightsPage() {
                 </p>
               )}
             </section>
+
+            {growing && growing.length > 0 && (
+              <section className="mt-8 rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+                <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-400">
+                  Companies on the move
+                </h2>
+                <div className="mt-3 overflow-x-auto">
+                  <table className="w-full min-w-[520px] text-sm">
+                    <thead>
+                      <tr className="text-left text-[10px] uppercase tracking-wide text-neutral-500">
+                        <th className="pb-2 font-medium">Company</th>
+                        <th className="pb-2 text-right font-medium">Growth</th>
+                        <th className="pb-2 text-right font-medium">New 30d</th>
+                        <th className="pb-2 text-right font-medium">Open</th>
+                        <th className="pb-2 text-right font-medium">Trend</th>
+                        <th className="pb-2 text-right font-medium">Ways in</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {growing.map((g) => (
+                        <tr key={g.company} className="border-t border-neutral-800">
+                          <td className="py-2 text-neutral-200">
+                            {g.company}
+                            {g.city && <span className="text-neutral-500"> · {g.city}</span>}
+                          </td>
+                          <td
+                            className={`py-2 text-right font-medium tabular-nums ${
+                              g.growthScore >= 70
+                                ? 'text-emerald-400'
+                                : g.growthScore >= 40
+                                  ? 'text-amber-400'
+                                  : 'text-neutral-400'
+                            }`}
+                          >
+                            {g.growthScore}
+                          </td>
+                          <td className="py-2 text-right tabular-nums text-neutral-200">{g.newRoles30d}</td>
+                          <td className="py-2 text-right tabular-nums text-neutral-400">{g.activeJobs}</td>
+                          <td className="py-2 text-right text-[11px] text-neutral-500">
+                            {g.hiringTrend === 'GROWING'
+                              ? '↑ growing'
+                              : g.hiringTrend === 'DECLINING'
+                                ? '↓ slowing'
+                                : g.hiringTrend === 'STABLE'
+                                  ? '→ stable'
+                                  : '—'}
+                          </td>
+                          <td className="py-2 text-right tabular-nums text-neutral-400">
+                            {g.referralContacts > 0 ? g.referralContacts : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="mt-3 text-[11px] text-neutral-500">
+                  Ranked by hiring momentum (scale + frequency + trend + recency), refreshed daily
+                  from our own data. A high-growth company reads more applications and moves faster —
+                  this now lifts those jobs in your Opportunity Score.
+                </p>
+              </section>
+            )}
 
             {pipeline && pipeline.runs > 0 && (
               <section className="mt-8 rounded-xl border border-neutral-800 bg-neutral-900 p-4">

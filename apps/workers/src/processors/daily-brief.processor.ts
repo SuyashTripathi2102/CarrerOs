@@ -23,6 +23,14 @@ export function startDailyBriefWorker(api: ApiClient): Worker {
       } catch (err) {
         console.warn(`[source-trust] recompute skipped: ${err}`);
       }
+      // Refresh deterministic company signals (growth/velocity/departments) for
+      // the whole corpus — SQL only, cheap, keeps the Opportunity Score current.
+      try {
+        const s = await api.deriveCompanySignals();
+        console.log(`[company-signals] refreshed: ${s.companies} companies`);
+      } catch (err) {
+        console.warn(`[company-signals] refresh skipped: ${err}`);
+      }
       const res = await api.triggerDailyBrief();
       console.log(`[daily-brief] sent: ${res.sent}`);
       return res;
