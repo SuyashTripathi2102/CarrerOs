@@ -323,17 +323,57 @@ export class DiscoveryService {
    * so repeated runs spread across the pool (no per-company extractedAt yet).
    */
   async careerPagesDue(limit = 30) {
+    // Priority: watched-by-anyone → target city → never/least-recently extracted.
+    // The same statement CLAIMS the batch (sets lastExtractedAt) so runs rotate
+    // through the corpus instead of re-fetching the same pages every 6h.
     return this.prisma.$queryRaw<Array<{ id: string; name: string; careerPageUrl: string }>>`
-      SELECT c.id, c.name, c."careerPageUrl"
-      FROM companies c
-      WHERE c."careerPageUrl" IS NOT NULL
-        AND c."atsProvider" = 'UNKNOWN'
-        AND c."discoveryStage" <> 'UNRESOLVABLE'
-      ORDER BY
-        (c.city IN ('Bangalore','Bengaluru','Pune','Hyderabad','Mumbai','Indore','Gurgaon','Gurugram','Noida','Chennai','Ahmedabad','Kolkata')) DESC,
-        random()
-      LIMIT ${Math.min(100, Math.max(1, limit))}
+      WITH due AS (
+        SELECT c.id
+        FROM companies c
+        WHERE c."careerPageUrl" IS NOT NULL
+          AND c."atsProvider" = 'UNKNOWN'
+          AND c."discoveryStage" <> 'UNRESOLVABLE'
+        ORDER BY
+          EXISTS (SELECT 1 FROM company_watches w WHERE w."companyId" = c.id) DESC,
+          (c.city IN ('Bangalore','Bengaluru','Pune','Hyderabad','Mumbai','Indore','Gurgaon','Gurugram','Noida','Chennai','Ahmedabad','Kolkata')) DESC,
+          c."lastExtractedAt" ASC NULLS FIRST,
+          c.id
+        LIMIT ${Math.min(100, Math.max(1, limit))}
+      )
+      UPDATE companies SET "lastExtractedAt" = now()
+      WHERE id IN (SELECT id FROM due)
+      RETURNING id, name, "careerPageUrl"
     `;
+  }
+
+  /** Operational health of the deterministic career-page extractor. */
+  async extractionHealth() {
+    const [runs] = await this.prisma.$queryRaw<
+      [{ runs: bigint; found: bigint; created: bigint; last: Date | null }]
+    >`
+      SELECT count(*) AS runs, COALESCE(sum("jobsFound"), 0) AS found,
+             COALESCE(sum("jobsNew"), 0) AS created, max("startedAt") AS last
+      FROM crawl_runs WHERE source LIKE 'career-page%'
+    `;
+    const [corpus] = await this.prisma.$queryRaw<[{ total: bigint; extracted: bigint }]>`
+      SELECT count(*) AS total,
+             count(*) FILTER (WHERE "lastExtractedAt" IS NOT NULL) AS extracted
+      FROM companies
+      WHERE "careerPageUrl" IS NOT NULL AND "atsProvider" = 'UNKNOWN'
+    `;
+    const [jobs] = await this.prisma.$queryRaw<[{ n: bigint }]>`
+      SELECT count(*) AS n FROM jobs WHERE "externalId" LIKE 'careerpage-%' AND status = 'ACTIVE'
+    `;
+    const total = Number(corpus.total);
+    const extracted = Number(corpus.extracted);
+    return {
+      runs: Number(runs.runs),
+      jobsExtracted: Number(jobs.n),
+      companiesTotal: total,
+      companiesProcessed: extracted,
+      processedPct: total > 0 ? Math.round((extracted / total) * 100) : 0,
+      lastRun: runs.last,
+    };
   }
 
   /**

@@ -69,4 +69,10 @@ export class DiscoveryController {
   coverage() {
     return this.discovery.cityCoverage();
   }
+
+  /** Deterministic career-page extractor — operational health. */
+  @Get('extraction')
+  extraction() {
+    return this.discovery.extractionHealth();
+  }
 }

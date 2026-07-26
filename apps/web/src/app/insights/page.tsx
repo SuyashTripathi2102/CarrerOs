@@ -47,6 +47,15 @@ interface CityCoverage {
   coverage: number;
 }
 
+interface Extraction {
+  runs: number;
+  jobsExtracted: number;
+  companiesTotal: number;
+  companiesProcessed: number;
+  processedPct: number;
+  lastRun: string | null;
+}
+
 function Tile({ label, value, hint }: { label: string; value: number; hint?: string }) {
   return (
     <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
@@ -72,6 +81,7 @@ export default function InsightsPage() {
   const [data, setData] = useState<Insights | null>(null);
   const [sources, setSources] = useState<SourceFunnel[] | null>(null);
   const [cities, setCities] = useState<CityCoverage[] | null>(null);
+  const [extraction, setExtraction] = useState<Extraction | null>(null);
 
   useEffect(() => {
     apiGet<Insights>('/dashboard').then(setData);
@@ -81,6 +91,9 @@ export default function InsightsPage() {
     apiGet<CityCoverage[]>('/discovery/coverage')
       .then(setCities)
       .catch(() => setCities([]));
+    apiGet<Extraction>('/discovery/extraction')
+      .then(setExtraction)
+      .catch(() => setExtraction(null));
   }, []);
 
   return (
@@ -196,6 +209,33 @@ export default function InsightsPage() {
                 <p className="mt-3 text-[11px] text-neutral-500">
                   Target-role India jobs (≤30 days) per 100 companies discovered. Adding companies to
                   a low-yield source does not add opportunities.
+                </p>
+              </section>
+            )}
+
+            {extraction && (
+              <section className="mt-8 rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+                <div className="flex items-baseline justify-between gap-3">
+                  <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-400">
+                    Career-page extractor (deterministic v1)
+                  </h2>
+                  <span className="text-[11px] text-neutral-500">
+                    {extraction.lastRun
+                      ? `last run ${new Date(extraction.lastRun).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
+                      : 'no run yet'}
+                  </span>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+                  <PipeStat label="Jobs extracted" value={extraction.jobsExtracted} tone="good" />
+                  <PipeStat label="Ingest runs" value={extraction.runs} />
+                  <PipeStat label="Pages processed" value={extraction.companiesProcessed} />
+                  <PipeStat label="Corpus %" value={extraction.processedPct} tone="mid" />
+                </div>
+                <p className="mt-3 text-[11px] text-neutral-500">
+                  Tier-1 static extraction (no browser, no LLM): {extraction.companiesProcessed} of{' '}
+                  {extraction.companiesTotal.toLocaleString()} custom career pages claimed. High
+                  precision, modest recall — only anchor-structured pages yield jobs; the rest await
+                  the render/LLM tiers.
                 </p>
               </section>
             )}

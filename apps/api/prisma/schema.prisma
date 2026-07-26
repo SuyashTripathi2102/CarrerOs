@@ -320,6 +320,7 @@ model Company {
   confidence        Float          @default(0)
   confidenceSignals Json? // { websiteVerified, careerPageFound, atsDetected, jobsExtracted, monitoringHealthy }
   lastProbedAt      DateTime? // discovery prober bookkeeping — due again after cooldown
+  lastExtractedAt   DateTime? // deterministic career-page extractor — claim/rotate the corpus
 
   country       String?
   city          String? // for city-based discovery (Indore/Pune/Bangalore...)
