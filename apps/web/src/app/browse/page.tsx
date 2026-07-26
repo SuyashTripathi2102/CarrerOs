@@ -2,7 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { apiGet } from '@/lib/api';
+import { apiGet, apiPost } from '@/lib/api';
+
+/** Fire-and-forget outcome logging — never blocks navigation, never throws. */
+function track(jobId: string, type: 'CLICKED' | 'DISMISSED') {
+  apiPost('/events', { jobId, type, surface: 'browse' }).catch(() => {});
+}
 
 interface Factor {
   label: string;
@@ -44,6 +49,7 @@ export default function BrowsePage() {
   const [data, setData] = useState<Browse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState('');
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     apiGet<Browse>('/matches/browse?limit=100')
@@ -55,14 +61,15 @@ export default function BrowsePage() {
   if (!data) return <Shell><p className="text-neutral-400">Ranking every job by your resume…</p></Shell>;
 
   const term = q.trim().toLowerCase();
-  const items = term
+  const items = (term
     ? data.items.filter(
         (j) =>
           j.title.toLowerCase().includes(term) ||
           j.company.toLowerCase().includes(term) ||
           (j.location ?? '').toLowerCase().includes(term),
       )
-    : data.items;
+    : data.items
+  ).filter((j) => !dismissed.has(j.jobId));
 
   return (
     <Shell>
@@ -99,10 +106,11 @@ export default function BrowsePage() {
       ) : (
         <div className="mt-3 divide-y divide-neutral-900 rounded-xl border border-neutral-800">
           {items.map((j) => (
+            <div key={j.jobId} className="group relative">
             <Link
-              key={j.jobId}
               href={`/jobs/${j.jobId}`}
-              className="flex items-start gap-3 px-3 py-2.5 transition hover:bg-neutral-900"
+              onClick={() => track(j.jobId, 'CLICKED')}
+              className="flex items-start gap-3 px-3 py-2.5 pr-9 transition hover:bg-neutral-900"
             >
               <div className="w-10 flex-none text-right">
                 <div className={`text-base font-semibold tabular-nums ${oppColor(j.opportunity)}`}>
@@ -154,6 +162,18 @@ export default function BrowsePage() {
               </div>
               <span className="flex-none self-center text-neutral-600">→</span>
             </Link>
+            <button
+              type="button"
+              title="Not relevant — hide and record why"
+              onClick={() => {
+                track(j.jobId, 'DISMISSED');
+                setDismissed((prev) => new Set(prev).add(j.jobId));
+              }}
+              className="absolute right-2 top-2 rounded px-1.5 text-neutral-600 opacity-0 transition hover:bg-neutral-800 hover:text-neutral-300 group-hover:opacity-100"
+            >
+              ×
+            </button>
+            </div>
           ))}
         </div>
       )}

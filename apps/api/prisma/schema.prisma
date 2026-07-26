@@ -140,6 +140,7 @@ model User {
   companyResumes    CompanyResume[]
   referralContacts  ReferralContact[]
   companyWatches    CompanyWatch[]
+  opportunityEvents OpportunityEvent[]
 
   @@map("users")
 }
@@ -401,6 +402,7 @@ model Job {
   reviewFeedback  JobReviewFeedback[]
   companyResumes  CompanyResume[]
   referralContacts ReferralContact[]
+  opportunityEvents OpportunityEvent[]
 
   // Dedupe guarantee: a recrawl updates the existing row instead of inserting.
   @@unique([companyId, externalId])
@@ -509,6 +511,33 @@ model Application {
   @@unique([userId, jobId])
   @@index([userId, status])
   @@map("applications")
+}
+
+// Append-only outcome log (Validation phase). Every time a user acts on a
+// recommendation — opens it, clicks through, dismisses it, or applies — we
+// snapshot the Opportunity Score AND its full breakdown AS IT WAS AT THAT MOMENT.
+// The live breakdown on JobMatch is mutable (rescores overwrite it); this is the
+// immutable record that lets us later answer "which signals actually correlated
+// with clicks and applications?" — data that cannot be reconstructed after the
+// fact, so it has to start recording now.
+model OpportunityEvent {
+  id               String   @id @default(cuid())
+  userId           String
+  jobId            String
+  type             String // VIEWED | CLICKED | DISMISSED | APPLIED
+  surface          String? // where it was shown: browse | today | telegram | tracker
+  opportunityScore Float? // score at the moment of the action
+  verdict          String? // APPLY | CONSIDER | SKIP at that moment
+  breakdown        Json? // [{module, score, weight, reason}] snapshot — the "why"
+  decisionVersion  Int?
+  createdAt        DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job  Job  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([userId, jobId])
+  @@index([type, createdAt])
+  @@map("opportunity_events")
 }
 
 // Append-only status timeline — the tracker's history view reads this directly.

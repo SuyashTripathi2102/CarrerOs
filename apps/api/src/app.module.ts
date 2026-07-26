@@ -14,6 +14,7 @@ import { MatchingModule } from './modules/matching/matching.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { OpportunityModule } from './modules/opportunity/opportunity.module';
 import { SourceTrustModule } from './modules/source-trust/source-trust.module';
+import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { CompaniesModule } from './modules/companies/companies.module';
 import { CrawlModule } from './modules/crawl/crawl.module';
 import { DiscoveryModule } from './modules/discovery/discovery.module';
@@ -54,6 +55,7 @@ import { UsersModule } from './modules/users/users.module';
     NotificationsModule,
     OpportunityModule,
     SourceTrustModule,
+    AnalyticsModule,
     ApplicationsModule,
     ReviewModule,
     ReferralsModule,

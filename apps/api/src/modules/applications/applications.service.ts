@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { ApplicationStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AnalyticsService } from '../analytics/analytics.service';
 import {
   funnelInsights,
   likelyCauses,
@@ -20,7 +21,10 @@ import {
  */
 @Injectable()
 export class ApplicationsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly analytics: AnalyticsService,
+  ) {}
 
   /**
    * "I applied" / "save for later" from a job card. Idempotent per (user,job):
@@ -48,7 +52,7 @@ export class ApplicationsService {
       select: { id: true },
     });
 
-    return this.prisma.application.create({
+    const created = await this.prisma.application.create({
       data: {
         userId,
         jobId,
@@ -61,6 +65,13 @@ export class ApplicationsService {
       },
       include: { job: { select: { title: true } } },
     });
+
+    // Snapshot the score+breakdown at apply time — the highest-signal outcome
+    // for "which signals correlate with applications". Append-only, best-effort.
+    if (status === ApplicationStatus.APPLIED) {
+      await this.analytics.record(userId, jobId, 'APPLIED', 'tracker');
+    }
+    return created;
   }
 
   async transition(
@@ -75,7 +86,7 @@ export class ApplicationsService {
       throw new BadRequestException(`Already ${toStatus}`);
     }
 
-    return this.prisma.application.update({
+    const updated = await this.prisma.application.update({
       where: { id: applicationId },
       data: {
         status: toStatus,
@@ -86,6 +97,12 @@ export class ApplicationsService {
       },
       include: { job: { select: { title: true } } },
     });
+
+    // First transition into APPLIED is an apply outcome — snapshot the decision.
+    if (toStatus === ApplicationStatus.APPLIED && !app.appliedAt) {
+      await this.analytics.record(userId, app.jobId, 'APPLIED', 'tracker');
+    }
+    return updated;
   }
 
   list(userId: string, status?: ApplicationStatus) {
