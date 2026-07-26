@@ -32,7 +32,7 @@ const SnapshotBodySchema = z.object({
 });
 
 const ExtractionRunSchema = z.object({
-  kind: z.enum(['live', 'replay']),
+  kind: z.enum(['live', 'replay', 'render']),
   extractorVersion: z.string().min(1),
   companiesQueued: z.number().int().min(0).default(0),
   fetched: z.number().int().min(0).default(0),
@@ -100,6 +100,20 @@ export class DiscoveryInternalController {
     return this.discovery.recordExtractionRun(parsed.data);
   }
 
+  /** Flag JS-app-shell career pages for the render tier. */
+  @Post('flag-render')
+  flagRender(@Body() body: unknown) {
+    const parsed = z.object({ companyIds: z.array(z.string()).max(200) }).safeParse(body);
+    if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
+    return this.discovery.flagForRender(parsed.data.companyIds);
+  }
+
+  /** Companies flagged for rendering, claimed for a render batch. */
+  @Get('render/due')
+  renderDue(@Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number) {
+    return this.discovery.renderDue(limit);
+  }
+
   @Post(':companyId/result')
   result(@Param('companyId') companyId: string, @Body() body: unknown) {
     const parsed = DiscoveryResultSchema.safeParse(body);
@@ -146,5 +160,11 @@ export class DiscoveryController {
   @Get('crawl-schedule')
   crawlSchedule() {
     return this.discovery.crawlScheduleHealth();
+  }
+
+  /** Render tier: flagged JS-app-shell pages + how many are rendered. */
+  @Get('render')
+  render() {
+    return this.discovery.renderHealth();
   }
 }

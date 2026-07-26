@@ -82,6 +82,14 @@ interface CrawlSchedule {
   dormantPct: number;
 }
 
+interface RenderHealth {
+  flagged: number;
+  rendered: number;
+  pending: number;
+  jobsFromRender: number;
+  renderedPct: number;
+}
+
 interface Pipeline {
   window: string;
   runs: number;
@@ -170,6 +178,7 @@ export default function InsightsPage() {
   const [trust, setTrust] = useState<SourceTrust[] | null>(null);
   const [pipeline, setPipeline] = useState<Pipeline | null>(null);
   const [schedule, setSchedule] = useState<CrawlSchedule | null>(null);
+  const [render, setRender] = useState<RenderHealth | null>(null);
 
   useEffect(() => {
     apiGet<Insights>('/dashboard').then(setData);
@@ -194,6 +203,9 @@ export default function InsightsPage() {
     apiGet<CrawlSchedule>('/discovery/crawl-schedule')
       .then(setSchedule)
       .catch(() => setSchedule(null));
+    apiGet<RenderHealth>('/discovery/render')
+      .then(setRender)
+      .catch(() => setRender(null));
   }, []);
 
   return (
@@ -354,6 +366,32 @@ export default function InsightsPage() {
                   Each company&apos;s crawl cadence follows its own hiring history. {schedule.dormantPct}%
                   are dormant (no live jobs, nothing new in ~4 months) — crawled monthly, not
                   hourly, so the box spends its budget where jobs actually appear.
+                </p>
+              </section>
+            )}
+
+            {render && render.flagged > 0 && (
+              <section className="mt-8 rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+                <div className="flex items-baseline justify-between">
+                  <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-400">
+                    Render tier (JS pages)
+                  </h2>
+                  <span className="text-[11px] text-neutral-500">
+                    {render.jobsFromRender > 0
+                      ? `${render.jobsFromRender.toLocaleString()} jobs via render`
+                      : 'awaiting a render service'}
+                  </span>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+                  <PipeStat label="Flagged" value={render.flagged} tone="mid" />
+                  <PipeStat label="Rendered" value={render.rendered} tone="good" />
+                  <PipeStat label="Pending" value={render.pending} />
+                  <PipeStat label="Jobs" value={render.jobsFromRender} tone="good" />
+                </div>
+                <p className="mt-3 text-[11px] text-neutral-500">
+                  Career pages the static tier found to be JavaScript app shells. A render service
+                  (Playwright/Crawl4AI, separate box) loads them and feeds the <em>same</em>{' '}
+                  extractor. No service configured yet = these wait, harmlessly.
                 </p>
               </section>
             )}

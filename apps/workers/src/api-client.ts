@@ -69,6 +69,14 @@ export class ApiClient {
     return this.request('POST', '/internal/discovery/extraction-run', metrics);
   }
 
+  flagForRender(companyIds: string[]): Promise<{ flagged: number }> {
+    return this.request('POST', '/internal/discovery/flag-render', { companyIds });
+  }
+
+  getRenderDue(limit: number): Promise<CareerPageDue[]> {
+    return this.request('GET', `/internal/discovery/render/due?limit=${limit}`);
+  }
+
   applyDiscoveryResult(companyId: string, result: DiscoveryResult): Promise<{ stage: string }> {
     return this.request('POST', `/internal/discovery/${companyId}/result`, result);
   }
@@ -146,7 +154,7 @@ export interface ReplaySnapshot {
 }
 
 export interface ExtractionRunMetrics {
-  kind: 'live' | 'replay';
+  kind: 'live' | 'replay' | 'render';
   extractorVersion: string;
   companiesQueued: number;
   fetched: number;

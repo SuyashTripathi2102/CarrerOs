@@ -545,6 +545,64 @@ export class DiscoveryService {
     };
   }
 
+  /** Flag companies whose career pages are JS app shells — the render tier's queue. */
+  async flagForRender(companyIds: string[]) {
+    if (companyIds.length === 0) return { flagged: 0 };
+    const res = await this.prisma.company.updateMany({
+      where: { id: { in: companyIds }, needsRender: false },
+      data: { needsRender: true },
+    });
+    return { flagged: res.count };
+  }
+
+  /**
+   * Companies flagged for rendering, claimed (lastRenderedAt bumped) so runs
+   * rotate. Prioritised watched → target-city → least-recently-rendered, same as
+   * the static extractor. Returns the URL the render service should load.
+   */
+  async renderDue(limit = 20) {
+    return this.prisma.$queryRaw<Array<{ id: string; name: string; careerPageUrl: string }>>`
+      WITH due AS (
+        SELECT c.id
+        FROM companies c
+        WHERE c."needsRender" = true
+          AND c."careerPageUrl" IS NOT NULL
+          AND c."discoveryStage" <> 'UNRESOLVABLE'
+        ORDER BY
+          EXISTS (SELECT 1 FROM company_watches w WHERE w."companyId" = c.id) DESC,
+          (c.city IN ('Bangalore','Bengaluru','Pune','Hyderabad','Mumbai','Indore','Gurgaon','Gurugram','Noida','Chennai','Ahmedabad','Kolkata')) DESC,
+          c."lastRenderedAt" ASC NULLS FIRST,
+          c.id
+        LIMIT ${Math.min(50, Math.max(1, limit))}
+      )
+      UPDATE companies SET "lastRenderedAt" = now()
+      WHERE id IN (SELECT id FROM due)
+      RETURNING id, name, "careerPageUrl"
+    `;
+  }
+
+  /** Render-tier health: how many pages are flagged, and how many rendered. */
+  async renderHealth() {
+    const [row] = await this.prisma.$queryRaw<
+      [{ flagged: bigint; rendered: bigint; jobs: bigint }]
+    >`
+      SELECT
+        count(*) FILTER (WHERE "needsRender" = true) AS flagged,
+        count(*) FILTER (WHERE "needsRender" = true AND "lastRenderedAt" IS NOT NULL) AS rendered,
+        (SELECT count(*) FROM jobs WHERE source LIKE 'career-render%' AND status = 'ACTIVE') AS jobs
+      FROM companies
+    `;
+    const flagged = Number(row.flagged);
+    const rendered = Number(row.rendered);
+    return {
+      flagged,
+      rendered,
+      pending: flagged - rendered,
+      jobsFromRender: Number(row.jobs),
+      renderedPct: flagged > 0 ? Math.round((rendered / flagged) * 100) : 0,
+    };
+  }
+
   /** Operational health of the deterministic career-page extractor. */
   async extractionHealth() {
     const [runs] = await this.prisma.$queryRaw<

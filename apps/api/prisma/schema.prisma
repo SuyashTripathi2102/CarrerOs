@@ -322,6 +322,12 @@ model Company {
   confidenceSignals Json? // { websiteVerified, careerPageFound, atsDetected, jobsExtracted, monitoringHealthy }
   lastProbedAt      DateTime? // discovery prober bookkeeping — due again after cooldown
   lastExtractedAt   DateTime? // deterministic career-page extractor — claim/rotate the corpus
+  // Render tier (Phase 4): the static extractor found a JS app shell (jobs hidden
+  // behind client-side rendering). Flagged for the render service, which loads
+  // the page in a real browser and feeds the SAME extractor. Null lastRenderedAt
+  // = never rendered; the render-due query rotates by it.
+  needsRender     Boolean   @default(false)
+  lastRenderedAt  DateTime?
 
   country       String?
   city          String? // for city-based discovery (Indore/Pune/Bangalore...)
@@ -351,6 +357,7 @@ model Company {
   @@index([name])
   @@index([nextCrawlAt]) // the "due now" scheduler query
   @@index([discoveryStage, lastProbedAt]) // the discovery prober's due query
+  @@index([needsRender, lastRenderedAt]) // the render-tier due query
   @@map("companies")
 }
 

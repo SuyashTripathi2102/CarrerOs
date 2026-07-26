@@ -58,6 +58,26 @@ export function preprocess(html: string): string {
     .replace(/<!--[\s\S]*?-->/g, ' ');
 }
 
+/**
+ * Does this HTML look like a client-rendered app shell that hides its jobs
+ * behind JavaScript? Conservative by design (precision-first): only an obvious
+ * SPA skeleton — framework root marker, almost no anchors, almost no rendered
+ * text — qualifies. These are exactly the pages the static tier can't parse and
+ * the render tier should. A false positive just wastes one render; a false
+ * negative leaves jobs unfound, so we tune toward flagging only the clear cases.
+ */
+export function looksJsRendered(html: string): boolean {
+  const anchors = (html.match(/<a\b/gi) ?? []).length;
+  const spaMarker =
+    /id=["'](root|__next|app|application)["']|__NEXT_DATA__|data-reactroot|ng-app|window\.__NUXT__|data-server-rendered/i.test(
+      html,
+    );
+  const textLen = clean(
+    html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' '),
+  ).length;
+  return spaMarker && anchors < 8 && textLen < 1500;
+}
+
 interface Candidate {
   title: string;
   href: string | null;

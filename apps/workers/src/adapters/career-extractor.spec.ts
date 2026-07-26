@@ -1,4 +1,4 @@
-import { extractCareerPage } from './career-extractor';
+import { extractCareerPage, looksJsRendered } from './career-extractor';
 
 const page = (body: string) => `<html><body>${body}</body></html>`;
 const a = (href: string, text: string) => `<a href="${href}">${text}</a>`;
@@ -61,5 +61,40 @@ describe('extractCareerPage', () => {
     const html = page('<p>We are a leading software developer and consulting company.</p>');
     const r = extractCareerPage(html, 'https://acme.com', 'Acme');
     expect(r.boardJobs).toHaveLength(0);
+  });
+});
+
+describe('looksJsRendered (render-tier gate)', () => {
+  it('flags an empty React app shell', () => {
+    const shell =
+      '<html><body><div id="root"></div><script src="/static/main.js"></script></body></html>';
+    expect(looksJsRendered(shell)).toBe(true);
+  });
+
+  it('flags a Next.js shell with only __NEXT_DATA__', () => {
+    const shell =
+      '<html><body><div id="__next"></div><script id="__NEXT_DATA__">{}</script></body></html>';
+    expect(looksJsRendered(shell)).toBe(true);
+  });
+
+  it('does NOT flag a static page that already lists jobs', () => {
+    const html = page(
+      [
+        a('/careers/react-developer', 'React Developer'),
+        a('/careers/node-developer', 'Node.js Developer'),
+        a('/careers/backend-engineer', 'Backend Engineer'),
+        a('/careers/qa', 'QA Engineer'),
+        a('/careers/devops', 'DevOps Engineer'),
+        a('/careers/pm', 'Product Manager'),
+        a('/careers/data', 'Data Engineer'),
+        a('/careers/sre', 'Site Reliability Engineer'),
+      ].join(''),
+    );
+    expect(looksJsRendered(html)).toBe(false);
+  });
+
+  it('does NOT flag a content-rich page even with a root div', () => {
+    const body = `<div id="root">${'Careers at Acme. '.repeat(200)}</div>`;
+    expect(looksJsRendered(page(body))).toBe(false);
   });
 });

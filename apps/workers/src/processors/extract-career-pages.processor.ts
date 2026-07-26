@@ -5,7 +5,12 @@ import type { BoardJob } from '@careeros/shared';
 import { QueueNames } from '../queues/names';
 import { createRedisConnection } from '../queues/connection';
 import { ApiClient } from '../api-client';
-import { extractCareerPage, preprocess, EXTRACTOR_VERSION } from '../adapters/career-extractor';
+import {
+  extractCareerPage,
+  preprocess,
+  looksJsRendered,
+  EXTRACTOR_VERSION,
+} from '../adapters/career-extractor';
 
 const BATCH = 30;
 const CONFIDENCE_THRESHOLD = 70;
@@ -13,6 +18,36 @@ const CONFIDENCE_THRESHOLD = 70;
 // the pathological ones so one giant page can't blow up the snapshot table.
 const SNAPSHOT_CAP = 500_000;
 const REPLAY_BATCH = 60;
+const RENDER_BATCH = 15; // rendering is heavier — smaller batches
+
+/**
+ * Fetch a page's rendered HTML from the render service (Playwright/Crawl4AI on a
+ * separate box — Chromium is too heavy for the API box). Returns null on any
+ * failure or when no render service is configured, so the render tier degrades
+ * to a no-op instead of erroring.
+ */
+async function fetchRenderedHtml(url: string): Promise<string | null> {
+  const base = process.env.RENDER_SERVICE_URL;
+  if (!base) return null;
+  try {
+    const res = await fetch(`${base.replace(/\/$/, '')}/render`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(process.env.RENDER_SERVICE_TOKEN
+          ? { 'x-render-token': process.env.RENDER_SERVICE_TOKEN }
+          : {}),
+      },
+      body: JSON.stringify({ url, waitUntil: 'networkidle' }),
+      signal: AbortSignal.timeout(45_000),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { html?: string };
+    return data.html && data.html.length > 200 ? data.html : null;
+  } catch {
+    return null;
+  }
+}
 
 /** IPv4-forced HTML GET (broken v6 egress; arbitrary career hosts) — null on any failure. */
 function fetchHtmlV4(url: string, timeoutMs = 10_000): Promise<string | null> {
@@ -91,6 +126,7 @@ export function startCareerExtractWorker(api: ApiClient): Worker {
       let confidenceTotal = 0;
       let confidencePages = 0;
       const rejections: Record<string, number> = {};
+      const jsWallCompanyIds: string[] = []; // static tier hit an app shell → render tier
 
       let snapshotted = 0;
       for (const company of due) {
@@ -115,6 +151,9 @@ export function startCareerExtractWorker(api: ApiClient): Worker {
           confidenceTotal += confidence;
           confidencePages++;
         }
+        // Static tier found nothing but the page is a JS app shell → hand it to
+        // the render tier, which loads it in a browser and re-runs THIS extractor.
+        if (jobs.length === 0 && looksJsRendered(html)) jsWallCompanyIds.push(company.id);
         const clean = boardJobs.filter(valid);
         if (clean.length > 0) {
           pagesWithJobs++;
@@ -150,6 +189,17 @@ export function startCareerExtractWorker(api: ApiClient): Worker {
       if (all.length > 0) {
         ingested = await api.ingestBoardJobs(`career-page-${EXTRACTOR_VERSION}`, all);
       }
+      // Hand JS-app-shell pages to the render tier (no-op there until a render
+      // service is configured). A failure must never fail the extraction run.
+      if (jsWallCompanyIds.length > 0) {
+        try {
+          const f = await api.flagForRender(jsWallCompanyIds);
+          console.log(`[career-extract] flagged ${f.flagged} JS-shell pages for render`);
+        } catch (err) {
+          console.warn(`[career-extract] flag-render failed: ${err}`);
+        }
+      }
+
       const totalMs = Date.now() - started;
       console.log(
         `[career-extract] ${processed} pages · ${fetchFailed} fetch-failed · ${pagesWithJobs} with jobs · ` +
@@ -320,4 +370,136 @@ export async function ensureReplayExtractSchedule(): Promise<void> {
   );
   await queue.close();
   console.log('[scheduler] replay-extract: daily (concurrency 1)');
+}
+
+/**
+ * Render tier (Phase 4) — "just another renderer" behind the SAME pipeline. For
+ * JS-app-shell career pages the static tier can't read, this asks the render
+ * service for the browser-rendered HTML, then runs the EXACT SAME deterministic
+ * extractor → validate → snapshot (so rendered pages are replayable too) →
+ * ingest (fingerprint dedup, embed, Opportunity Score). No new extraction logic.
+ *
+ * Fully feature-flagged: with no RENDER_SERVICE_URL the worker is a clean no-op,
+ * so it ships to the 2 GB box today and activates the moment a render service
+ * (Playwright/Crawl4AI on a bigger box) is pointed at it.
+ */
+export function startRenderExtractWorker(api: ApiClient): Worker {
+  return new Worker(
+    QueueNames.RENDER_EXTRACT,
+    async (_job: Job) => {
+      if (!process.env.RENDER_SERVICE_URL) {
+        return { skipped: 'no RENDER_SERVICE_URL configured' };
+      }
+      const started = Date.now();
+      const due = await api.getRenderDue(RENDER_BATCH);
+      let processed = 0;
+      let renderFailed = 0;
+      let pagesWithJobs = 0;
+      let snapshotted = 0;
+      let confidenceTotal = 0;
+      let confidencePages = 0;
+      let fetchMsTotal = 0;
+      let parseMsTotal = 0;
+      const rejections: Record<string, number> = {};
+      const all: BoardJob[] = [];
+
+      for (const company of due) {
+        processed++;
+        const t0 = Date.now();
+        const html = await fetchRenderedHtml(company.careerPageUrl);
+        fetchMsTotal += Date.now() - t0;
+        if (!html) {
+          renderFailed++;
+          continue;
+        }
+        const t1 = Date.now();
+        const { boardJobs, jobs, confidence, rejections: rej } = extractCareerPage(
+          html,
+          company.careerPageUrl,
+          company.name,
+          CONFIDENCE_THRESHOLD,
+        );
+        parseMsTotal += Date.now() - t1;
+        for (const [k, v] of Object.entries(rej)) rejections[k] = (rejections[k] ?? 0) + v;
+        if (jobs.length > 0) {
+          confidenceTotal += confidence;
+          confidencePages++;
+        }
+        const clean = boardJobs.filter(valid);
+        if (clean.length > 0) {
+          pagesWithJobs++;
+          all.push(...clean);
+        }
+        // Snapshot the rendered HTML — rendered pages join the replay corpus too.
+        if (jobs.length > 0) {
+          try {
+            await api.storeSnapshot({
+              companyId: company.id,
+              url: company.careerPageUrl,
+              html: preprocess(html).slice(0, SNAPSHOT_CAP),
+              extractorVersion: EXTRACTOR_VERSION,
+              confidence,
+              jobsAccepted: clean.length,
+              candidateCount: jobs.length,
+            });
+            snapshotted++;
+          } catch (err) {
+            console.warn(`[render-extract] snapshot failed for ${company.name}: ${err}`);
+          }
+        }
+      }
+
+      let ingested: { found: number; created: number; duplicates?: number } = {
+        found: 0,
+        created: 0,
+      };
+      if (all.length > 0) {
+        ingested = await api.ingestBoardJobs(`career-render-${EXTRACTOR_VERSION}`, all);
+      }
+      const totalMs = Date.now() - started;
+      console.log(
+        `[render-extract] ${processed} pages · ${renderFailed} render-failed · ${pagesWithJobs} with jobs · ` +
+          `${all.length} extracted · ${ingested.created} new · ${totalMs}ms`,
+      );
+
+      if (processed > 0) {
+        try {
+          await api.recordExtractionRun({
+            kind: 'render',
+            extractorVersion: EXTRACTOR_VERSION,
+            companiesQueued: due.length,
+            fetched: processed - renderFailed,
+            fetchFailed: renderFailed,
+            pagesWithJobs,
+            jobsExtracted: all.length,
+            jobsIngested: ingested.created,
+            duplicates: ingested.duplicates ?? 0,
+            snapshotted,
+            avgConfidence: confidencePages ? Math.round(confidenceTotal / confidencePages) : 0,
+            avgFetchMs: processed ? Math.round(fetchMsTotal / processed) : 0,
+            avgParseMs: confidencePages ? Math.round(parseMsTotal / Math.max(1, confidencePages)) : 0,
+            totalMs,
+            rejections,
+          });
+        } catch (err) {
+          console.warn(`[render-extract] metrics record failed: ${err}`);
+        }
+      }
+
+      return { processed, renderFailed, pagesWithJobs, extracted: all.length, ...ingested };
+    },
+    { connection: createRedisConnection(), concurrency: 1 },
+  );
+}
+
+/** Render tier runs every 6h, offset from the static tier. No-op without a service. */
+export async function ensureRenderExtractSchedule(): Promise<void> {
+  const queue = new Queue(QueueNames.RENDER_EXTRACT, { connection: createRedisConnection() });
+  await queue.upsertJobScheduler(
+    'render-extract-6h',
+    { pattern: '45 */6 * * *' }, // every 6h at :45 (static runs at :15)
+    { name: 'scheduled', opts: { attempts: 1, removeOnComplete: true, removeOnFail: true } },
+  );
+  await queue.close();
+  console.log('[scheduler] render-extract: every 6h (concurrency 1)');
 }

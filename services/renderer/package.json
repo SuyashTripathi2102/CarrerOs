@@ -1,0 +1,13 @@
+{
+  "name": "careeros-renderer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Headless-browser render service for CareerOS Phase 4. Loads JS-only career pages and returns rendered HTML for the SAME deterministic extractor. Runs on its own box — Chromium is too heavy for the API box.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "playwright": "^1.49.1"
+  }
+}

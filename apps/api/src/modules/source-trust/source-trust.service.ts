@@ -30,9 +30,10 @@ const BASELINES: Record<string, number> = {
 };
 const DEFAULT_BASELINE = 85;
 
-/** Baseline prior for a source string. Career-page/replay share one prior. */
+/** Baseline prior for a source string. Career-page/replay/render share priors. */
 export function baselineFor(source: string): number {
   if (source.startsWith('career-page') || source.startsWith('career-replay')) return 94;
+  if (source.startsWith('career-render')) return 92; // rendered, same parser, slightly less proven
   return BASELINES[source] ?? DEFAULT_BASELINE;
 }
 
