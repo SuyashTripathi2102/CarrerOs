@@ -141,4 +141,10 @@ export class DiscoveryController {
   pipeline() {
     return this.discovery.pipelineMetrics();
   }
+
+  /** Adaptive-crawl tier distribution — dead-company backoff made visible. */
+  @Get('crawl-schedule')
+  crawlSchedule() {
+    return this.discovery.crawlScheduleHealth();
+  }
 }

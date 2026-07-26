@@ -73,6 +73,15 @@ interface SourceTrust {
   jobsFresh: number;
 }
 
+interface CrawlSchedule {
+  total: number;
+  hot: number;
+  warm: number;
+  cold: number;
+  dormant: number;
+  dormantPct: number;
+}
+
 interface Pipeline {
   window: string;
   runs: number;
@@ -160,6 +169,7 @@ export default function InsightsPage() {
   const [replay, setReplay] = useState<Replay | null>(null);
   const [trust, setTrust] = useState<SourceTrust[] | null>(null);
   const [pipeline, setPipeline] = useState<Pipeline | null>(null);
+  const [schedule, setSchedule] = useState<CrawlSchedule | null>(null);
 
   useEffect(() => {
     apiGet<Insights>('/dashboard').then(setData);
@@ -181,6 +191,9 @@ export default function InsightsPage() {
     apiGet<Pipeline>('/discovery/pipeline')
       .then(setPipeline)
       .catch(() => setPipeline(null));
+    apiGet<CrawlSchedule>('/discovery/crawl-schedule')
+      .then(setSchedule)
+      .catch(() => setSchedule(null));
   }, []);
 
   return (
@@ -317,6 +330,30 @@ export default function InsightsPage() {
                 <p className="mt-3 text-[11px] text-neutral-500">
                   Queued → fetched → parsed (page yielded ≥1 job) → accepted → ingested, then the
                   global embed → rank stages. A big drop between two stages is exactly where to look.
+                </p>
+              </section>
+            )}
+
+            {schedule && schedule.total > 0 && (
+              <section className="mt-8 rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+                <div className="flex items-baseline justify-between">
+                  <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-400">
+                    Adaptive crawl schedule
+                  </h2>
+                  <span className="text-[11px] text-neutral-500">
+                    {schedule.total.toLocaleString()} monitored
+                  </span>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+                  <PipeStat label="Hot · 30m" value={schedule.hot} tone="good" />
+                  <PipeStat label="Warm · 4h" value={schedule.warm} />
+                  <PipeStat label="Cold · 24h" value={schedule.cold} tone="mid" />
+                  <PipeStat label="Dormant · 30d" value={schedule.dormant} />
+                </div>
+                <p className="mt-3 text-[11px] text-neutral-500">
+                  Each company&apos;s crawl cadence follows its own hiring history. {schedule.dormantPct}%
+                  are dormant (no live jobs, nothing new in ~4 months) — crawled monthly, not
+                  hourly, so the box spends its budget where jobs actually appear.
                 </p>
               </section>
             )}

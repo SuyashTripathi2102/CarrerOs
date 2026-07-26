@@ -8,6 +8,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CompaniesService } from '../companies/companies.service';
 import { computeConfidence } from '../discovery/discovery.service';
 import { jobFingerprint } from './job-fingerprint';
+import { adaptiveTier, TIER_INTERVAL_MS, type Tier } from './crawl-scheduling';
 import { EMBED_JOBS_QUEUE } from './internal.constants';
 
 export interface SyncResult {
@@ -19,12 +20,6 @@ export interface SyncResult {
   duplicates?: number; // cross-source fingerprint collisions collapsed away
 }
 
-/** Tier → how long until the next crawl after a successful sync. */
-const TIER_INTERVAL_MS: Record<CrawlTier, number> = {
-  HOT: 30 * 60 * 1000, // 30 min
-  WARM: 4 * 60 * 60 * 1000, // 4 h
-  COLD: 24 * 60 * 60 * 1000, // 24 h
-};
 const FAILURE_BACKOFF_MS = 60 * 60 * 1000; // failed company retries in 1h, not hot-loop
 
 const UPSERT_CHUNK = 500;
@@ -79,7 +74,7 @@ export class IngestService {
         },
       });
 
-      await this.bumpNextCrawl(companyId, /* failed */ false);
+      await this.applyAdaptiveSchedule(companyId);
       await this.updateConfidenceAfterCrawl(companyId, jobs.length > 0);
       await this.enqueueEmbeddings(newJobIds);
 
@@ -350,10 +345,50 @@ export class IngestService {
     });
     const interval = failed
       ? FAILURE_BACKOFF_MS
-      : TIER_INTERVAL_MS[company?.crawlTier ?? CrawlTier.WARM];
+      : TIER_INTERVAL_MS[(company?.crawlTier ?? CrawlTier.WARM) as Tier];
     await this.prisma.company.update({
       where: { id: companyId },
       data: { nextCrawlAt: new Date(Date.now() + interval) },
+    });
+  }
+
+  /**
+   * Set the crawl tier + next-crawl time from the company's own hiring history:
+   * frequent shippers get visited often, the quiet get backed off, the long-dead
+   * go DORMANT (monthly). A watched company is always kept HOT — the user is
+   * actively tracking it, so we crawl it eagerly regardless of recent volume.
+   */
+  private async applyAdaptiveSchedule(companyId: string): Promise<void> {
+    const [stats] = await this.prisma.$queryRaw<
+      [{ active: bigint; new14: bigint; last_new: Date | null; attempts: bigint; watched: bigint }]
+    >`
+      SELECT
+        count(*) FILTER (WHERE status = 'ACTIVE') AS active,
+        count(*) FILTER (WHERE COALESCE("postedAt", "firstSeenAt") > now() - interval '14 days') AS new14,
+        max("firstSeenAt") AS last_new,
+        (SELECT count(*) FROM crawl_runs WHERE "companyId" = ${companyId}) AS attempts,
+        (SELECT count(*) FROM company_watches WHERE "companyId" = ${companyId}) AS watched
+      FROM jobs WHERE "companyId" = ${companyId}
+    `;
+
+    const daysSinceLastNewJob = stats.last_new
+      ? Math.floor((Date.now() - new Date(stats.last_new).getTime()) / 86_400_000)
+      : null;
+    let tier: Tier = adaptiveTier({
+      newJobs14d: Number(stats.new14),
+      activeJobs: Number(stats.active),
+      daysSinceLastNewJob,
+      crawlAttempts: Number(stats.attempts),
+    });
+    // Watchlist overrides adaptive backoff — never let a tracked company go cold.
+    if (Number(stats.watched) > 0) tier = 'HOT';
+
+    await this.prisma.company.update({
+      where: { id: companyId },
+      data: {
+        crawlTier: tier as CrawlTier,
+        nextCrawlAt: new Date(Date.now() + TIER_INTERVAL_MS[tier]),
+      },
     });
   }
 

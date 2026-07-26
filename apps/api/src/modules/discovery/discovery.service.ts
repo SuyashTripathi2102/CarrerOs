@@ -576,6 +576,30 @@ export class DiscoveryService {
   }
 
   /**
+   * Adaptive-crawl health: how the monitored corpus is distributed across tiers,
+   * so the dead-company backoff is visible. A large DORMANT count is a good sign
+   * — it means the scheduler stopped wasting crawls on companies that never post.
+   */
+  async crawlScheduleHealth() {
+    const rows = await this.prisma.company.groupBy({
+      by: ['crawlTier'],
+      where: { discoveryStage: DiscoveryStage.MONITORED },
+      _count: { _all: true },
+    });
+    const byTier: Record<string, number> = { HOT: 0, WARM: 0, COLD: 0, DORMANT: 0 };
+    for (const r of rows) byTier[r.crawlTier] = r._count._all;
+    const total = Object.values(byTier).reduce((a, b) => a + b, 0);
+    return {
+      total,
+      hot: byTier.HOT,
+      warm: byTier.WARM,
+      cold: byTier.COLD,
+      dormant: byTier.DORMANT,
+      dormantPct: total > 0 ? Math.round((byTier.DORMANT / total) * 100) : 0,
+    };
+  }
+
+  /**
    * Discovery coverage per city — the observability the funnel was missing.
    * For each city we know: companies discovered → career pages found → ATS
    * detected → monitored → actually hiring → engineering roles open. Coverage %
