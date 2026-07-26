@@ -11,6 +11,7 @@ import {
   type JobClassification,
 } from '../matching/role-classification';
 import { companyTier, isEvergreen } from './company-tier';
+import { SourceTrustService } from '../source-trust/source-trust.service';
 
 /** Bump when decide() changes: stored verdicts say which logic produced them. */
 export const DECISION_VERSION = 1;
@@ -53,6 +54,8 @@ interface ScoringContext {
     salaryMax: number | null;
     currency: string | null;
     companyId: string;
+    source: string | null;
+    sourceTrust: number | null; // 0-100 trust of the ingest source; null = unknown
   };
   prefs: {
     workModes: string[];
@@ -83,7 +86,10 @@ const WEIGHTS = {
 
 @Injectable()
 export class OpportunityService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly sourceTrust: SourceTrustService,
+  ) {}
 
   /** Compute + persist the opportunity score for one JobMatch. */
   async scoreMatch(matchId: string): Promise<OpportunityResult | null> {
@@ -95,6 +101,8 @@ export class OpportunityService {
       },
     });
     if (!match || match.job.status !== JobStatus.ACTIVE) return null;
+
+    const sourceTrust = await this.sourceTrust.trustFor(match.job.source);
 
     const result = this.compute({
       match: {
@@ -113,6 +121,8 @@ export class OpportunityService {
         salaryMax: match.job.salaryMax,
         currency: match.job.currency,
         companyId: match.job.companyId,
+        source: match.job.source,
+        sourceTrust,
       },
       prefs: match.user.preference
         ? {
@@ -401,6 +411,25 @@ export class OpportunityService {
       Math.round(
         (modules.reduce((s, m) => s + m.score * m.weight, 0) / totalWeight) * 10,
       ) / 10;
+
+    // Source reliability nudge (bounded ±4 around a 92 baseline, applied like the
+    // verification gate — a direct adjustment, not a weighted module — so it
+    // doesn't dilute the renormalized blend). A top-tier ATS edges out an equal
+    // job from a noisier source; a stale-heavy source is gently discounted.
+    if (ctx.job.sourceTrust != null) {
+      const nudge = Math.max(-4, Math.min(3, Math.round((ctx.job.sourceTrust - 92) / 4)));
+      if (nudge !== 0) {
+        opportunityScore = Math.max(0, Math.min(100, Math.round((opportunityScore + nudge) * 10) / 10));
+      }
+      modules.push({
+        module: 'sourceReliability',
+        score: ctx.job.sourceTrust,
+        weight: 0, // informational — the nudge already applied
+        reason: `${ctx.job.source ?? 'source'} reliability ${ctx.job.sourceTrust}/100${
+          nudge !== 0 ? ` (${nudge > 0 ? '+' : ''}${nudge})` : ''
+        }`,
+      });
+    }
 
     // Verification gate: never silently recommend a company we barely know.
     // The 5%-weight quality module can't express "we have no idea who this

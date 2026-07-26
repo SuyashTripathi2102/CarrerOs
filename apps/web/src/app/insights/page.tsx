@@ -64,6 +64,15 @@ interface Replay {
   currentVersion: string;
 }
 
+interface SourceTrust {
+  source: string;
+  baseline: number;
+  trustScore: number;
+  jobsActive: number;
+  jobsStale: number;
+  jobsFresh: number;
+}
+
 function Tile({ label, value, hint }: { label: string; value: number; hint?: string }) {
   return (
     <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
@@ -91,6 +100,7 @@ export default function InsightsPage() {
   const [cities, setCities] = useState<CityCoverage[] | null>(null);
   const [extraction, setExtraction] = useState<Extraction | null>(null);
   const [replay, setReplay] = useState<Replay | null>(null);
+  const [trust, setTrust] = useState<SourceTrust[] | null>(null);
 
   useEffect(() => {
     apiGet<Insights>('/dashboard').then(setData);
@@ -106,6 +116,9 @@ export default function InsightsPage() {
     apiGet<Replay>('/discovery/replay')
       .then(setReplay)
       .catch(() => setReplay(null));
+    apiGet<SourceTrust[]>('/source-trust')
+      .then(setTrust)
+      .catch(() => setTrust([]));
   }, []);
 
   return (
@@ -221,6 +234,54 @@ export default function InsightsPage() {
                 <p className="mt-3 text-[11px] text-neutral-500">
                   Target-role India jobs (≤30 days) per 100 companies discovered. Adding companies to
                   a low-yield source does not add opportunities.
+                </p>
+              </section>
+            )}
+
+            {trust && trust.length > 0 && (
+              <section className="mt-8 rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+                <h2 className="text-sm font-medium uppercase tracking-wide text-neutral-400">
+                  Source trust
+                </h2>
+                <div className="mt-3 overflow-x-auto">
+                  <table className="w-full min-w-[480px] text-sm">
+                    <thead>
+                      <tr className="text-left text-[10px] uppercase tracking-wide text-neutral-500">
+                        <th className="pb-2 font-medium">Ingest source</th>
+                        <th className="pb-2 text-right font-medium">Trust</th>
+                        <th className="pb-2 text-right font-medium">Baseline</th>
+                        <th className="pb-2 text-right font-medium">Active</th>
+                        <th className="pb-2 text-right font-medium">Fresh</th>
+                        <th className="pb-2 text-right font-medium">Stale</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {trust.map((t) => (
+                        <tr key={t.source} className="border-t border-neutral-800">
+                          <td className="py-2 text-neutral-200">{t.source}</td>
+                          <td
+                            className={`py-2 text-right font-medium tabular-nums ${
+                              t.trustScore >= 95
+                                ? 'text-emerald-400'
+                                : t.trustScore >= 80
+                                  ? 'text-amber-400'
+                                  : 'text-red-400'
+                            }`}
+                          >
+                            {t.trustScore}
+                          </td>
+                          <td className="py-2 text-right tabular-nums text-neutral-500">{t.baseline}</td>
+                          <td className="py-2 text-right tabular-nums text-neutral-400">{t.jobsActive}</td>
+                          <td className="py-2 text-right tabular-nums text-emerald-400/80">{t.jobsFresh}</td>
+                          <td className="py-2 text-right tabular-nums text-red-400/70">{t.jobsStale}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="mt-3 text-[11px] text-neutral-500">
+                  A curated baseline nudged by observed listing quality (fresh up, stale down). Feeds
+                  a small bounded adjustment into every Opportunity Score.
                 </p>
               </section>
             )}

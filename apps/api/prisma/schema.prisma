@@ -777,6 +777,23 @@ model ExtractionSnapshot {
   @@map("extraction_snapshots")
 }
 
+// Per-source trust: a curated baseline nudged by observed listing quality. Feeds
+// a small, bounded adjustment into the Opportunity Score, and the source-yield
+// dashboard. Recomputed daily from live job data. See source-trust.service.ts.
+model SourceTrust {
+  source      String   @id // ingest source, e.g. "adzuna" | "career-page-deterministic-v1"
+  baseline    Int      @default(85) // curated prior
+  trustScore  Int      @default(85) // recomputed 0-100
+  jobsSeen    Int      @default(0)
+  jobsActive  Int      @default(0)
+  jobsRemoved Int      @default(0)
+  jobsStale   Int      @default(0) // active but > 60d — source not pruning dead posts
+  jobsFresh   Int      @default(0) // active and < 14d
+  computedAt  DateTime @default(now())
+
+  @@map("source_trust")
+}
+
 // One row per crawl attempt per company — the admin panel's data source.
 model CrawlRun {
   id          String      @id @default(cuid())

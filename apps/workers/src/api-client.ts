@@ -32,6 +32,10 @@ export class ApiClient {
     return this.request('POST', '/internal/daily-brief/consider-digest');
   }
 
+  recomputeSourceTrust(): Promise<{ sources: number }> {
+    return this.request('POST', '/internal/source-trust/recompute');
+  }
+
   syncCompanyJobs(companyId: string, source: string, jobs: NormalizedJob[]): Promise<SyncResult> {
     return this.request('POST', `/internal/companies/${companyId}/jobs/sync`, { source, jobs });
   }

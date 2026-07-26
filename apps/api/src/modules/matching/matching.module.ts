@@ -3,6 +3,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { EMBED_JOBS_QUEUE } from '../internal/internal.constants';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { OpportunityModule } from '../opportunity/opportunity.module';
+import { SourceTrustModule } from '../source-trust/source-trust.module';
 import { EmbedProcessor } from './embed.processor';
 import { MATCH_NEW_JOBS_QUEUE } from './matching.constants';
 import { MatchNewJobsProcessor } from './match-new-jobs.processor';
@@ -14,6 +15,7 @@ import { MatchingService } from './matching.service';
 @Module({
   imports: [
     OpportunityModule,
+    SourceTrustModule,
     NotificationsModule,
     BullModule.registerQueue({ name: GENERATE_MATCHES_QUEUE }),
     BullModule.registerQueue({ name: EMBED_JOBS_QUEUE }),

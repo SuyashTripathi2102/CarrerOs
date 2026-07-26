@@ -17,6 +17,7 @@ import {
 import type { JobClassification } from './role-classification';
 import { atsKeywordAudit } from './ats-keywords';
 import { opportunityScore, type HiringTrend } from './opportunity-score';
+import { SourceTrustService } from '../source-trust/source-trust.service';
 
 const SIMILARITY_TOP_K = 40; // pgvector prefilter size
 const LLM_SCORE_TOP_N = 15; // how many get deep LLM scoring
@@ -104,6 +105,7 @@ export class MatchingService {
     private readonly opportunity: OpportunityService,
     private readonly notifications: NotificationsService,
     private readonly classifier: JobClassifierService,
+    private readonly sourceTrust: SourceTrustService,
   ) {}
 
   /**
@@ -822,6 +824,8 @@ export class MatchingService {
     // referral/watchlist/fresh job can rise above a slightly-higher-fit cold one.
     const pool = Math.min(200, limit * 3);
 
+    const trustMap = await this.sourceTrust.trustMap();
+
     const rows = await this.prisma.$queryRaw<
       Array<{
         id: string;
@@ -833,6 +837,7 @@ export class MatchingService {
         country: string | null;
         postedAt: Date | null;
         firstSeenAt: Date;
+        source: string | null;
         similarity: number;
         applied: boolean;
         verdict: string | null;
@@ -843,7 +848,7 @@ export class MatchingService {
       }>
     >`
       SELECT j.id, j.title, j.location, j."workMode", j.url, j.country,
-             j."postedAt", j."firstSeenAt", c.name AS company,
+             j."postedAt", j."firstSeenAt", j.source, c.name AS company,
              (1 - (je.vector <=> re.vector))::float8 AS similarity,
              (a.id IS NOT NULL) AS applied,
              m.verdict,
@@ -879,6 +884,7 @@ export class MatchingService {
           watched: r.watched,
           hiringTrend: (r.hiring_trend as HiringTrend) ?? null,
           applied: r.applied,
+          sourceTrust: r.source ? (trustMap.get(r.source) ?? null) : null,
         });
         return {
           jobId: r.id,

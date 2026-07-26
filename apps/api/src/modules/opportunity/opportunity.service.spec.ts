@@ -1,8 +1,8 @@
 import { HiringTrend } from '@prisma/client';
 import { OpportunityService } from './opportunity.service';
 
-/** compute() is pure — no Prisma needed for these tests. */
-const service = new OpportunityService(null as never);
+/** compute() is pure — no Prisma or SourceTrust needed for these tests. */
+const service = new OpportunityService(null as never, null as never);
 
 function ctx(overrides: Partial<Parameters<OpportunityService['compute']>[0]> = {}) {
   return {
@@ -23,6 +23,8 @@ function ctx(overrides: Partial<Parameters<OpportunityService['compute']>[0]> = 
       salaryMax: 3_000_000,
       currency: 'INR',
       companyId: 'c1',
+      source: 'greenhouse',
+      sourceTrust: null,
       ...(overrides.job ?? {}),
     },
     prefs: overrides.prefs !== undefined ? overrides.prefs : {
@@ -115,6 +117,18 @@ describe('OpportunityService.compute', () => {
     );
     expect(unverified.opportunityScore).toBeLessThan(trusted.opportunityScore * 0.9);
     expect(unverified.breakdown.some((m) => m.module === 'verification')).toBe(true);
+  });
+
+  it('nudges the score by source trust, bounded and explainable', () => {
+    const neutral = service.compute(ctx()); // sourceTrust null -> no module, no nudge
+    expect(neutral.breakdown.some((m) => m.module === 'sourceReliability')).toBe(false);
+
+    const trusted = service.compute(ctx({ job: { sourceTrust: 100 } as never }));
+    const noisy = service.compute(ctx({ job: { sourceTrust: 60 } as never }));
+    expect(trusted.breakdown.some((m) => m.module === 'sourceReliability')).toBe(true);
+    // 100 -> +2, 60 -> -4 : the bounded band, trusted clearly above noisy.
+    expect(trusted.opportunityScore).toBeGreaterThan(noisy.opportunityScore);
+    expect(trusted.opportunityScore - neutral.opportunityScore).toBeLessThanOrEqual(3);
   });
 
   it('decays freshness for stale postings', () => {

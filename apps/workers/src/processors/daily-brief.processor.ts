@@ -15,6 +15,14 @@ export function startDailyBriefWorker(api: ApiClient): Worker {
         console.log(`[consider-digest] sent: ${res.sent}`);
         return res;
       }
+      // Refresh source-trust before the morning's scoring reflects it — one
+      // cheap aggregate; a failure here must never block the brief.
+      try {
+        const t = await api.recomputeSourceTrust();
+        console.log(`[source-trust] recomputed: ${t.sources} sources`);
+      } catch (err) {
+        console.warn(`[source-trust] recompute skipped: ${err}`);
+      }
       const res = await api.triggerDailyBrief();
       console.log(`[daily-brief] sent: ${res.sent}`);
       return res;

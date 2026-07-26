@@ -17,6 +17,7 @@ export interface OppSignals {
   watched: boolean; // company on the user's watchlist
   hiringTrend: HiringTrend;
   applied: boolean;
+  sourceTrust?: number | null; // 0–100 trust of the ingest source; null = unknown
 }
 
 export interface OppFactor {
@@ -68,6 +69,13 @@ export function opportunityScore(s: OppSignals): Opportunity {
 
   if (s.hiringTrend === 'GROWING') add('Company hiring is growing', 5);
   else if (s.hiringTrend === 'DECLINING') add('Company hiring is slowing', -3);
+
+  // Source reliability — a small nudge so a top-tier ATS edges out an equal-fit
+  // job from a noisier source, and a stale-heavy source is gently discounted.
+  if (s.sourceTrust != null) {
+    if (s.sourceTrust >= 95) add('Reliable source', 3);
+    else if (s.sourceTrust <= 75) add('Low-trust source', -5);
+  }
 
   // Already applied — keep it visible but sink it so fresh leads rise.
   if (s.applied) add('Already applied', -18);
