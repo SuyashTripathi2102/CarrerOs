@@ -5,8 +5,8 @@ import Link from 'next/link';
 import { apiGet, apiPost } from '@/lib/api';
 
 /** Fire-and-forget outcome logging — never blocks navigation, never throws. */
-function track(jobId: string, type: 'CLICKED' | 'DISMISSED') {
-  apiPost('/events', { jobId, type, surface: 'browse' }).catch(() => {});
+function track(jobId: string, type: 'CLICKED' | 'DISMISSED', rank: number) {
+  apiPost('/events', { jobId, type, surface: 'browse', rank }).catch(() => {});
 }
 
 interface Factor {
@@ -53,7 +53,16 @@ export default function BrowsePage() {
 
   useEffect(() => {
     apiGet<Browse>('/matches/browse?limit=100')
-      .then(setData)
+      .then((d) => {
+        setData(d);
+        // Log impressions once per load — the CTR/apply-rate denominator.
+        if (d.items.length > 0) {
+          apiPost('/events/impressions', {
+            surface: 'browse',
+            items: d.items.map((j, i) => ({ jobId: j.jobId, rank: i + 1 })),
+          }).catch(() => {});
+        }
+      })
       .catch((e) => setError(String(e)));
   }, []);
 
@@ -70,6 +79,9 @@ export default function BrowsePage() {
       )
     : data.items
   ).filter((j) => !dismissed.has(j.jobId));
+
+  // True rank = position in the opportunity-ranked list (not the filtered view).
+  const rankOf = new Map(data.items.map((j, i) => [j.jobId, i + 1]));
 
   return (
     <Shell>
@@ -109,7 +121,7 @@ export default function BrowsePage() {
             <div key={j.jobId} className="group relative">
             <Link
               href={`/jobs/${j.jobId}`}
-              onClick={() => track(j.jobId, 'CLICKED')}
+              onClick={() => track(j.jobId, 'CLICKED', rankOf.get(j.jobId) ?? 0)}
               className="flex items-start gap-3 px-3 py-2.5 pr-9 transition hover:bg-neutral-900"
             >
               <div className="w-10 flex-none text-right">
@@ -166,7 +178,7 @@ export default function BrowsePage() {
               type="button"
               title="Not relevant — hide and record why"
               onClick={() => {
-                track(j.jobId, 'DISMISSED');
+                track(j.jobId, 'DISMISSED', rankOf.get(j.jobId) ?? 0);
                 setDismissed((prev) => new Set(prev).add(j.jobId));
               }}
               className="absolute right-2 top-2 rounded px-1.5 text-neutral-600 opacity-0 transition hover:bg-neutral-800 hover:text-neutral-300 group-hover:opacity-100"

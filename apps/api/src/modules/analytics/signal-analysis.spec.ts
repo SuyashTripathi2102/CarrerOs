@@ -1,4 +1,8 @@
-import { aggregateSignalOutcomes, type OppEventInput } from './signal-analysis';
+import {
+  aggregateSignalOutcomes,
+  recommendationQuality,
+  type OppEventInput,
+} from './signal-analysis';
 
 const ev = (type: string, score: number, mods: [string, number][]): OppEventInput => ({
   type,
@@ -49,8 +53,8 @@ describe('aggregateSignalOutcomes', () => {
     expect(Math.abs(fresh.lift)).toBeLessThan(5);
   });
 
-  it('treats VIEWED as neutral (not counted in engaged/dismissed sample)', () => {
-    const out = aggregateSignalOutcomes([ev('VIEWED', 70, [['resumeFit', 80]])]);
+  it('treats SHOWN as neutral (not counted in engaged/dismissed sample)', () => {
+    const out = aggregateSignalOutcomes([ev('SHOWN', 70, [['resumeFit', 80]])]);
     expect(out.sampleSize).toBe(0);
     expect(out.signals).toHaveLength(0);
   });
@@ -59,5 +63,29 @@ describe('aggregateSignalOutcomes', () => {
     const out = aggregateSignalOutcomes([]);
     expect(out.sampleSize).toBe(0);
     expect(out.avgScore.engaged).toBeNull();
+  });
+});
+
+describe('recommendationQuality', () => {
+  it('computes CTR, apply and dismiss rates from impressions', () => {
+    const events: OppEventInput[] = [
+      ...Array.from({ length: 100 }, () => ev('SHOWN', 60, [])),
+      ...Array.from({ length: 34 }, () => ev('CLICKED', 70, [])),
+      ...Array.from({ length: 11 }, () => ev('APPLIED', 88, [])),
+      ...Array.from({ length: 18 }, () => ev('DISMISSED', 40, [])),
+    ];
+    const q = recommendationQuality(events);
+    expect(q.shown).toBe(100);
+    expect(q.ctr).toBe(34);
+    expect(q.applyRate).toBe(11);
+    expect(q.dismissRate).toBe(18);
+    expect(q.avgScoreApplied).toBe(88);
+    expect(q.avgScoreDismissed).toBe(40);
+  });
+
+  it('returns null rates with no impressions (no divide-by-zero)', () => {
+    const q = recommendationQuality([]);
+    expect(q.ctr).toBeNull();
+    expect(q.applyRate).toBeNull();
   });
 });

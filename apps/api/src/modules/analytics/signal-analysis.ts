@@ -39,6 +39,50 @@ const ENGAGED = new Set(['CLICKED', 'APPLIED']);
 const avg = (xs: number[]): number | null =>
   xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : null;
 
+export interface RecommendationQuality {
+  shown: number;
+  clicked: number;
+  dismissed: number;
+  applied: number;
+  ctr: number | null; // clicked / shown
+  applyRate: number | null; // applied / shown
+  dismissRate: number | null; // dismissed / shown
+  avgScoreApplied: number | null;
+  avgScoreDismissed: number | null;
+}
+
+const pct = (num: number, den: number): number | null =>
+  den > 0 ? Math.round((num / den) * 1000) / 10 : null;
+
+/**
+ * Product-level funnel: from impressions to clicks to applies, plus the score
+ * separation between applied and dismissed. This is the "are the recommendations
+ * any good?" read that a system-metrics dashboard can't give.
+ */
+export function recommendationQuality(events: OppEventInput[]): RecommendationQuality {
+  const counts: Record<string, number> = {};
+  const appliedScores: number[] = [];
+  const dismissedScores: number[] = [];
+  for (const e of events) {
+    counts[e.type] = (counts[e.type] ?? 0) + 1;
+    if (e.type === 'APPLIED' && e.opportunityScore != null) appliedScores.push(e.opportunityScore);
+    if (e.type === 'DISMISSED' && e.opportunityScore != null)
+      dismissedScores.push(e.opportunityScore);
+  }
+  const shown = counts['SHOWN'] ?? 0;
+  return {
+    shown,
+    clicked: counts['CLICKED'] ?? 0,
+    dismissed: counts['DISMISSED'] ?? 0,
+    applied: counts['APPLIED'] ?? 0,
+    ctr: pct(counts['CLICKED'] ?? 0, shown),
+    applyRate: pct(counts['APPLIED'] ?? 0, shown),
+    dismissRate: pct(counts['DISMISSED'] ?? 0, shown),
+    avgScoreApplied: avg(appliedScores),
+    avgScoreDismissed: avg(dismissedScores),
+  };
+}
+
 export function aggregateSignalOutcomes(events: OppEventInput[]): SignalOutcome {
   const counts: Record<string, number> = {};
   for (const e of events) counts[e.type] = (counts[e.type] ?? 0) + 1;

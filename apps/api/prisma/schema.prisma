@@ -524,12 +524,14 @@ model OpportunityEvent {
   id               String   @id @default(cuid())
   userId           String
   jobId            String
-  type             String // VIEWED | CLICKED | DISMISSED | APPLIED
+  type             String // SHOWN | CLICKED | DISMISSED | APPLIED
   surface          String? // where it was shown: browse | today | telegram | tracker
+  rank             Int? // position in the ranked list when shown/acted — for position-bias analysis
   opportunityScore Float? // score at the moment of the action
   verdict          String? // APPLY | CONSIDER | SKIP at that moment
+  jobSource        String? // job provenance/extractor version (e.g. career-page-deterministic-v1)
   breakdown        Json? // [{module, score, weight, reason}] snapshot — the "why"
-  decisionVersion  Int?
+  decisionVersion  Int? // score/decision logic version at the moment (immutable metadata)
   createdAt        DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
