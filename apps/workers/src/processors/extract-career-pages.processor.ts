@@ -5,13 +5,14 @@ import type { BoardJob } from '@careeros/shared';
 import { QueueNames } from '../queues/names';
 import { createRedisConnection } from '../queues/connection';
 import { ApiClient } from '../api-client';
-import { extractCareerPage } from '../adapters/career-extractor';
+import { extractCareerPage, preprocess, EXTRACTOR_VERSION } from '../adapters/career-extractor';
 
-/** The extractor's version — recorded via the ingest source so we know which
- *  parser produced which jobs (and can re-extract when it improves). */
-const EXTRACTOR_VERSION = 'deterministic-v1';
 const BATCH = 30;
 const CONFIDENCE_THRESHOLD = 70;
+// Cap stored HTML: preprocessed career pages are typically 20–150KB; this bounds
+// the pathological ones so one giant page can't blow up the snapshot table.
+const SNAPSHOT_CAP = 500_000;
+const REPLAY_BATCH = 60;
 
 /** IPv4-forced HTML GET (broken v6 egress; arbitrary career hosts) — null on any failure. */
 function fetchHtmlV4(url: string, timeoutMs = 10_000): Promise<string | null> {
@@ -84,6 +85,7 @@ export function startCareerExtractWorker(api: ApiClient): Worker {
       let pagesWithJobs = 0;
       const all: BoardJob[] = [];
 
+      let snapshotted = 0;
       for (const company of due) {
         processed++;
         const html = await fetchHtmlV4(company.careerPageUrl);
@@ -91,7 +93,7 @@ export function startCareerExtractWorker(api: ApiClient): Worker {
           fetchFailed++;
           continue;
         }
-        const { boardJobs } = extractCareerPage(
+        const { boardJobs, jobs, confidence } = extractCareerPage(
           html,
           company.careerPageUrl,
           company.name,
@@ -102,6 +104,26 @@ export function startCareerExtractWorker(api: ApiClient): Worker {
           pagesWithJobs++;
           all.push(...clean);
         }
+
+        // Snapshot any page with job-like structure (>=1 candidate title survived
+        // filtering), even at 0 accepted — that's exactly the recall a better
+        // extractor will unlock on replay, with no re-crawl.
+        if (jobs.length > 0) {
+          try {
+            await api.storeSnapshot({
+              companyId: company.id,
+              url: company.careerPageUrl,
+              html: preprocess(html).slice(0, SNAPSHOT_CAP),
+              extractorVersion: EXTRACTOR_VERSION,
+              confidence,
+              jobsAccepted: clean.length,
+              candidateCount: jobs.length,
+            });
+            snapshotted++;
+          } catch (err) {
+            console.warn(`[career-extract] snapshot failed for ${company.name}: ${err}`);
+          }
+        }
         await new Promise((r) => setTimeout(r, 400)); // pace
       }
 
@@ -111,9 +133,16 @@ export function startCareerExtractWorker(api: ApiClient): Worker {
       }
       console.log(
         `[career-extract] ${processed} pages · ${fetchFailed} fetch-failed · ${pagesWithJobs} with jobs · ` +
-          `${all.length} extracted · ${ingested.created} new · ${Date.now() - started}ms`,
+          `${snapshotted} snapshotted · ${all.length} extracted · ${ingested.created} new · ${Date.now() - started}ms`,
       );
-      return { processed, fetchFailed, pagesWithJobs, extracted: all.length, ...ingested };
+      return {
+        processed,
+        fetchFailed,
+        pagesWithJobs,
+        snapshotted,
+        extracted: all.length,
+        ...ingested,
+      };
     },
     { connection: createRedisConnection(), concurrency: 1 },
   );
@@ -129,4 +158,78 @@ export async function ensureCareerExtractSchedule(): Promise<void> {
   );
   await queue.close();
   console.log('[scheduler] career-extract: every 6h (concurrency 1)');
+}
+
+/**
+ * Replay worker — the payoff of snapshots. Re-runs the CURRENT extractor over
+ * stored HTML that an older version processed, and ingests whatever the improved
+ * parser now finds. No network, no re-crawl: a parser improvement turns into new
+ * jobs across the whole captured corpus. Idempotent — fingerprint dedup at ingest
+ * means re-mining the same page never creates duplicates. After reprocessing, the
+ * snapshot is re-stored under the current version so it leaves the backlog.
+ */
+export function startReplayExtractWorker(api: ApiClient): Worker {
+  return new Worker(
+    QueueNames.REPLAY_EXTRACT,
+    async (_job: Job) => {
+      const started = Date.now();
+      const due = await api.getReplayDue(EXTRACTOR_VERSION, REPLAY_BATCH);
+      let reprocessed = 0;
+      const all: BoardJob[] = [];
+
+      for (const snap of due) {
+        reprocessed++;
+        const { boardJobs, jobs, confidence } = extractCareerPage(
+          snap.html,
+          snap.url,
+          snap.name,
+          CONFIDENCE_THRESHOLD,
+        );
+        const clean = boardJobs.filter(valid);
+        if (clean.length > 0) all.push(...clean);
+        // Re-store under the current version so it exits the replay backlog. The
+        // html is unchanged (from the snapshot itself) so no re-crawl happens.
+        try {
+          await api.storeSnapshot({
+            companyId: snap.companyId,
+            url: snap.url,
+            html: snap.html,
+            extractorVersion: EXTRACTOR_VERSION,
+            confidence,
+            jobsAccepted: clean.length,
+            candidateCount: jobs.length,
+          });
+        } catch (err) {
+          console.warn(`[replay-extract] re-store failed for ${snap.name}: ${err}`);
+        }
+      }
+
+      let ingested = { found: 0, created: 0 };
+      if (all.length > 0) {
+        ingested = await api.ingestBoardJobs(`career-replay-${EXTRACTOR_VERSION}`, all);
+      }
+      console.log(
+        `[replay-extract] ${reprocessed} snapshots · ${all.length} extracted · ` +
+          `${ingested.created} new · ${Date.now() - started}ms`,
+      );
+      return { reprocessed, extracted: all.length, ...ingested };
+    },
+    { connection: createRedisConnection(), concurrency: 1 },
+  );
+}
+
+/**
+ * Replay runs daily. When the extractor version is unchanged it's a no-op (every
+ * snapshot is already current); when it's bumped, this drains the backlog a batch
+ * at a time until the whole corpus has been re-mined by the new parser.
+ */
+export async function ensureReplayExtractSchedule(): Promise<void> {
+  const queue = new Queue(QueueNames.REPLAY_EXTRACT, { connection: createRedisConnection() });
+  await queue.upsertJobScheduler(
+    'replay-extract-daily',
+    { pattern: '45 3 * * *' }, // 03:45 daily
+    { name: 'scheduled', opts: { attempts: 1, removeOnComplete: true, removeOnFail: true } },
+  );
+  await queue.close();
+  console.log('[scheduler] replay-extract: daily (concurrency 1)');
 }

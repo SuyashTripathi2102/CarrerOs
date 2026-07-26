@@ -343,6 +343,7 @@ model Company {
   crawlRuns    CrawlRun[]
   intelligence CompanyIntelligence?
   watches      CompanyWatch[]
+  snapshot     ExtractionSnapshot?
 
   // One company per ATS board — prevents two rows crawling the same source.
   @@unique([atsProvider, atsIdentifier])
@@ -748,6 +749,32 @@ model CompanyIntelligence {
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@map("company_intelligence")
+}
+
+// The stored, preprocessed HTML of a career page at extraction time — the raw
+// material that makes the deterministic pipeline REPLAYABLE. When the extractor
+// improves (v2, or a JS-render tier), we re-run it over stored snapshots and
+// mine new jobs WITHOUT re-crawling the network. One latest snapshot per company
+// (replaced on each real extraction) bounds storage to ~corpus size.
+model ExtractionSnapshot {
+  id               String    @id @default(cuid())
+  companyId        String    @unique
+  url              String // the career page the HTML came from
+  html             String // preprocessed fragment (script/style stripped), capped ~500KB
+  extractorVersion String // the extractor version that last processed this snapshot
+  confidence       Int       @default(0) // page-level confidence at last extraction
+  jobsAccepted     Int       @default(0) // jobs at/above threshold at last extraction
+  candidateCount   Int       @default(0) // titles that survived filtering — replay potential
+  fetchedAt        DateTime  @default(now()) // when the HTML was captured from the network
+  replayedAt       DateTime? // last time an extractor was re-run over this stored HTML
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([extractorVersion]) // "which snapshots are behind the current version?"
+  @@index([replayedAt])
+  @@map("extraction_snapshots")
 }
 
 // One row per crawl attempt per company — the admin panel's data source.

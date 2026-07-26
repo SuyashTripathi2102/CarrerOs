@@ -50,6 +50,17 @@ export class ApiClient {
     return this.request('GET', `/internal/discovery/career-pages/due?limit=${limit}`);
   }
 
+  storeSnapshot(snapshot: SnapshotInput): Promise<{ ok: boolean }> {
+    return this.request('POST', '/internal/discovery/snapshot', snapshot);
+  }
+
+  getReplayDue(version: string, limit: number): Promise<ReplaySnapshot[]> {
+    return this.request(
+      'GET',
+      `/internal/discovery/snapshots/replay-due?version=${encodeURIComponent(version)}&limit=${limit}`,
+    );
+  }
+
   applyDiscoveryResult(companyId: string, result: DiscoveryResult): Promise<{ stage: string }> {
     return this.request('POST', `/internal/discovery/${companyId}/result`, result);
   }
@@ -107,6 +118,23 @@ export interface CareerPageDue {
   id: string;
   name: string;
   careerPageUrl: string;
+}
+
+export interface SnapshotInput {
+  companyId: string;
+  url: string;
+  html: string;
+  extractorVersion: string;
+  confidence: number;
+  jobsAccepted: number;
+  candidateCount: number;
+}
+
+export interface ReplaySnapshot {
+  companyId: string;
+  name: string;
+  url: string;
+  html: string;
 }
 
 export interface CompanyDue {

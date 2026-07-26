@@ -1,6 +1,14 @@
 import type { BoardJob } from '@careeros/shared';
 
 /**
+ * The extractor's version. Bump on ANY change that could extract new or
+ * different jobs from the SAME HTML (new signal, relaxed gate, better candidate
+ * generation). The replay queue re-runs this version over every stored snapshot
+ * still behind it — turning a parser improvement into new jobs with no crawling.
+ */
+export const EXTRACTOR_VERSION = 'deterministic-v1';
+
+/**
  * Deterministic career-page extractor (Tier 1 — no browser, no LLM).
  *
  * Modular by stage: preprocess → candidate generation → feature extraction →
@@ -39,8 +47,10 @@ const clean = (s: string): string =>
 
 /** Stage 1 — strip only non-content noise. We deliberately KEEP nav/header/
  *  footer: real job links often live there ("Careers" / "Hire X"), and the
- *  NEGATIVE signal + role filter reject actual nav junk (Home/About/Contact). */
-function preprocess(html: string): string {
+ *  NEGATIVE signal + role filter reject actual nav junk (Home/About/Contact).
+ *  Exported so the snapshot pipeline stores this smaller fragment (not raw HTML)
+ *  and replay re-extracts from the exact bytes the live run saw. */
+export function preprocess(html: string): string {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')

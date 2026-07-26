@@ -18,7 +18,9 @@ import {
 } from './processors/places-discovery.processor';
 import {
   ensureCareerExtractSchedule,
+  ensureReplayExtractSchedule,
   startCareerExtractWorker,
+  startReplayExtractWorker,
 } from './processors/extract-career-pages.processor';
 
 async function main() {
@@ -34,12 +36,14 @@ async function main() {
     startDailyBriefWorker(api),
     startPlacesDiscoveryWorker(api),
     startCareerExtractWorker(api),
+    startReplayExtractWorker(api),
   ];
   await ensureRefreshSchedule();
   await ensureDailyBriefSchedule();
   await ensurePlacesDiscoverySchedule();
   await ensureBoardSchedules();
   await ensureCareerExtractSchedule();
+  await ensureReplayExtractSchedule();
 
   console.log(`CareerOS workers started (${workers.length} processors listening).`);
 

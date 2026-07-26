@@ -21,6 +21,16 @@ const BulkBodySchema = z.object({
   candidates: z.array(CompanyCandidateSchema).max(5000),
 });
 
+const SnapshotBodySchema = z.object({
+  companyId: z.string().min(1),
+  url: z.string().url(),
+  html: z.string().max(2_000_000),
+  extractorVersion: z.string().min(1),
+  confidence: z.number().int().min(0).max(100).default(0),
+  jobsAccepted: z.number().int().min(0).default(0),
+  candidateCount: z.number().int().min(0).default(0),
+});
+
 /** Internal (worker-facing) endpoints of the Company Discovery Engine. */
 @Public()
 @UseGuards(InternalTokenGuard)
@@ -44,6 +54,24 @@ export class DiscoveryInternalController {
   @Get('career-pages/due')
   careerPagesDue(@Query('limit', new DefaultValuePipe(30), ParseIntPipe) limit: number) {
     return this.discovery.careerPagesDue(limit);
+  }
+
+  /** Persist the preprocessed HTML of a career page — replay's raw material. */
+  @Post('snapshot')
+  snapshot(@Body() body: unknown) {
+    const parsed = SnapshotBodySchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
+    return this.discovery.storeSnapshot(parsed.data);
+  }
+
+  /** Stored snapshots a newer extractor version hasn't reprocessed yet. */
+  @Get('snapshots/replay-due')
+  replayDue(
+    @Query('version') version: string,
+    @Query('limit', new DefaultValuePipe(50), ParseIntPipe) limit: number,
+  ) {
+    if (!version) throw new BadRequestException('version is required');
+    return this.discovery.snapshotsReplayDue(version, limit);
   }
 
   @Post(':companyId/result')
@@ -74,5 +102,11 @@ export class DiscoveryController {
   @Get('extraction')
   extraction() {
     return this.discovery.extractionHealth();
+  }
+
+  /** Replay backlog: captured snapshots + how many are behind the current parser. */
+  @Get('replay')
+  replay(@Query('version') version?: string) {
+    return this.discovery.replayStatus(version || 'deterministic-v1');
   }
 }

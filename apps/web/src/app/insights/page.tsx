@@ -56,6 +56,14 @@ interface Extraction {
   lastRun: string | null;
 }
 
+interface Replay {
+  snapshots: number;
+  behindCurrentVersion: number;
+  jobsAccepted: number;
+  avgConfidence: number;
+  currentVersion: string;
+}
+
 function Tile({ label, value, hint }: { label: string; value: number; hint?: string }) {
   return (
     <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-4">
@@ -82,6 +90,7 @@ export default function InsightsPage() {
   const [sources, setSources] = useState<SourceFunnel[] | null>(null);
   const [cities, setCities] = useState<CityCoverage[] | null>(null);
   const [extraction, setExtraction] = useState<Extraction | null>(null);
+  const [replay, setReplay] = useState<Replay | null>(null);
 
   useEffect(() => {
     apiGet<Insights>('/dashboard').then(setData);
@@ -94,6 +103,9 @@ export default function InsightsPage() {
     apiGet<Extraction>('/discovery/extraction')
       .then(setExtraction)
       .catch(() => setExtraction(null));
+    apiGet<Replay>('/discovery/replay')
+      .then(setReplay)
+      .catch(() => setReplay(null));
   }, []);
 
   return (
@@ -237,6 +249,33 @@ export default function InsightsPage() {
                   precision, modest recall — only anchor-structured pages yield jobs; the rest await
                   the render/LLM tiers.
                 </p>
+
+                {replay && (
+                  <div className="mt-4 border-t border-neutral-800 pt-3">
+                    <div className="flex items-baseline justify-between">
+                      <h3 className="text-[11px] font-medium uppercase tracking-wide text-neutral-500">
+                        Replay corpus · {replay.currentVersion}
+                      </h3>
+                      {replay.behindCurrentVersion > 0 ? (
+                        <span className="text-[11px] text-amber-400">
+                          {replay.behindCurrentVersion} behind — re-mining
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-emerald-400">all current</span>
+                      )}
+                    </div>
+                    <div className="mt-2 grid grid-cols-3 gap-2 text-sm">
+                      <PipeStat label="Snapshots" value={replay.snapshots} />
+                      <PipeStat label="Jobs held" value={replay.jobsAccepted} tone="good" />
+                      <PipeStat label="Avg conf" value={replay.avgConfidence} tone="mid" />
+                    </div>
+                    <p className="mt-2 text-[11px] text-neutral-600">
+                      Stored HTML of every job-bearing page. When the extractor improves, replay
+                      re-mines these {replay.snapshots.toLocaleString()} pages for new jobs — no
+                      re-crawl.
+                    </p>
+                  </div>
+                )}
               </section>
             )}
 

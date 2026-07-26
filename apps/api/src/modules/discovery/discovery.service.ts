@@ -346,6 +346,82 @@ export class DiscoveryService {
     `;
   }
 
+  /**
+   * Store (or replace) the preprocessed HTML snapshot for a company's career
+   * page. One latest snapshot per company — this is the raw material the replay
+   * queue re-mines when the extractor improves. HTML is capped upstream (~500KB).
+   */
+  async storeSnapshot(input: {
+    companyId: string;
+    url: string;
+    html: string;
+    extractorVersion: string;
+    confidence: number;
+    jobsAccepted: number;
+    candidateCount: number;
+  }) {
+    const data = {
+      url: input.url,
+      html: input.html,
+      extractorVersion: input.extractorVersion,
+      confidence: input.confidence,
+      jobsAccepted: input.jobsAccepted,
+      candidateCount: input.candidateCount,
+    };
+    await this.prisma.extractionSnapshot.upsert({
+      where: { companyId: input.companyId },
+      create: { companyId: input.companyId, fetchedAt: new Date(), ...data },
+      // A store from a live crawl refreshes fetchedAt; a store from replay keeps
+      // the original fetchedAt (html unchanged) but advances the version.
+      update: { ...data, fetchedAt: new Date() },
+    });
+    return { ok: true };
+  }
+
+  /**
+   * Snapshots that a newer extractor hasn't processed yet — the replay backlog.
+   * Claims the batch (sets replayedAt) so runs rotate and don't re-hand the same
+   * pages. `version` is the caller's current extractor version; anything stored
+   * under a different version is replay-eligible.
+   */
+  async snapshotsReplayDue(version: string, limit = 50) {
+    return this.prisma.$queryRaw<
+      Array<{ companyId: string; name: string; url: string; html: string }>
+    >`
+      WITH due AS (
+        SELECT s."companyId"
+        FROM extraction_snapshots s
+        WHERE s."extractorVersion" <> ${version}
+        ORDER BY s."replayedAt" ASC NULLS FIRST, s."fetchedAt" ASC
+        LIMIT ${Math.min(200, Math.max(1, limit))}
+      )
+      UPDATE extraction_snapshots s SET "replayedAt" = now()
+      FROM companies c
+      WHERE s."companyId" IN (SELECT "companyId" FROM due) AND c.id = s."companyId"
+      RETURNING s."companyId" AS "companyId", c.name AS name, s.url AS url, s.html AS html
+    `;
+  }
+
+  /** How much of the corpus is captured + how far behind the current extractor. */
+  async replayStatus(version: string) {
+    const [row] = await this.prisma.$queryRaw<
+      [{ total: bigint; behind: bigint; accepted: bigint; avgconf: number | null }]
+    >`
+      SELECT count(*) AS total,
+             count(*) FILTER (WHERE "extractorVersion" <> ${version}) AS behind,
+             COALESCE(sum("jobsAccepted"), 0) AS accepted,
+             avg(confidence) AS avgconf
+      FROM extraction_snapshots
+    `;
+    return {
+      snapshots: Number(row.total),
+      behindCurrentVersion: Number(row.behind),
+      jobsAccepted: Number(row.accepted),
+      avgConfidence: row.avgconf == null ? 0 : Math.round(Number(row.avgconf)),
+      currentVersion: version,
+    };
+  }
+
   /** Operational health of the deterministic career-page extractor. */
   async extractionHealth() {
     const [runs] = await this.prisma.$queryRaw<
