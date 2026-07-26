@@ -7,6 +7,7 @@ import type { BoardJob, NormalizedJob } from '@careeros/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CompaniesService } from '../companies/companies.service';
 import { computeConfidence } from '../discovery/discovery.service';
+import { jobFingerprint } from './job-fingerprint';
 import { EMBED_JOBS_QUEUE } from './internal.constants';
 
 export interface SyncResult {
@@ -15,6 +16,7 @@ export interface SyncResult {
   created: number;
   updated: number;
   removed: number;
+  duplicates?: number; // cross-source fingerprint collisions collapsed away
 }
 
 /** Tier → how long until the next crawl after a successful sync. */
@@ -53,7 +55,7 @@ export class IngestService {
     });
 
     try {
-      const { created, updated, newJobIds } = await this.batchUpsert(companyId, jobs);
+      const { created, updated, newJobIds } = await this.batchUpsert(companyId, jobs, source);
 
       // Anything ACTIVE we did NOT see this run has been taken down.
       const seenIds = jobs.map((j) => j.externalId);
@@ -109,6 +111,7 @@ export class IngestService {
 
     let created = 0;
     let updated = 0;
+    let duplicates = 0;
     let failures = 0;
     const newJobIds: string[] = [];
 
@@ -124,9 +127,10 @@ export class IngestService {
     for (const { entry, jobs } of byCompany.values()) {
       try {
         const company = await this.companies.findOrCreateFromBoard(entry);
-        const res = await this.batchUpsert(company.id, jobs);
+        const res = await this.batchUpsert(company.id, jobs, source);
         created += res.created;
         updated += res.updated;
+        duplicates += res.duplicates;
         newJobIds.push(...res.newJobIds);
       } catch (err) {
         failures++;
@@ -148,7 +152,7 @@ export class IngestService {
     });
 
     await this.enqueueEmbeddings(newJobIds);
-    return { crawlRunId: run.id, found: entries.length, created, updated, removed: 0 };
+    return { crawlRunId: run.id, found: entries.length, created, updated, removed: 0, duplicates };
   }
 
   /**
@@ -159,9 +163,11 @@ export class IngestService {
   private async batchUpsert(
     companyId: string,
     jobs: NormalizedJob[],
-  ): Promise<{ created: number; updated: number; newJobIds: string[] }> {
+    source?: string,
+  ): Promise<{ created: number; updated: number; duplicates: number; newJobIds: string[] }> {
     let created = 0;
     let updated = 0;
+    let duplicates = 0;
     const newJobIds: string[] = [];
 
     // Dedupe by externalId within this crawl: Workable (and others) list the
@@ -170,46 +176,102 @@ export class IngestService {
     // ENTIRELY, silently dropping every job from that company (2026-07-09:
     // 45 Workable crawls/day failing this way). Keep first occurrence.
     const seen = new Set<string>();
-    const deduped = jobs.filter((j) => {
+    const byExternalId = jobs.filter((j) => {
       if (seen.has(j.externalId)) return false;
       seen.add(j.externalId);
       return true;
     });
 
-    for (let i = 0; i < deduped.length; i += UPSERT_CHUNK) {
-      const chunk = deduped.slice(i, i + UPSERT_CHUNK);
+    // Compute the cross-source fingerprint once per job.
+    const withFp = byExternalId.map((j) => ({
+      job: j,
+      fingerprint: jobFingerprint({
+        companyId,
+        title: j.title,
+        location: j.location,
+        workMode: j.workMode,
+      }),
+    }));
+
+    // Within-batch collapse: a single source can list the same opening twice
+    // (near-identical duplicate posts). Keep the first per fingerprint so the
+    // ON CONFLICT statement never sees a fingerprint twice.
+    const fpSeen = new Set<string>();
+    const uniqueInBatch = withFp.filter((w) => {
+      if (fpSeen.has(w.fingerprint)) {
+        duplicates++;
+        return false;
+      }
+      fpSeen.add(w.fingerprint);
+      return true;
+    });
+
+    // Cross-source collapse: this company may already carry this fingerprint
+    // under a DIFFERENT externalId (same job from another board). Don't insert
+    // a competing row — just keep the canonical one fresh. Never suppress an
+    // entry whose own externalId already exists (that's a legitimate update).
+    const fingerprints = uniqueInBatch.map((w) => w.fingerprint);
+    const externalIds = uniqueInBatch.map((w) => w.job.externalId);
+    const existing = await this.prisma.job.findMany({
+      where: { companyId, fingerprint: { in: fingerprints } },
+      select: { id: true, externalId: true, fingerprint: true },
+    });
+    const ownerByFp = new Map(existing.map((e) => [e.fingerprint!, e]));
+    const refreshIds: string[] = [];
+    const toUpsert = uniqueInBatch.filter((w) => {
+      const owner = ownerByFp.get(w.fingerprint);
+      if (owner && owner.externalId !== w.job.externalId) {
+        duplicates++;
+        refreshIds.push(owner.id); // keep the canonical row's lastSeenAt current
+        return false;
+      }
+      return true;
+    });
+    if (refreshIds.length > 0) {
+      await this.prisma.job.updateMany({
+        where: { id: { in: refreshIds } },
+        data: { lastSeenAt: new Date(), status: JobStatus.ACTIVE },
+      });
+    }
+
+    for (let i = 0; i < toUpsert.length; i += UPSERT_CHUNK) {
+      const chunk = toUpsert.slice(i, i + UPSERT_CHUNK);
 
       const ids = chunk.map(() => randomUUID());
-      const externalIds = chunk.map((j) => j.externalId);
-      const titles = chunk.map((j) => j.title);
-      const descriptions = chunk.map((j) => j.description ?? '');
-      const urls = chunk.map((j) => j.url);
-      const locations = chunk.map((j) => j.location ?? null);
-      const countries = chunk.map((j) => j.country ?? null);
-      const workModes = chunk.map((j) => j.workMode ?? null);
-      const salaryMins = chunk.map((j) => j.salaryMin ?? null);
-      const salaryMaxs = chunk.map((j) => j.salaryMax ?? null);
-      const currencies = chunk.map((j) => j.currency ?? null);
-      const postedAts = chunk.map((j) => j.postedAt ?? null);
+      const chunkExternalIds = chunk.map((w) => w.job.externalId);
+      const titles = chunk.map((w) => w.job.title);
+      const descriptions = chunk.map((w) => w.job.description ?? '');
+      const urls = chunk.map((w) => w.job.url);
+      const locations = chunk.map((w) => w.job.location ?? null);
+      const countries = chunk.map((w) => w.job.country ?? null);
+      const workModes = chunk.map((w) => w.job.workMode ?? null);
+      const salaryMins = chunk.map((w) => w.job.salaryMin ?? null);
+      const salaryMaxs = chunk.map((w) => w.job.salaryMax ?? null);
+      const currencies = chunk.map((w) => w.job.currency ?? null);
+      const postedAts = chunk.map((w) => w.job.postedAt ?? null);
+      const fingerprintsCol = chunk.map((w) => w.fingerprint);
+      const sources = chunk.map(() => source ?? null);
 
       const rows = await this.prisma.$queryRaw<{ id: string; inserted: boolean }[]>`
         INSERT INTO jobs (
           id, "companyId", "externalId", title, description, url,
           location, country, "workMode", "salaryMin", "salaryMax", currency,
-          "postedAt", status, "firstSeenAt", "lastSeenAt"
+          "postedAt", source, fingerprint, status, "firstSeenAt", "lastSeenAt"
         )
         SELECT
           u.id, ${companyId}, u.external_id, u.title, u.description, u.url,
           u.location, u.country, u.work_mode::"WorkMode", u.salary_min, u.salary_max, u.currency,
-          u.posted_at::timestamptz, 'ACTIVE', now(), now()
+          u.posted_at::timestamptz, u.source, u.fingerprint, 'ACTIVE', now(), now()
         FROM unnest(
-          ${ids}::text[], ${externalIds}::text[], ${titles}::text[],
+          ${ids}::text[], ${chunkExternalIds}::text[], ${titles}::text[],
           ${descriptions}::text[], ${urls}::text[], ${locations}::text[],
           ${countries}::text[], ${workModes}::text[], ${salaryMins}::int[],
-          ${salaryMaxs}::int[], ${currencies}::text[], ${postedAts}::text[]
+          ${salaryMaxs}::int[], ${currencies}::text[], ${postedAts}::text[],
+          ${sources}::text[], ${fingerprintsCol}::text[]
         ) AS u(
           id, external_id, title, description, url, location,
-          country, work_mode, salary_min, salary_max, currency, posted_at
+          country, work_mode, salary_min, salary_max, currency, posted_at,
+          source, fingerprint
         )
         ON CONFLICT ("companyId", "externalId") DO UPDATE SET
           title = EXCLUDED.title,
@@ -222,6 +284,8 @@ export class IngestService {
           "salaryMax" = EXCLUDED."salaryMax",
           currency = EXCLUDED.currency,
           "postedAt" = EXCLUDED."postedAt",
+          source = COALESCE(EXCLUDED.source, jobs.source),
+          fingerprint = EXCLUDED.fingerprint,
           status = 'ACTIVE',
           "lastSeenAt" = now()
         RETURNING id, (xmax = 0) AS inserted
@@ -237,7 +301,7 @@ export class IngestService {
       }
     }
 
-    return { created, updated, newJobIds };
+    return { created, updated, duplicates, newJobIds };
   }
 
   /**

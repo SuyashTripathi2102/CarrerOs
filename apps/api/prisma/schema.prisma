@@ -370,6 +370,13 @@ model Job {
   firstSeenAt DateTime  @default(now())
   lastSeenAt  DateTime  @default(now()) // crawler bumps this every run it still sees the job
   status      JobStatus @default(ACTIVE)
+  // Ingest source of record ("remoteok" | "adzuna" | "career-page-deterministic-v1" | ...).
+  // Powers source-trust scoring and per-source pipeline metrics.
+  source      String?
+  // Cross-source identity: sha256(companyId + normalized title + location + workMode).
+  // The same opening from Adzuna/Jooble/career-page collapses onto one fingerprint,
+  // so we don't show three rows for one job. Computed at ingest. See job-fingerprint.ts.
+  fingerprint String?
   raw         Json? // original source payload, for reprocessing without recrawling
   // GENERATED ALWAYS AS to_tsvector(title+description) STORED — created in a
   // hand-edited migration; @default(dbgenerated()) tells Prisma a db-side
@@ -388,6 +395,9 @@ model Job {
 
   // Dedupe guarantee: a recrawl updates the existing row instead of inserting.
   @@unique([companyId, externalId])
+  // Cross-source dedup lookup: "does this company already have this fingerprint
+  // under a different externalId?" — the pre-insert collapse query.
+  @@index([companyId, fingerprint])
   @@index([search], type: Gin)
   @@index([status, firstSeenAt])
   @@index([title])
