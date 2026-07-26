@@ -17,6 +17,7 @@ export const QueueNames = {
   SEND_NOTIFICATION: 'send-notification',
   DAILY_BRIEF: 'daily-brief', // repeatable 8AM IST — morning summary via API
   PLACES_DISCOVERY: 'places-discovery', // weekly city-based company discovery (Places API)
+  CAREER_EXTRACT: 'career-extract', // deterministic extraction of custom career pages
 } as const;
 
 export type QueueName = (typeof QueueNames)[keyof typeof QueueNames];

@@ -46,6 +46,10 @@ export class ApiClient {
     return this.request('GET', `/internal/discovery/due?limit=${limit}`);
   }
 
+  getCareerPagesDue(limit: number): Promise<CareerPageDue[]> {
+    return this.request('GET', `/internal/discovery/career-pages/due?limit=${limit}`);
+  }
+
   applyDiscoveryResult(companyId: string, result: DiscoveryResult): Promise<{ stage: string }> {
     return this.request('POST', `/internal/discovery/${companyId}/result`, result);
   }
@@ -97,6 +101,12 @@ export interface DiscoveryDueCompany {
   website: string | null;
   careerPageUrl: string | null;
   discoveryStage: string;
+}
+
+export interface CareerPageDue {
+  id: string;
+  name: string;
+  careerPageUrl: string;
 }
 
 export interface CompanyDue {

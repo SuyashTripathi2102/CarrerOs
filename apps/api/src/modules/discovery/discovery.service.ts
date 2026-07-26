@@ -317,6 +317,26 @@ export class DiscoveryService {
   }
 
   /**
+   * Career pages worth a deterministic-extractor pass: a career page is known
+   * but no ATS was detected (the custom/JS long tail). Prioritised by target
+   * city so the cities the user cares about get covered first; randomised within
+   * so repeated runs spread across the pool (no per-company extractedAt yet).
+   */
+  async careerPagesDue(limit = 30) {
+    return this.prisma.$queryRaw<Array<{ id: string; name: string; careerPageUrl: string }>>`
+      SELECT c.id, c.name, c."careerPageUrl"
+      FROM companies c
+      WHERE c."careerPageUrl" IS NOT NULL
+        AND c."atsProvider" = 'UNKNOWN'
+        AND c."discoveryStage" <> 'UNRESOLVABLE'
+      ORDER BY
+        (c.city IN ('Bangalore','Bengaluru','Pune','Hyderabad','Mumbai','Indore','Gurgaon','Gurugram','Noida','Chennai','Ahmedabad','Kolkata')) DESC,
+        random()
+      LIMIT ${Math.min(100, Math.max(1, limit))}
+    `;
+  }
+
+  /**
    * Discovery coverage per city — the observability the funnel was missing.
    * For each city we know: companies discovered → career pages found → ATS
    * detected → monitored → actually hiring → engineering roles open. Coverage %

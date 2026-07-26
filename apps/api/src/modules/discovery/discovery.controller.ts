@@ -40,6 +40,12 @@ export class DiscoveryInternalController {
     return this.discovery.probeDue(Math.min(limit, 100));
   }
 
+  /** Career pages (career URL known, ATS unknown) for the deterministic extractor. */
+  @Get('career-pages/due')
+  careerPagesDue(@Query('limit', new DefaultValuePipe(30), ParseIntPipe) limit: number) {
+    return this.discovery.careerPagesDue(limit);
+  }
+
   @Post(':companyId/result')
   result(@Param('companyId') companyId: string, @Body() body: unknown) {
     const parsed = DiscoveryResultSchema.safeParse(body);
