@@ -1,0 +1,114 @@
+-- PIPELINE HEALTH — the permanent operational metric.
+--
+--   docker exec -i careeros-postgres-1 psql -U careeros -d careeros -f - \
+--     < scripts/pipeline-health.sql
+--
+-- Answers one question: **how quickly does a newly discovered job become a
+-- ranked opportunity?** Every stage below is a place a job can stall.
+--
+--     discovered -> embedded -> retrieved -> classified -> scored -> APPLY
+--
+-- Read it top-down. The first stage whose backlog is growing is the
+-- bottleneck; every stage after it is being starved, and speeding those up
+-- spends money without moving the north star.
+--
+-- HONEST FRAMING: an unembedded job is NOT a missed opportunity. It is a job
+-- that has not yet entered the decision pipeline. Some fraction are senior,
+-- non-engineering, wrong geography, or stale. We learn how many mattered only
+-- after they are embedded and judged. Never report the backlog as "lost jobs".
+
+\echo '=== 1. STAGE COVERAGE — where the corpus actually sits ==='
+SELECT
+  count(*)                                                          AS active_jobs,
+  count(e."jobId")                                                  AS embedded,
+  round(100.0 * count(e."jobId") / NULLIF(count(*), 0), 1)          AS pct_embedded,
+  count(*) - count(e."jobId")                                       AS awaiting_embedding,
+  count(c."jobId")                                                  AS classified,
+  round(100.0 * count(c."jobId") / NULLIF(count(*), 0), 1)          AS pct_classified
+FROM jobs j
+LEFT JOIN job_embeddings e     ON e."jobId" = j.id
+LEFT JOIN job_classifications c ON c."jobId" = j.id
+WHERE j.status = 'ACTIVE';
+
+\echo ''
+\echo '=== 2. DISCOVERY -> EMBEDDED LATENCY (p50 / p95) ==='
+-- The stage the 2026-08-13 audit identified as binding. p95 matters more than
+-- the mean: a good average hides a tail of jobs that never get judged while
+-- they are still open.
+SELECT
+  count(*)                                                                    AS embedded_last_7d,
+  round((percentile_cont(0.50) WITHIN GROUP (
+    ORDER BY EXTRACT(epoch FROM e."createdAt" - j."firstSeenAt") / 3600))::numeric, 2) AS p50_hours,
+  round((percentile_cont(0.95) WITHIN GROUP (
+    ORDER BY EXTRACT(epoch FROM e."createdAt" - j."firstSeenAt") / 3600))::numeric, 2) AS p95_hours,
+  round((max(EXTRACT(epoch FROM e."createdAt" - j."firstSeenAt")) / 86400)::numeric, 2) AS worst_days
+FROM job_embeddings e
+JOIN jobs j ON j.id = e."jobId"
+WHERE e."createdAt" > now() - interval '7 days';
+
+\echo ''
+\echo '=== 3. EMBEDDING THROUGHPUT vs INTAKE — is the gap closing? ==='
+-- The decisive comparison for the 24h experiment. produced >= arrived means
+-- the backlog drains on its own and needs no intervention.
+WITH arrived AS (
+  SELECT date_trunc('hour', "firstSeenAt") AS h, count(*) AS n
+  FROM jobs WHERE "firstSeenAt" > now() - interval '24 hours' GROUP BY 1
+), produced AS (
+  SELECT date_trunc('hour', "createdAt") AS h, count(*) AS n
+  FROM job_embeddings WHERE "createdAt" > now() - interval '24 hours' GROUP BY 1
+)
+SELECT
+  COALESCE(a.h, p.h) AS hour,
+  COALESCE(a.n, 0)   AS jobs_arrived,
+  COALESCE(p.n, 0)   AS embeddings_produced,
+  COALESCE(p.n, 0) - COALESCE(a.n, 0) AS net_drain
+FROM arrived a FULL OUTER JOIN produced p ON a.h = p.h
+ORDER BY 1 DESC LIMIT 24;
+
+\echo ''
+\echo '=== 4. BACKLOG AGE — are unembedded jobs still worth embedding? ==='
+-- A backlog of jobs already past their freshness window is not urgent; a
+-- backlog of jobs posted today is.
+SELECT
+  count(*) AS awaiting_embedding,
+  count(*) FILTER (WHERE now()::date - COALESCE(j."postedAt", j."firstSeenAt")::date <=  7) AS age_0_7d,
+  count(*) FILTER (WHERE now()::date - COALESCE(j."postedAt", j."firstSeenAt")::date BETWEEN 8 AND 14) AS age_8_14d,
+  count(*) FILTER (WHERE now()::date - COALESCE(j."postedAt", j."firstSeenAt")::date > 14) AS age_over_14d,
+  round(avg(now()::date - COALESCE(j."postedAt", j."firstSeenAt")::date)::numeric, 1) AS avg_age_days
+FROM jobs j
+LEFT JOIN job_embeddings e ON e."jobId" = j.id
+WHERE j.status = 'ACTIVE' AND e."jobId" IS NULL;
+
+\echo ''
+\echo '=== 5. NORTH STAR — fresh actionable opportunities/day ==='
+-- NOT jobs discovered, embedded, classified, or scored. The only number that
+-- tracks the product goal: opportunities the user could act on today.
+--
+--   ACTIVE + current classifier + APPLY verdict + posted within 14 days
+--
+-- verdict='APPLY' and opportunityScore>=70 are DIFFERENT metrics and are
+-- reported separately here on purpose — conflating them has inflated this
+-- figure three times already.
+SELECT
+  date_trunc('day', m."decidedAt")::date AS day,
+  count(*) FILTER (WHERE m.verdict = 'APPLY')            AS apply_verdicts,
+  count(*) FILTER (WHERE m."opportunityScore" >= 70)     AS score_70_plus,
+  count(*) FILTER (WHERE m.verdict = 'APPLY'
+                     AND now()::date - COALESCE(j."postedAt", j."firstSeenAt")::date <= 14)
+                                                          AS fresh_actionable
+FROM job_matches m
+JOIN jobs j ON j.id = m."jobId" AND j.status = 'ACTIVE'
+WHERE m."decidedAt" > now() - interval '7 days'
+GROUP BY 1 ORDER BY 1 DESC;
+
+\echo ''
+\echo '=== 6. ACTIONABLE RIGHT NOW — what /today should be showing ==='
+SELECT
+  count(*) FILTER (WHERE m.verdict = 'APPLY')        AS apply_total,
+  count(*) FILTER (WHERE m.verdict = 'APPLY'
+                     AND now()::date - COALESCE(j."postedAt", j."firstSeenAt")::date <= 14)
+                                                      AS apply_fresh,
+  count(*) FILTER (WHERE m.verdict = 'CONSIDER')     AS consider_total
+FROM job_matches m
+JOIN jobs j ON j.id = m."jobId"
+WHERE j.status = 'ACTIVE';

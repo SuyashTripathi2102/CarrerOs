@@ -84,11 +84,68 @@ backlog     1,638 relevant unevaluated (862 still fresh)
 latency       3.3 h discovery → classified (worst 0.5 d)
 ```
 
-Classification is fast and the backlog is ~2 days of capacity. The real
-constraint is one stage earlier: **embedding coverage 61%** — 8,040 active jobs
-have no embedding and are invisible to retrieval entirely, so they can never
-become candidates regardless of relevance. Raising the classification cap would
-spend money speeding up a stage that is not binding.
+Classification is fast and the backlog is ~2 days of capacity. Raising the
+classification cap would spend money speeding up a stage that is not binding.
+
+### Embedding backlog — measured, then CLOSED (2026-08-13, same evening)
+
+The first reading said "embedding coverage 61%, 8,040 jobs invisible to
+retrieval — this is the real constraint." **That framing was wrong** and is
+corrected here rather than quietly deleted.
+
+Four measurements settled it:
+
+| Evidence | Reading |
+|---|---|
+| Coverage over ~40 min | 61% → 68.2% → 68.8%, still climbing |
+| Coverage by ingestion day | **2026-08-12 cohort = 100.0%**; only today's = 57% |
+| Discovery → embedded latency | **p50 0.32 h**, p95 11.09 h, worst 0.47 d |
+| Queue depth | 113 waiting × 100 jobIds/batch = **11,300 slots ≥ 6,429 unembedded** |
+
+There is no chronic bottleneck and nothing is stranded. A single crawl landed
+**15,220 jobs between 06:00 and 07:00**; the embedder drains it at ~5,300/h
+(one 100-id batch/min, `enqueueEmbeddings`, `ingest.service.ts:396`). Every
+unembedded job was first seen *today*. Yesterday's cohort is fully covered.
+
+**Correct statement:** *6,429 jobs have not yet entered the decision pipeline* —
+not "8,040 missed opportunities". They are not equivalent, and 4,749 of them are
+postings already older than 14 days (greenhouse avg 137 d, breezy 209 d), which
+will mostly fail the freshness window anyway. How many mattered is knowable only
+after they are embedded and judged.
+
+**Action taken: none.** Per the pre-agreed decision rule — coverage climbing
+toward 90% means the system is self-healing faster than intake, so worker
+concurrency, batch size and provider limits are *not* touched. Re-run
+`scripts/pipeline-health.sql` to re-check; do not re-litigate from a single
+coverage percentage again.
+
+### The scoreboard — `fresh actionable opportunities/day`
+
+Adopted 2026-08-13 as the single operational number. **Not** jobs discovered,
+embedded, classified, sources added, or Opportunity Score. Those are stage
+diagnostics; this is the product.
+
+```
+fresh actionable opportunity =
+    ACTIVE  +  target geography  +  target role  +  ≤ target experience
+           +  current classifier version  +  verdict = APPLY
+           +  posted within 14 days
+```
+
+Then the chain that actually matters:
+
+```
+fresh APPLYs/day → applications/day → interviews/month → offers
+```
+
+`verdict='APPLY'` and `opportunityScore>=70` are reported as **separate
+columns, never summed** — conflating them has inflated this figure three times.
+
+**Baseline 2026-08-13:** 8 fresh actionable · 31 scored ≥70 · 20 CONSIDER.
+
+Measured by `scripts/pipeline-health.sql`, which is the permanent operational
+metric: stage coverage, discovery→embedded p50/p95, throughput vs intake,
+backlog age, and the scoreboard.
 
 **Success metric:** a stable daily funnel — new → India → SWE → stack → ≤3 YOE →
 eligible → scored → APPLY → applied — measured across ≥5 consecutive days.
