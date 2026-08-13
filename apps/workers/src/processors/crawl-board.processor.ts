@@ -6,9 +6,10 @@ import { fetchRemoteOkJobs } from '../adapters/remoteok';
 import { fetchHnWhoIsHiring } from '../adapters/hn-whoishiring';
 import { fetchAdzunaJobs } from '../adapters/adzuna';
 import { fetchJoobleJobs } from '../adapters/jooble';
+import { fetchFreehireJobs } from '../adapters/freehire';
 
 export interface CrawlBoardJobData {
-  board: 'remoteok' | 'hn-hiring' | 'adzuna' | 'jooble';
+  board: 'remoteok' | 'hn-hiring' | 'adzuna' | 'jooble' | 'freehire';
 }
 
 const BOARDS = {
@@ -16,6 +17,7 @@ const BOARDS = {
   'hn-hiring': fetchHnWhoIsHiring,
   adzuna: fetchAdzunaJobs,
   jooble: fetchJoobleJobs,
+  freehire: fetchFreehireJobs,
 } as const;
 
 export function startCrawlBoardWorker(api: ApiClient): Worker<CrawlBoardJobData> {

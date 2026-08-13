@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { AtsProvider, Company, Prisma } from '@prisma/client';
 import { CRAWLABLE_PROVIDERS } from '@careeros/shared';
 import { PrismaService } from '../../prisma/prisma.service';
+import { normalizeCompanyName } from './company-name';
 
 // Single source of truth in shared, mirroring the workers' adapter map.
 // The 2026-07-08 incident was exactly this list drifting: WORKABLE had a
@@ -31,6 +32,27 @@ export class CompaniesRepository {
     return this.prisma.company.findFirst({
       where: { name: { equals: name, mode: 'insensitive' } },
     });
+  }
+
+  /**
+   * Match on company identity rather than exact string, so "Zensar" and
+   * "Zensar Technologies" resolve to one row instead of two.
+   *
+   * The normalized base is always a PREFIX of any suffixed variant, so a
+   * prefix query is a sound and index-friendly candidate filter; normalized
+   * equality is then checked in JS. Doing it this way avoids a stored-column
+   * migration and keeps the rule in one testable function.
+   */
+  async findByNormalizedName(name: string): Promise<Company | null> {
+    const base = normalizeCompanyName(name);
+    if (!base) return null;
+    const candidates = await this.prisma.company.findMany({
+      where: { name: { startsWith: base, mode: 'insensitive' } },
+      // Oldest first: merge into the established record, not the newcomer.
+      orderBy: { createdAt: 'asc' },
+      take: 25,
+    });
+    return candidates.find((c) => normalizeCompanyName(c.name) === base) ?? null;
   }
 
   list(skip: number, take: number, search?: string) {

@@ -29,6 +29,10 @@ export interface ScoreModule {
   score: number; // 0-100
   weight: number;
   reason: string;
+  /** Trust dimension, set only by the `verification` module. UNKNOWN carries
+   *  no score effect — it tells the action layer to verify before applying,
+   *  rather than pretending the opportunity is worse than it is. */
+  status?: 'UNKNOWN' | 'FAILED';
 }
 
 export interface OpportunityResult {
@@ -66,6 +70,13 @@ interface ScoringContext {
   company: {
     name: string;
     confidence: number;
+    /** When the discovery prober last visited. NULL = never measured, so
+     *  `confidence` carries no evidence either way. */
+    probedAt: Date | null;
+    /** When this company entered the corpus — the start of our observation
+     *  window. Shorter than 14 days means the 14-day activity signal is
+     *  unobserved, not absent. */
+    knownSince: Date | null;
     hiringTrend: HiringTrend | null;
     /** Jobs this company added in the last 14 days — live hiring activity. */
     recentJobs14d: number;
@@ -73,6 +84,9 @@ interface ScoringContext {
     growthScore: number | null;
   };
 }
+
+/** The 14-day activity signal is only evidence once we have watched 14 days. */
+const ACTIVITY_WINDOW_DAYS = 14;
 
 const WEIGHTS = {
   resumeFit: 35,
@@ -137,6 +151,15 @@ export class OpportunityService {
       company: {
         name: match.job.company.name,
         confidence: match.job.company.confidence,
+        // Absence of evidence vs evidence of absence. A company the prober has
+        // never visited has confidence 0 because nothing was measured — not
+        // because it failed. `lastProbedAt` is the only field that separates
+        // the two, so the scorer needs it to avoid scoring UNKNOWN as BAD.
+        probedAt: match.job.company.lastProbedAt,
+        // How long we have actually been watching. A company discovered three
+        // hours ago cannot have "no new openings in 14 days" — we did not
+        // observe the window.
+        knownSince: match.job.company.createdAt,
         hiringTrend: match.job.company.intelligence?.hiringTrend ?? null,
         growthScore: match.job.company.intelligence?.growthScore ?? null,
         // Prefer postedAt: firstSeenAt spikes on a company's FIRST crawl
@@ -340,16 +363,33 @@ export class OpportunityService {
     }
 
     // 6. Company quality — discovery confidence, floored for curated big tech.
+    //
+    // UNKNOWN ≠ LOW. `computeConfidence` starts at 0 and ADDS per positive
+    // signal, so a company the prober has never visited is indistinguishable
+    // from one that failed every check. Scoring that 0 is inventing negative
+    // evidence — it cost board-sourced India jobs up to 6.3 points and flipped
+    // 7 of 15 audited matches from CONSIDER to SKIP (2026-08-12 audit).
+    // A curated big-tech name is evidence in itself, so it still scores.
     const tier = companyTier(ctx.company.name);
-    modules.push({
-      module: 'companyQuality',
-      score: tier === 'BIG_TECH' ? Math.max(ctx.company.confidence, 85) : ctx.company.confidence,
-      weight: WEIGHTS.companyQuality,
-      reason:
-        tier === 'BIG_TECH'
-          ? `big tech (${ctx.company.name})`
-          : `company confidence ${Math.round(ctx.company.confidence)}/100`,
-    });
+    const companyMeasured = ctx.company.probedAt !== null;
+    if (tier === 'BIG_TECH') {
+      modules.push({
+        module: 'companyQuality',
+        score: Math.max(ctx.company.confidence, 85),
+        weight: WEIGHTS.companyQuality,
+        reason: `big tech (${ctx.company.name})`,
+      });
+    } else if (companyMeasured) {
+      // Probed: whatever the confidence is, it is a real measurement — a low
+      // score here is evidence of absence and must keep dragging.
+      modules.push({
+        module: 'companyQuality',
+        score: ctx.company.confidence,
+        weight: WEIGHTS.companyQuality,
+        reason: `company confidence ${Math.round(ctx.company.confidence)}/100`,
+      });
+    }
+    // else: never probed → module drops out, remaining weights renormalize.
 
     // 7. Hiring velocity — a growing team reads more applications. Prefer the
     // Phase-5 deterministic growth score (scale + frequency + momentum + recency,
@@ -381,18 +421,29 @@ export class OpportunityService {
         reason: `hiring trend: ${ctx.company.hiringTrend.toLowerCase()}`,
       });
     } else {
+      // Live 14-day fallback. "No new openings in 14d" is only a finding if we
+      // WATCHED for 14 days — a company discovered three hours ago scores 0
+      // by construction, which is unobserved, not quiet. Seeing postings is
+      // still evidence at any age (they exist), so only the zero case is gated.
       const recent = ctx.company.recentJobs14d;
-      modules.push({
-        module: 'hiringVelocity',
-        score: recent >= 10 ? 95 : recent >= 3 ? 75 : recent >= 1 ? 55 : 30,
-        weight: WEIGHTS.hiringVelocity,
-        reason:
-          recent >= 3
-            ? `actively hiring — ${recent} new roles in 14d`
-            : recent >= 1
-              ? `${recent} new role(s) in 14d`
-              : 'no new openings in 14d',
-      });
+      const observedDays = ctx.company.knownSince
+        ? (Date.now() - ctx.company.knownSince.getTime()) / 86_400_000
+        : 0;
+      const windowObserved = observedDays >= ACTIVITY_WINDOW_DAYS;
+      if (recent > 0 || windowObserved) {
+        modules.push({
+          module: 'hiringVelocity',
+          score: recent >= 10 ? 95 : recent >= 3 ? 75 : recent >= 1 ? 55 : 30,
+          weight: WEIGHTS.hiringVelocity,
+          reason:
+            recent >= 3
+              ? `actively hiring — ${recent} new roles in 14d`
+              : recent >= 1
+                ? `${recent} new role(s) in 14d`
+                : 'no new openings in 14d',
+        });
+      }
+      // else: window not yet observed → module drops out and renormalizes.
     }
 
     // 7b. City preference — boost only, never penalize (location is often
@@ -447,18 +498,38 @@ export class OpportunityService {
       });
     }
 
-    // Verification gate: never silently recommend a company we barely know.
-    // The 5%-weight quality module can't express "we have no idea who this
-    // is" — so low confidence dampens the whole score AND flags it visibly.
-    if (ctx.company.confidence < 40) {
+    // Verification is a TRUST dimension, not an OPPORTUNITY dimension.
+    //
+    //   Opportunity Score → "is this a good job for this person?"
+    //   Verification      → "can we safely act on it?"
+    //
+    // Conflating them meant a never-probed company lost ~13 points on a
+    // 90-score job — measuring our own probe backlog as if it were job
+    // quality. Every aggregator/email job arrives unprobed, so that would
+    // have made new supply look weak on arrival (2026-08-13).
+    //
+    // The dampening now applies ONLY to evidence of absence: we looked, and
+    // what we found was thin. Never looked → no penalty, no credit, flagged.
+    const verificationMeasured = ctx.company.probedAt !== null;
+    if (!verificationMeasured) {
+      modules.push({
+        module: 'verification',
+        score: 0,
+        weight: 0, // informational — carries NO score effect in either direction
+        status: 'UNKNOWN',
+        reason: 'company not yet verified — verify before applying',
+      });
+    } else if (ctx.company.confidence < 40) {
       opportunityScore = Math.round(opportunityScore * 0.85 * 10) / 10;
       modules.push({
         module: 'verification',
         score: ctx.company.confidence,
         weight: 0, // informational — the dampening already applied
-        reason: `⚠ company not yet verified (confidence ${Math.round(ctx.company.confidence)}/100) — score reduced`,
+        status: 'FAILED',
+        reason: `⚠ company verification weak (confidence ${Math.round(ctx.company.confidence)}/100) — score reduced`,
       });
     }
+    // else: probed and confident → no flag, no dampening (unchanged).
 
     const contentHash = createHash('sha256')
       .update(`${ctx.job.title}|${ctx.job.salaryMin}|${ctx.job.salaryMax}`)

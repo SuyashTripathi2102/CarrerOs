@@ -132,7 +132,8 @@ export class MatchingService {
     this.logger.log(`Prefilter: ${candidates.length} candidates by cosine similarity`);
 
     // Role eligibility before scoring — similarity ranks, it never admits.
-    const { eligible } = await this.gateByRole(userId, candidates);
+    const { eligible, rejected } = await this.gateByRole(userId, candidates);
+    await this.recordGateRejections(userId, resume.resumeVersionId, rejected);
     const toScore = eligible.slice(0, LLM_SCORE_TOP_N);
     const { matchIds } = await this.scoreAndUpsert(userId, resume, toScore);
 
@@ -310,6 +311,10 @@ export class MatchingService {
             AND m."resumeVersionId" = ${resume.resumeVersionId}
             AND m."decidedAt" IS NOT NULL
             AND m."decidedAt" >= ${profileUpdatedAt}
+            -- A gate refusal is only binding while the classifier that made it
+            -- is current. Bump CLASSIFIER_VERSION and every refusal re-opens;
+            -- scored matches (decisionVersion NULL) are unaffected.
+            AND (m."decisionVersion" IS NULL OR m."decisionVersion" >= ${CLASSIFIER_VERSION})
         )
       ORDER BY je.vector <=> re.vector
       LIMIT ${cap}
@@ -325,6 +330,16 @@ export class MatchingService {
           .map(([k, v]) => `${k}=${v}`)
           .join(' '),
     );
+    // Record refusals BEFORE the early return: a run where nothing is eligible
+    // is exactly the run that must clear those slots, or the next run inspects
+    // the identical 60 jobs and the pipeline never advances.
+    const recorded = await this.recordGateRejections(
+      userId,
+      resume.resumeVersionId,
+      gate.rejected,
+    );
+    if (recorded > 0) this.logger.log(`recorded ${recorded} gate refusals as decided SKIPs`);
+
     if (gate.eligible.length === 0) {
       const empty = emptyReconcileReport();
       empty.inspected = candidates.length;
@@ -443,11 +458,18 @@ export class MatchingService {
   ): Promise<{
     eligible: typeof candidates;
     rejectedByCode: Record<string, number>;
+    /** Per-job refusals, so the caller can RECORD them. Counting them only
+     *  (as this did until 2026-08-12) left every refused job with no
+     *  job_matches row — so `NOT EXISTS(decided)` re-admitted it on every
+     *  run, and refusals silently ate the candidate cap forever. */
+    rejected: { id: string; code: string; reason: string }[];
     needsReview: string[];
   }> {
     const rejectedByCode: Record<string, number> = {};
+    const rejected: { id: string; code: string; reason: string }[] = [];
     const needsReview: string[] = [];
-    if (candidates.length === 0) return { eligible: [], rejectedByCode, needsReview };
+    if (candidates.length === 0)
+      return { eligible: [], rejectedByCode, rejected, needsReview };
 
     const known = await this.prisma.jobClassification.findMany({
       where: { jobId: { in: candidates.map((c) => c.id) } },
@@ -511,6 +533,11 @@ export class MatchingService {
         );
         if (off && noDisciplines.has(off.key)) {
           rejectedByCode['CAREER_PATH_EXCLUDED'] = (rejectedByCode['CAREER_PATH_EXCLUDED'] ?? 0) + 1;
+          rejected.push({
+            id: cand.id,
+            code: 'CAREER_PATH_EXCLUDED',
+            reason: `You said no to ${off.key} roles.`,
+          });
           continue;
         }
       }
@@ -536,10 +563,67 @@ export class MatchingService {
       if (e.eligible) eligible.push(cand);
       else {
         rejectedByCode[e.code] = (rejectedByCode[e.code] ?? 0) + 1;
+        // needsReview jobs stay un-recorded: they are genuinely undecided and
+        // must remain candidates for the Needs Review surface.
         if (e.needsReview) needsReview.push(cand.id);
+        else rejected.push({ id: cand.id, code: e.code, reason: e.reason ?? e.code });
       }
     }
-    return { eligible, rejectedByCode, needsReview };
+    return { eligible, rejectedByCode, rejected, needsReview };
+  }
+
+  /**
+   * Record gate refusals as decided SKIP matches.
+   *
+   * Two things depend on this, and both were broken while refusals were only
+   * counted: the candidate query excludes jobs via `NOT EXISTS(decidedAt)`,
+   * so an unrecorded refusal was re-fetched on EVERY run and permanently
+   * consumed a slot under LIMIT (measured 2026-08-12: 19 of 60 slots dead,
+   * 106 pool-wide and climbing) — and `/excluded` reads exactly these rows,
+   * so the audit surface showed nothing.
+   *
+   * decisionVersion carries CLASSIFIER_VERSION: bump the classifier and every
+   * refusal it made becomes a candidate again, which is the point of versioning
+   * the classifier at all.
+   */
+  private async recordGateRejections(
+    userId: string,
+    resumeVersionId: string,
+    rejected: { id: string; code: string; reason: string }[],
+  ): Promise<number> {
+    if (rejected.length === 0) return 0;
+    const now = new Date();
+    let written = 0;
+    for (const r of rejected) {
+      await this.prisma.jobMatch.upsert({
+        where: { userId_jobId_resumeVersionId: { userId, jobId: r.id, resumeVersionId } },
+        create: {
+          userId,
+          jobId: r.id,
+          resumeVersionId,
+          // No personalized scoring happened — the gate refused before any LLM
+          // call. Zero is "not scored", not "scored badly"; verdictCode carries
+          // the real explanation.
+          overallScore: 0,
+          technicalScore: 0,
+          experienceScore: 0,
+          verdict: 'SKIP',
+          verdictCode: r.code,
+          verdictReason: r.reason,
+          decidedAt: now,
+          decisionVersion: CLASSIFIER_VERSION,
+        },
+        update: {
+          verdict: 'SKIP',
+          verdictCode: r.code,
+          verdictReason: r.reason,
+          decidedAt: now,
+          decisionVersion: CLASSIFIER_VERSION,
+        },
+      });
+      written++;
+    }
+    return written;
   }
 
   /** Confirmed skills from the active resume — for off-path discipline checks. */

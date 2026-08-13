@@ -56,7 +56,13 @@ export class CompaniesService {
       if (byAts) return byAts;
     }
 
-    const byName = await this.companies.findByName(input.name);
+    // Exact first (cheap, index-backed), then identity match. Without the
+    // second lookup "Zensar" and "Zensar Technologies" become two companies,
+    // and since jobFingerprint is keyed on companyId the same opening gets two
+    // fingerprints and escapes cross-source dedup entirely.
+    const byName =
+      (await this.companies.findByName(input.name)) ??
+      (await this.companies.findByNormalizedName(input.name));
     if (byName) {
       // Upgrade: we may have just learned this company's ATS — enables direct crawls.
       if (byName.atsProvider === AtsProvider.UNKNOWN && detected?.identifier) {
