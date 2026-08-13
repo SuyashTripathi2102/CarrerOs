@@ -43,9 +43,52 @@ behaviour. Two real defects surfaced in one afternoon.
 |---|---|
 | Queue starvation (gate refusals never recorded) | ✅ fixed, 9 regression tests |
 | RemoteOK ingesting non-jobs | ✅ fixed, 33 regression tests, 96% of feed rejected |
-| UNKNOWN ≠ LOW in `companyQuality` / `hiringVelocity` | 🔴 audited, **not yet fixed** |
-| Full module audit against the invariant | ⬜ |
-| Daily-cycle baseline (several real days) | ⬜ |
+| Company aliases defeating fingerprint dedup | ✅ fixed, 18 regression tests |
+| UNKNOWN ≠ LOW in `companyQuality` / `hiringVelocity` | ✅ fixed and verified |
+| Full module audit against the invariant | ✅ done 2026-08-13 — see below |
+| Evaluation-latency measurement | ✅ done — cap is NOT the bottleneck |
+| Daily-cycle baseline (≥5 days) | ⬜ **the remaining gate** |
+
+### Module audit vs UNKNOWN ≠ LOW (2026-08-13)
+
+Every module classified by how it treats missing evidence:
+
+| Module | Missing-data behaviour | Verdict |
+|---|---|---|
+| `resumeFit` | always present (LLM output) | ✅ n/a |
+| `experienceFit` | always present | ✅ n/a |
+| `remotePreference` | guarded on prefs **and** `job.workMode` | ✅ drops out |
+| `salaryPreference` | guarded on `minSalary` **and** `salaryMax` | ✅ drops out |
+| `companyQuality` | drops out when `lastProbedAt IS NULL` | ✅ fixed |
+| `hiringVelocity` | drops out when observation window < 14d | ✅ fixed |
+| `cityPreference` | **boost-only, never penalises** | ✅ exemplary |
+| `sourceReliability` | guarded on `sourceTrust != null`, weight 0 | ✅ drops out |
+| `freshness` | `postedAt ?? firstSeenAt` — **unknown date scores 100** | ⚠️ latent |
+| `skillGap` | `gaps === 0 → 100` conflates "none missing" with "not assessed" | ⚠️ minor |
+
+**`freshness` is the mirror image of the bug we fixed:** absence of evidence is
+scored as *best* rather than worst. A job posted 3 months ago but first seen
+today scores maximally fresh. Blast radius today is **zero** — only 74 of 20,630
+active jobs lack `postedAt` (68 `career-page-deterministic-v1`, 6 `hn-hiring`)
+and **no current match uses the fallback**. But that extractor is 100% date-less
+and grows as career-page crawling scales, so exposure grows with Phase 1. Fix
+when it starts mattering, not before; recorded here so it is not rediscovered
+by accident a third time.
+
+### Evaluation latency (2026-08-13) — why the 60-cap was NOT raised
+
+```
+supply     15,730 new jobs/day (5,300 India)
+evaluated     768 classified/day
+backlog     1,638 relevant unevaluated (862 still fresh)
+latency       3.3 h discovery → classified (worst 0.5 d)
+```
+
+Classification is fast and the backlog is ~2 days of capacity. The real
+constraint is one stage earlier: **embedding coverage 61%** — 8,040 active jobs
+have no embedding and are invisible to retrieval entirely, so they can never
+become candidates regardless of relevance. Raising the classification cap would
+spend money speeding up a stage that is not binding.
 
 **Success metric:** a stable daily funnel — new → India → SWE → stack → ≤3 YOE →
 eligible → scored → APPLY → applied — measured across ≥5 consecutive days.
