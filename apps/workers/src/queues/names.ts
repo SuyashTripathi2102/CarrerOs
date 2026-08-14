@@ -14,6 +14,7 @@ export const QueueNames = {
   SCRAPE_HARD_TARGET: 'scrape-hard-target',
   PARSE_RESUME: 'parse-resume',
   GENERATE_MATCHES: 'generate-matches',
+  EVALUATE_MATCHES: 'evaluate-matches', // repeatable 15m tick -> judge unevaluated eligible jobs
   SEND_NOTIFICATION: 'send-notification',
   DAILY_BRIEF: 'daily-brief', // repeatable 8AM IST — morning summary via API
   PLACES_DISCOVERY: 'places-discovery', // weekly city-based company discovery (Places API)

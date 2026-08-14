@@ -112,6 +112,50 @@ FROM job_matches WHERE "decidedAt" > now() - interval '7 days'
 GROUP BY 1 ORDER BY 1 DESC LIMIT 15;
 
 \echo ''
+\echo '=== EVALUATION SLA — the metric that actually matters ==='
+-- NOT "percent of the corpus classified". The corpus contains months of stale
+-- historical listings, so that number is dominated by jobs nobody would apply
+-- to anyway. What matters is whether a job discovered TODAY gets judged while
+-- it is still worth acting on.
+--
+--   TARGET: 95% of fresh eligible jobs evaluated within 6 hours of discovery.
+SELECT
+  count(*)                                                                   AS fresh_eligible_judged_7d,
+  round((percentile_cont(0.50) WITHIN GROUP (
+    ORDER BY EXTRACT(epoch FROM m."decidedAt" - j."firstSeenAt")/3600))::numeric, 2) AS p50_hours,
+  round((percentile_cont(0.95) WITHIN GROUP (
+    ORDER BY EXTRACT(epoch FROM m."decidedAt" - j."firstSeenAt")/3600))::numeric, 2) AS p95_hours,
+  round((max(EXTRACT(epoch FROM m."decidedAt" - j."firstSeenAt"))/3600)::numeric, 2) AS max_hours,
+  round(100.0 * count(*) FILTER (
+    WHERE m."decidedAt" - j."firstSeenAt" < interval '6 hours') / NULLIF(count(*),0), 1)
+                                                                             AS pct_within_6h
+FROM job_matches m
+JOIN jobs j ON j.id = m."jobId"
+WHERE m."decidedAt" > now() - interval '7 days'
+  AND now()::date - COALESCE(j."postedAt", j."firstSeenAt")::date <= 14;
+
+\echo ''
+\echo '=== FRESH ELIGIBLE BACKLOG — what the belt still owes, by priority tier ==='
+-- Tier 0 is the only urgent number. A large tier-2 backlog is historical
+-- sediment; a non-empty tier 0 means CareerOS is actively missing live jobs.
+WITH re AS (SELECT vector FROM resume_embeddings WHERE "resumeVersionId" = :rv)
+SELECT
+  CASE WHEN now()::date - COALESCE(j."postedAt", j."firstSeenAt")::date <= 7 THEN 'tier0 (0-7d)  URGENT'
+       WHEN now()::date - COALESCE(j."postedAt", j."firstSeenAt")::date <= 14 THEN 'tier1 (8-14d)'
+       ELSE 'tier2 (15-45d)' END AS priority,
+  count(*) AS awaiting_judgement
+FROM jobs j
+JOIN job_embeddings e ON e."jobId" = j.id
+CROSS JOIN re
+LEFT JOIN job_matches m ON m."jobId" = j.id AND m."resumeVersionId" = :rv AND m."decidedAt" IS NOT NULL
+WHERE j.status = 'ACTIVE'
+  AND (j.country = 'IN' OR j."workMode" = 'REMOTE')
+  AND now()::date - COALESCE(j."postedAt", j."firstSeenAt")::date <= 45
+  AND 1 - (e.vector <=> re.vector) >= 0.45
+  AND m."jobId" IS NULL
+GROUP BY 1 ORDER BY 1;
+
+\echo ''
 \echo '=== CONVERSION (Track A) — only real once you start using /today ==='
 SELECT
   count(*) FILTER (WHERE type='SHOWN')    AS shown,

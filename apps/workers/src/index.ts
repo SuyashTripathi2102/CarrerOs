@@ -9,6 +9,10 @@ import {
 import { startSeedImportWorker } from './processors/seed-import.processor';
 import { ensureRefreshSchedule, startRefreshAllWorker } from './processors/refresh-all.processor';
 import {
+  ensureEvaluateMatchesSchedule,
+  startEvaluateMatchesWorker,
+} from './processors/evaluate-matches.processor';
+import {
   ensureDailyBriefSchedule,
   startDailyBriefWorker,
 } from './processors/daily-brief.processor';
@@ -40,8 +44,10 @@ async function main() {
     startCareerExtractWorker(api),
     startReplayExtractWorker(api),
     startRenderExtractWorker(api),
+    startEvaluateMatchesWorker(api),
   ];
   await ensureRefreshSchedule();
+  await ensureEvaluateMatchesSchedule();
   await ensureDailyBriefSchedule();
   await ensurePlacesDiscoverySchedule();
   await ensureBoardSchedules();

@@ -383,7 +383,19 @@ export class MatchingService {
             -- scored matches (decisionVersion NULL) are unaffected.
             AND (m."decisionVersion" IS NULL OR m."decisionVersion" >= ${CLASSIFIER_VERSION})
         )
-      ORDER BY je.vector <=> re.vector
+      -- FRESHNESS TIERS BEFORE SIMILARITY (2026-08-15). Ordering purely by
+      -- similarity meant a 40-day-old listing at 0.85 was evaluated ahead of a
+      -- job posted 30 minutes ago at 0.80. Once evaluation runs as a scheduled
+      -- conveyor belt every job is judged eventually, so this changes LATENCY,
+      -- not verdicts: it decides what gets looked at FIRST, and a fresh job is
+      -- worth more because it is still open and has fewer applicants.
+      ORDER BY
+        CASE
+          WHEN now()::date - COALESCE(j."postedAt", j."firstSeenAt")::date <= 7 THEN 0
+          WHEN now()::date - COALESCE(j."postedAt", j."firstSeenAt")::date <= 14 THEN 1
+          ELSE 2
+        END,
+        je.vector <=> re.vector
       LIMIT ${cap}
     `;
 

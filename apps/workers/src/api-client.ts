@@ -24,6 +24,14 @@ export class ApiClient {
     return this.request('GET', '/internal/companies/due');
   }
 
+  /**
+   * One turn of the evaluation conveyor belt. `cap` is the per-user batch size
+   * for this tick, so the schedule controls LLM spend directly.
+   */
+  reconcileMatches(cap: number): Promise<{ users: number; scored: number; apply: number }> {
+    return this.request('POST', `/internal/matches/reconcile?cap=${cap}`);
+  }
+
   triggerDailyBrief(): Promise<{ sent: number }> {
     return this.request('POST', '/internal/daily-brief');
   }

@@ -28,10 +28,20 @@ import { MatchingService } from './matching.service';
 export class MatchingInternalController {
   constructor(private readonly matching: MatchingService) {}
 
+  /**
+   * One turn of the evaluation conveyor belt.
+   *
+   * `cap` is the batch size PER USER for this tick, so the scheduler controls
+   * spend directly: a 15-minute tick at cap=60 evaluates at most 60 candidates
+   * per user per tick, and the backlog drains predictably instead of arriving
+   * as one large LLM bill. Candidates are ordered fresh-first (see
+   * reconcileForUser), so a job posted an hour ago is judged before a 40-day-old
+   * listing regardless of similarity.
+   */
   @Post('reconcile')
   @HttpCode(HttpStatus.OK)
-  reconcileAll() {
-    return this.matching.reconcileAll();
+  reconcileAll(@Query('cap', new DefaultValuePipe(60), ParseIntPipe) cap: number) {
+    return this.matching.reconcileAll(Math.min(200, Math.max(1, cap)));
   }
 
   /**
