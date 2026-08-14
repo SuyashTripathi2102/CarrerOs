@@ -11,8 +11,16 @@ import { apiGet, apiPost } from '@/lib/api';
  * the persisted verdict in job_matches — the two are different scoring paths and
  * are known to disagree. Sending it lets the event record what the user saw.
  */
-function track(jobId: string, type: 'CLICKED', rank: number, displayedScore?: number) {
-  apiPost('/events', { jobId, type, surface: 'today', rank, displayedScore }).catch(() => {});
+function track(jobId: string, type: 'CLICKED', rank: number, a: Action) {
+  apiPost('/events', {
+    jobId,
+    type,
+    surface: 'today',
+    rank,
+    // What this card claimed. POTENTIAL cards show no score, and record none.
+    displayedScore: a.opportunity,
+    displayedVerdict: a.kind === 'APPLY' ? 'APPLY' : a.kind === 'POTENTIAL' ? 'POTENTIAL' : undefined,
+  }).catch(() => {});
 }
 
 type Impact = 'DO_FIRST' | 'HIGH' | 'MEDIUM' | 'LOW';
@@ -26,9 +34,10 @@ interface Action {
   href: string;
   value?: string;
   why?: string[];
-  /** Present only on job-bound kinds (APPLY / TAILOR / REFERRAL). */
+  /** Present only on job-bound kinds (APPLY / POTENTIAL / TAILOR / REFERRAL). */
   jobId?: string;
-  /** The score this card displays — the live surface score, not the stored verdict. */
+  /** Canonical Opportunity Score from the decision engine. Absent on POTENTIAL
+   *  cards, which are candidates CareerOS has not evaluated. */
   opportunity?: number;
 }
 interface Today {
@@ -45,6 +54,7 @@ const KIND_ICON: Record<string, string> = {
   REPLY: '💬',
   FOLLOW_UP: '✉️',
   APPLY: '🚀',
+  POTENTIAL: '🔍',
   TAILOR: '📄',
   REFERRAL: '🤝',
   MASTER_RESUME: '🗂️',
@@ -71,10 +81,21 @@ export default function TodayPage() {
         // jobId (MASTER_RESUME, LEARN, outreach) are not opportunities and are
         // deliberately excluded rather than logged against a placeholder.
         const items = d.actions
-          .map((a, i) => ({ jobId: a.jobId, rank: i + 1, displayedScore: a.opportunity }))
+          .map((a, i) => ({
+            jobId: a.jobId,
+            rank: i + 1,
+            displayedScore: a.opportunity,
+            displayedVerdict: a.kind === 'APPLY' ? 'APPLY' : a.kind === 'POTENTIAL' ? 'POTENTIAL' : undefined,
+          }))
           .filter(
-            (x): x is { jobId: string; rank: number; displayedScore: number | undefined } =>
-              Boolean(x.jobId),
+            (
+              x,
+            ): x is {
+              jobId: string;
+              rank: number;
+              displayedScore: number | undefined;
+              displayedVerdict: string | undefined;
+            } => Boolean(x.jobId),
           );
         if (items.length > 0) {
           apiPost('/events/impressions', { surface: 'today', items }).catch(() => {});
@@ -168,7 +189,7 @@ function ActionCard({ a, step, total }: { a: Action; step: number; total: number
         onClick={() => {
           // `step` is the same 1-based rank sent with the impression, so CTR
           // by position is computable without joining on anything else.
-          if (a.jobId) track(a.jobId, 'CLICKED', step, a.opportunity);
+          if (a.jobId) track(a.jobId, 'CLICKED', step, a);
         }}
         className={`block rounded-xl border bg-neutral-900 p-4 transition hover:border-neutral-600 ${
           a.impact === 'DO_FIRST' ? 'border-emerald-900/60' : 'border-neutral-800'

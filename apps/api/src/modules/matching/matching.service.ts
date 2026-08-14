@@ -42,6 +42,73 @@ export function verdictOf(opportunityScore: number): Verdict {
   return opportunityScore >= 75 ? 'APPLY' : opportunityScore >= 60 ? 'CONSIDER' : 'SKIP';
 }
 
+/**
+ * What a surface is allowed to claim about a job.
+ *
+ *   APPLY / CONSIDER  the decision engine evaluated it and said so
+ *   POTENTIAL         similar to the resume, NOT yet evaluated — a candidate,
+ *                     not a recommendation
+ *   REFUSED           evaluated and rejected (gate refusal or SKIP)
+ *
+ * The distinction POTENTIAL vs REFUSED is the UNKNOWN != LOW invariant applied
+ * to the surface: "we have not looked at this" and "we looked and it is wrong
+ * for you" are different claims, and only the second may suppress a job as a
+ * judgement. With evaluation coverage at 1.14% (235 of 20,671 active jobs),
+ * collapsing POTENTIAL into REFUSED would empty the product; collapsing it into
+ * APPLY is what caused the 2026-08-14 integrity failure.
+ */
+export type RecommendationState = 'APPLY' | 'CONSIDER' | 'POTENTIAL' | 'REFUSED';
+
+/** Gate refusals: the eligibility layer rejected the job before any scoring.
+ *  Their stored opportunityScore is a placeholder (overallScore = 0 means
+ *  "never LLM-scored", not "0% match"), so it is never shown as a score. */
+const GATE_REFUSAL_CODES = new Set([
+  'TARGET_ROLE_TOO_SENIOR',
+  'NOT_DEVELOPMENT',
+  'DEVELOPMENT_WRONG_SPECIALIZATION',
+  'TARGET_ROLE_BELOW_LEVEL',
+  'LOW_CODING_RESPONSIBILITY',
+  'CORE_STACK_MISMATCH',
+]);
+
+export function recommendationState(
+  verdict: string | null,
+  verdictCode: string | null,
+  decidedAt: Date | null,
+): RecommendationState {
+  // Undecided is undecided, whatever else is on the row. A verdict written
+  // without decidedAt is not a decision the surface may act on.
+  if (!decidedAt) return 'POTENTIAL';
+  if (verdictCode && GATE_REFUSAL_CODES.has(verdictCode)) return 'REFUSED';
+  if (verdict === 'APPLY') return 'APPLY';
+  if (verdict === 'CONSIDER') return 'CONSIDER';
+  if (verdict === 'SKIP') return 'REFUSED';
+  return 'POTENTIAL';
+}
+
+const STATE_RANK: Record<RecommendationState, number> = {
+  APPLY: 0,
+  CONSIDER: 1,
+  POTENTIAL: 2,
+  REFUSED: 3,
+};
+
+/**
+ * Evaluated recommendations outrank unevaluated candidates, always — an
+ * approved job must not be pushed below a merely-similar one. Within the
+ * evaluated buckets the canonical Opportunity Score orders; within POTENTIAL,
+ * where no such score exists, the similarity signal does.
+ */
+export function byRecommendation(
+  a: { state: RecommendationState; opportunity: number | null; matchSignal: number },
+  b: { state: RecommendationState; opportunity: number | null; matchSignal: number },
+): number {
+  const byState = STATE_RANK[a.state] - STATE_RANK[b.state];
+  if (byState !== 0) return byState;
+  if (a.state === 'POTENTIAL') return b.matchSignal - a.matchSignal;
+  return (b.opportunity ?? 0) - (a.opportunity ?? 0);
+}
+
 export interface ScoreChange {
   jobId: string;
   title: string;
@@ -897,6 +964,26 @@ export class MatchingService {
    * similarity is already computed for every job and the resume, so we can
    * surface the whole relevant feed immediately. Verdicts (when present) badge
    * the row; their absence never hides it.
+   *
+   * That broad-pool intent is deliberate and preserved. What changed on
+   * 2026-08-15 is the honesty of the labelling (audit in CAREEROS_2_ROADMAP):
+   *
+   *   1. The similarity blend is `matchSignal`, an ORDERING signal only. It is
+   *      no longer called an Opportunity Score — that name belongs solely to the
+   *      persisted 10-module decision (ADR-10). Two different questions were
+   *      sharing one name: "how similar is this?" vs "should you apply?".
+   *   2. `opportunity` is populated ONLY from the stored decision, and is null
+   *      for unevaluated jobs. A job we have not evaluated never gets a number
+   *      that looks like a verdict.
+   *   3. Gate-refused jobs are excluded from the actionable feed. Previously the
+   *      gate was bypassed entirely here: 15 of the top 100 were jobs the
+   *      eligibility gate had explicitly refused (mostly TARGET_ROLE_TOO_SENIOR),
+   *      shown as "Apply".
+   *   4. Evaluated jobs enter the pool unconditionally. The old top-200
+   *      similarity pool had an effective cutoff of 0.8037, which hid 6 of the 7
+   *      APPLY jobs (similarity 0.78–0.80) — the decision engine had approved
+   *      them at 74–92 and the surface could not show them. Deep retrieval
+   *      reaches MIN_SIMILARITY 0.45, so evaluation was never the constraint.
    */
   async browseByFit(userId: string, opts: { limit?: number; indiaOnly?: boolean } = {}) {
     const versionId = await this.activeResumeVersionId(userId);
@@ -904,8 +991,8 @@ export class MatchingService {
 
     const limit = Math.min(120, Math.max(1, opts.limit ?? 60));
     const indiaOnly = opts.indiaOnly ?? true;
-    // Pull a wider similarity pool, then re-rank by Opportunity Score so a
-    // referral/watchlist/fresh job can rise above a slightly-higher-fit cold one.
+    // Pull a wider similarity pool, then re-rank so a referral/watchlist/fresh
+    // job can rise above a slightly-higher-fit cold one.
     const pool = Math.min(200, limit * 3);
 
     const trustMap = await this.sourceTrust.trustMap();
@@ -925,6 +1012,9 @@ export class MatchingService {
         similarity: number;
         applied: boolean;
         verdict: string | null;
+        verdict_code: string | null;
+        stored_opportunity: number | null;
+        decided_at: Date | null;
         ref_contacted: boolean;
         ref_found: boolean;
         watched: boolean;
@@ -936,6 +1026,9 @@ export class MatchingService {
              (1 - (je.vector <=> re.vector))::float8 AS similarity,
              (a.id IS NOT NULL) AS applied,
              m.verdict,
+             m."verdictCode" AS verdict_code,
+             m."opportunityScore" AS stored_opportunity,
+             m."decidedAt" AS decided_at,
              COALESCE(ref.contacted, false) AS ref_contacted,
              COALESCE(ref.found, false) AS ref_found,
              (cw.id IS NOT NULL) AS watched,
@@ -954,14 +1047,21 @@ export class MatchingService {
       LEFT JOIN company_watches cw ON cw."companyId" = c.id AND cw."userId" = ${userId}
       LEFT JOIN company_intelligence ci ON ci."companyId" = c.id
       WHERE (${indiaOnly}::boolean = false OR j.country = 'IN' OR j."workMode" = 'REMOTE')
-      ORDER BY je.vector <=> re.vector
+      -- Evaluated jobs first, THEN fill by similarity. Without this the pool is
+      -- a pure top-N cosine slice whose cutoff (0.8037 when measured) sat above
+      -- most APPLY jobs, so the decision engine's best picks could not be shown
+      -- at all. An approved job must never be excluded for being 0.02 less
+      -- lexically similar than the 200th nearest neighbour.
+      ORDER BY (m."decidedAt" IS NOT NULL) DESC, je.vector <=> re.vector
       LIMIT ${pool}
     `;
 
     const items = rows
       .map((r) => {
         const ageDays = Math.floor((Date.now() - new Date(r.firstSeenAt).getTime()) / 86_400_000);
-        const opp = opportunityScore({
+        // An ORDERING signal, not a verdict. Same maths as before; the rename is
+        // the point — a similarity blend must not wear the name of the decision.
+        const signal = opportunityScore({
           resumeFit: r.similarity * 100,
           ageDays,
           referral: r.ref_contacted ? 'CONTACTED' : r.ref_found ? 'FOUND' : 'NONE',
@@ -970,6 +1070,7 @@ export class MatchingService {
           applied: r.applied,
           sourceTrust: r.source ? (trustMap.get(r.source) ?? null) : null,
         });
+        const state = recommendationState(r.verdict, r.verdict_code, r.decided_at);
         return {
           jobId: r.id,
           title: r.title,
@@ -983,14 +1084,24 @@ export class MatchingService {
           fit: Math.round(r.similarity * 100),
           applied: r.applied,
           verdict: r.verdict,
-          opportunity: opp.score,
-          competition: opp.competition,
-          factors: opp.factors,
+          state,
+          /**
+           * The canonical Opportunity Score, from the persisted decision only.
+           * NULL for POTENTIAL means "not evaluated yet" and must render as a
+           * pending state — never as a score, and never as 0.
+           */
+          opportunity: state === 'POTENTIAL' ? null : (r.stored_opportunity ?? null),
+          matchSignal: signal.score,
+          competition: signal.competition,
+          factors: signal.factors,
           watched: r.watched,
           referral: r.ref_contacted ? 'CONTACTED' : r.ref_found ? 'FOUND' : 'NONE',
         };
       })
-      .sort((a, b) => b.opportunity - a.opportunity)
+      // The eligibility gate is authoritative here, not decorative. A refused
+      // job never reaches an actionable surface — invariant #2.
+      .filter((i) => i.state !== 'REFUSED')
+      .sort(byRecommendation)
       .slice(0, limit);
 
     return { resumeReady: true, items };

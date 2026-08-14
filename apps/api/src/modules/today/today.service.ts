@@ -16,6 +16,10 @@ export type TodayKind =
   | 'REPLY'
   | 'FOLLOW_UP'
   | 'APPLY'
+  /** Similar to the resume but NOT evaluated — a candidate, not a
+   *  recommendation. Kept separate from APPLY so the product never implies a
+   *  judgement it has not made. */
+  | 'POTENTIAL'
   | 'TAILOR'
   | 'REFERRAL'
   | 'MASTER_RESUME'
@@ -60,8 +64,11 @@ const KIND_ORDER: Record<TodayKind, number> = {
   APPLY: 2,
   TAILOR: 3,
   REFERRAL: 4,
-  MASTER_RESUME: 5,
-  LEARN: 6,
+  // Below the evaluated actions: a real recommendation always outranks a
+  // candidate, but above the passive ones so recall stays visible.
+  POTENTIAL: 5,
+  MASTER_RESUME: 6,
+  LEARN: 7,
 };
 
 const DAY = 86_400_000;
@@ -104,10 +111,20 @@ export class TodayService {
       ['OA', 'INTERVIEW', 'OFFER'].includes(a.status),
     ).length;
 
-    // Apply candidates come from the unified Opportunity Score feed (fit +
-    // referral + freshness + watchlist + hiring) — not the sparse LLM verdicts.
-    const feed = await this.matching.browseByFit(userId, { limit: 12 });
-    const applyCandidates = feed.items.filter((i) => !i.applied && !appliedJobIds.has(i.jobId));
+    // The feed is a broad candidate pool: mostly jobs that merely LOOK relevant
+    // (evaluation coverage is ~1%), plus the few the decision engine has
+    // actually judged. Those are different claims and Today must not blur them.
+    //
+    // Telling the user to "Apply to X" is CareerOS asserting a judgement, so it
+    // may only be said about an evaluated APPLY. Until 2026-08-15 this took the
+    // whole feed, which is how a job refused as TARGET_ROLE_TOO_SENIOR was
+    // presented as "Apply to XO Health — Opportunity 71".
+    const feed = await this.matching.browseByFit(userId, { limit: 24 });
+    const actionable = feed.items.filter((i) => !i.applied && !appliedJobIds.has(i.jobId));
+    const applyCandidates = actionable.filter((i) => i.state === 'APPLY');
+    // Strong-looking but unjudged. Surfaced as an explicit pending state so
+    // recall survives without dressing a candidate up as a recommendation.
+    const potentialCandidates = actionable.filter((i) => i.state === 'POTENTIAL');
 
     // Missing-skill signal for the LEARN action (the feed doesn't carry it).
     const learnMatches = activeVersionId
@@ -168,12 +185,15 @@ export class TodayService {
       });
     }
 
-    // 2) Apply to your highest-Opportunity-Score jobs you haven't applied to.
+    // 2) Apply to your highest-Opportunity-Score EVALUATED jobs. Every card here
+    //    carries a real verdict from the decision engine.
     let freshApplyMatches = 0;
     const top = applyCandidates[0] ?? null;
     for (const m of applyCandidates.slice(0, 2)) {
       if (m.ageDays <= 3) freshApplyMatches++;
-      const chips = [...competitionChips(m.ageDays), `opp ${m.opportunity}`];
+      // `opportunity` is the canonical stored score; APPLY always carries one.
+      const opp = Math.round(m.opportunity ?? 0);
+      const chips = [...competitionChips(m.ageDays), `opp ${opp}`];
       if (m.referral !== 'NONE') chips.push('referral in flight');
       if (m.watched) chips.push('★ watchlist');
       if (tailoredJobs.has(m.jobId)) chips.push('resume ready');
@@ -183,15 +203,39 @@ export class TodayService {
       actions.push({
         kind: 'APPLY',
         title: `Apply to ${m.company}`,
-        detail: `Opportunity ${m.opportunity} · ${m.competition.toLowerCase()} competition — get in while it's fresh.`,
+        detail: `Opportunity ${opp} · ${m.competition.toLowerCase()} competition — get in while it's fresh.`,
         chips,
         stars: 5,
         minutes: 10,
         href: `/jobs/${m.jobId}`,
         why,
         jobId: m.jobId,
-        opportunity: m.opportunity,
+        opportunity: opp,
       });
+    }
+
+    // 2b) Potential matches — strong resume similarity, NOT yet evaluated.
+    //
+    // These keep recall alive while evaluation coverage sits near 1%: without
+    // them a day with no evaluated APPLY would render an empty product even
+    // though thousands of plausible jobs exist. The wording is deliberately
+    // non-committal — CareerOS has not judged these, and says so rather than
+    // implying a verdict it has not earned. No Opportunity Score is shown,
+    // because none exists.
+    if (applyCandidates.length < 3) {
+      for (const m of potentialCandidates.slice(0, 3 - applyCandidates.length)) {
+        actions.push({
+          kind: 'POTENTIAL',
+          title: `Review ${m.company} — looks like a fit`,
+          detail: `${m.fit}% resume similarity · not evaluated yet — open it to trigger a full assessment.`,
+          chips: [...competitionChips(m.ageDays), 'evaluation pending'],
+          stars: 3,
+          minutes: 4,
+          href: `/jobs/${m.jobId}`,
+          jobId: m.jobId,
+          // Deliberately no `opportunity`: an unevaluated job has no score.
+        });
+      }
     }
 
     // 3) Tailor / 4) Referral — for the top apply target, if not done yet.
