@@ -44,7 +44,10 @@ param(
   [int]$KeepWeekly = 4,
   [string]$Container = 'careeros-postgres-1',
   [string]$DbUser = 'careeros',
-  [string]$DbName = 'careeros'
+  [string]$DbName = 'careeros',
+  # Cold boot / wake-from-sleep: Docker Desktop needs a few minutes before the
+  # engine accepts connections. Wait rather than fail.
+  [int]$WaitForDockerSeconds = 600
 )
 
 $ErrorActionPreference = 'Stop'
@@ -57,9 +60,24 @@ if (-not $OffMachinePath) {
 function Write-Step($msg) { Write-Host "[backup] $msg" }
 
 # --- 1. Preconditions ------------------------------------------------------
-$running = docker ps --filter "name=$Container" --format '{{.Names}}'
-if ($running -ne $Container) {
-  throw "Postgres container '$Container' is not running - nothing to back up. Start the stack first."
+# WAIT for Docker rather than failing. This task runs at 02:00 and with
+# StartWhenAvailable it also fires shortly after a cold boot or a wake from
+# sleep - exactly when Docker Desktop is still starting. Throwing there would
+# make the backup fail on precisely the mornings it is most needed, and Gate 0
+# would sit silently red.
+$deadline = (Get-Date).AddSeconds($WaitForDockerSeconds)
+$ready = $false
+while ((Get-Date) -lt $deadline) {
+  $running = docker ps --filter "name=$Container" --format '{{.Names}}' 2>$null
+  if ($running -eq $Container) {
+    docker exec $Container pg_isready -U $DbUser 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) { $ready = $true; break }
+  }
+  Write-Step 'waiting for postgres to accept connections...'
+  Start-Sleep -Seconds 15
+}
+if (-not $ready) {
+  throw "Postgres '$Container' not ready after $WaitForDockerSeconds s - no backup taken."
 }
 New-Item -ItemType Directory -Force -Path $LocalPath | Out-Null
 
