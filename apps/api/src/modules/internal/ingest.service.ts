@@ -7,6 +7,7 @@ import type { BoardJob, NormalizedJob } from '@careeros/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CompaniesService } from '../companies/companies.service';
 import { computeConfidence } from '../discovery/discovery.service';
+import { normalizeCountry } from './country';
 import { jobFingerprint } from './job-fingerprint';
 import { adaptiveTier, TIER_INTERVAL_MS, type Tier } from './crawl-scheduling';
 import { EMBED_JOBS_QUEUE } from './internal.constants';
@@ -238,7 +239,15 @@ export class IngestService {
       const descriptions = chunk.map((w) => w.job.description ?? '');
       const urls = chunk.map((w) => w.job.url);
       const locations = chunk.map((w) => w.job.location ?? null);
-      const countries = chunk.map((w) => w.job.country ?? null);
+      // Normalized HERE, at the one place every source converges, so a new
+      // adapter cannot reintroduce the 2026-08-15 bug: Workable and Recruitee
+      // emitted locale names ("India", "Deutschland") and 567 Indian jobs
+      // became invisible to every `country = 'IN'` filter in the product.
+      // Falls back to the location string when the source sends no country —
+      // "Bengaluru, India" is perfectly good evidence of the market.
+      const countries = chunk.map(
+        (w) => normalizeCountry(w.job.country) ?? normalizeCountry(w.job.location),
+      );
       const workModes = chunk.map((w) => w.job.workMode ?? null);
       const salaryMins = chunk.map((w) => w.job.salaryMin ?? null);
       const salaryMaxs = chunk.map((w) => w.job.salaryMax ?? null);
