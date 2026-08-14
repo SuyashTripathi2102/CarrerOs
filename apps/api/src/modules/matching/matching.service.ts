@@ -320,16 +320,42 @@ export class MatchingService {
    *
    * Override with AI_DAILY_BUDGET_USD. Set to 0 to disable evaluation entirely.
    */
-  private dailyBudgetUsd(): number {
+  private num(raw: string | undefined, fallback: number): number {
     // An EMPTY value means "unset", not "0". Number('') is 0, so parsing
     // naively would let a blank or deleted env var silently pause evaluation —
     // indistinguishable from a belt with nothing left to judge, which is the
     // exact failure class this whole scheduler exists to remove. An explicit
     // "0" still means pause.
-    const raw = process.env.AI_DAILY_BUDGET_USD?.trim();
-    if (!raw) return 8;
-    const parsed = Number(raw);
-    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 8;
+    const v = raw?.trim();
+    if (!v) return fallback;
+    const parsed = Number(v);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+  }
+
+  /**
+   * Today's spend ceiling, which CHANGES on the day the credit dies.
+   *
+   * The funding is a GCP free credit — ~$248 remaining of ₹28,320.75 — that
+   * expires 2026-10-07 and is worth nothing afterwards. Two different regimes
+   * follow from that, and the switch must be automatic:
+   *
+   *   BEFORE expiry  spend freely. Unspent credit is simply lost, so a low
+   *                  ceiling is a pure waste — it does not save anything.
+   *   AFTER expiry   the identical ticks bill the attached card (the account
+   *                  is already "paid ... will accrue a balance"). The ceiling
+   *                  drops hard, so the belt throttles itself on 8 October
+   *                  without anyone remembering to act.
+   *
+   * Dropping to a small non-zero figure rather than 0 is deliberate: /today
+   * keeps judging genuinely fresh arrivals (~$4/day steady state) instead of
+   * going silently dead on a date nobody is watching.
+   */
+  private dailyBudgetUsd(): { budget: number; regime: 'credit' | 'post-credit' } {
+    const expiresAt = process.env.AI_CREDIT_EXPIRES_AT?.trim();
+    const expired = expiresAt ? Date.now() > new Date(expiresAt).getTime() : false;
+    return expired
+      ? { budget: this.num(process.env.AI_DAILY_BUDGET_AFTER_CREDIT_USD, 2), regime: 'post-credit' }
+      : { budget: this.num(process.env.AI_DAILY_BUDGET_USD, 8), regime: 'credit' };
   }
 
   async reconcileAll(
@@ -337,17 +363,17 @@ export class MatchingService {
   ): Promise<{ users: number; scored: number; apply: number; skipped?: string }> {
     // Checked BEFORE any candidate work: the point is to spend nothing once the
     // ceiling is hit, not to notice afterwards.
-    const budget = this.dailyBudgetUsd();
+    const { budget, regime } = this.dailyBudgetUsd();
     const spent = await this.ai.spentTodayUsd();
     if (spent >= budget) {
       this.logger.warn(
-        `evaluation skipped: $${spent.toFixed(2)} spent today >= $${budget.toFixed(2)} budget`,
+        `evaluation skipped [${regime}]: $${spent.toFixed(2)} spent today >= $${budget.toFixed(2)} budget`,
       );
       return {
         users: 0,
         scored: 0,
         apply: 0,
-        skipped: `daily AI budget reached ($${spent.toFixed(2)}/$${budget.toFixed(2)})`,
+        skipped: `daily AI budget reached ($${spent.toFixed(2)}/$${budget.toFixed(2)}, ${regime})`,
       };
     }
 

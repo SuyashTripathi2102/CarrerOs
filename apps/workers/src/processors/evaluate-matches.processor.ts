@@ -81,14 +81,28 @@ export function startEvaluateMatchesWorker(api: ApiClient): Worker {
   );
 }
 
-/** Idempotent scheduler: evaluate a batch every 15 min, matching discovery's cadence. */
+/**
+ * Idempotent scheduler.
+ *
+ * 10 minutes, not 15: a cap=100 tick measures ~440s, so a 15-minute cadence
+ * left the belt idle roughly half the time while a 4,900-job tier-0 backlog
+ * waited. At 10 minutes it runs near-continuously during a drain (~820
+ * candidates/hour) and costs nothing once caught up, because a tick with no
+ * unjudged candidates returns immediately.
+ *
+ * Overlap is harmless by construction: concurrency is 1, so a tick queued while
+ * another is running simply waits its turn rather than double-spending. Spend
+ * is bounded by the API's daily budget guard, not by this interval.
+ */
 export async function ensureEvaluateMatchesSchedule(): Promise<void> {
   const queue = new Queue<EvaluateMatchesJobData>(QueueNames.EVALUATE_MATCHES, {
     connection: createRedisConnection(),
   });
+  // Retire the previous cadence, or both schedulers fire.
+  await queue.removeJobScheduler('evaluate-matches-15m').catch(() => undefined);
   await queue.upsertJobScheduler(
-    'evaluate-matches-15m',
-    { every: 15 * 60 * 1000 },
+    'evaluate-matches-10m',
+    { every: 10 * 60 * 1000 },
     {
       name: 'scheduled',
       data: { cap: DEFAULT_CAP },
@@ -102,5 +116,5 @@ export async function ensureEvaluateMatchesSchedule(): Promise<void> {
     },
   );
   await queue.close();
-  console.log(`[scheduler] evaluate-matches: 15m (cap=${DEFAULT_CAP}/user/tick)`);
+  console.log(`[scheduler] evaluate-matches: 10m (cap=${DEFAULT_CAP}/user/tick)`);
 }

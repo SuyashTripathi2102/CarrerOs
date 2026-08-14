@@ -11,12 +11,23 @@
  * surprise invoice. These tests pin the decision itself.
  */
 
-/** Mirrors dailyBudgetUsd() in MatchingService. */
-function dailyBudgetUsd(raw: string | undefined): number {
+/** Mirrors num() in MatchingService. */
+function dailyBudgetUsd(raw: string | undefined, fallback = 8): number {
   const v = raw?.trim();
-  if (!v) return 8;
+  if (!v) return fallback;
   const parsed = Number(v);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 8;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+/** Mirrors the credit-regime switch in MatchingService.dailyBudgetUsd(). */
+function budgetFor(
+  now: Date,
+  env: { during?: string; after?: string; expiresAt?: string },
+): { budget: number; regime: 'credit' | 'post-credit' } {
+  const expired = env.expiresAt ? now.getTime() > new Date(env.expiresAt).getTime() : false;
+  return expired
+    ? { budget: dailyBudgetUsd(env.after, 2), regime: 'post-credit' }
+    : { budget: dailyBudgetUsd(env.during, 8), regime: 'credit' };
 }
 
 /** Mirrors the guard at the top of reconcileAll(). */
@@ -74,6 +85,40 @@ describe('AI daily budget guard', () => {
 
     it('runs on a fresh day with no spend', () => {
       expect(shouldSkip(0, 8)).toBe(false);
+    });
+  });
+
+  describe('the credit cliff — 2026-10-07', () => {
+    const env = { during: '50', after: '2', expiresAt: '2026-10-07' };
+
+    it('spends freely while the credit is alive', () => {
+      // Unspent credit is LOST on expiry, so a low ceiling before that date
+      // saves nothing — it only wastes the balance.
+      expect(budgetFor(new Date('2026-08-15'), env)).toEqual({ budget: 50, regime: 'credit' });
+    });
+
+    it('still spends freely on the last day', () => {
+      expect(budgetFor(new Date('2026-10-07T00:00:00Z'), env).regime).toBe('credit');
+    });
+
+    it('throttles the day AFTER expiry, with nobody having to remember', () => {
+      // The belt does not change on 8 October; the payer does. This is the
+      // whole reason the guard is date-aware rather than a fixed number.
+      expect(budgetFor(new Date('2026-10-08'), env)).toEqual({ budget: 2, regime: 'post-credit' });
+    });
+
+    it('throttles far beyond expiry too', () => {
+      expect(budgetFor(new Date('2027-01-01'), env).regime).toBe('post-credit');
+    });
+
+    it('post-credit budget is small but NON-ZERO', () => {
+      // Dropping to 0 would make /today silently die on a date nobody watches.
+      // A small budget keeps genuinely fresh jobs flowing (~$4/day steady state).
+      expect(budgetFor(new Date('2026-10-08'), env).budget).toBeGreaterThan(0);
+    });
+
+    it('stays in credit regime when no expiry is configured', () => {
+      expect(budgetFor(new Date('2030-01-01'), { during: '50' }).regime).toBe('credit');
     });
   });
 
