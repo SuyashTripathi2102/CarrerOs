@@ -31,6 +31,24 @@ export class AiUsageService {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * USD spent since midnight UTC. The budget guard's input.
+   *
+   * Estimated from token counts, not Google's invoice — good enough to stop a
+   * runaway, not an accounting record. Rows with an unknown model contribute
+   * null and are ignored, so this UNDER-reports rather than over-reports; the
+   * ceiling should be set with that in mind.
+   */
+  async spentTodayUsd(): Promise<number> {
+    const since = new Date();
+    since.setUTCHours(0, 0, 0, 0);
+    const agg = await this.prisma.aiUsage.aggregate({
+      _sum: { costUsd: true },
+      where: { createdAt: { gte: since } },
+    });
+    return Number(agg._sum.costUsd ?? 0);
+  }
+
   /** Fire-and-forget — usage accounting must never fail an AI call. */
   record(call: AiCallRecord): void {
     const price = PRICE_PER_MTOK[call.model];

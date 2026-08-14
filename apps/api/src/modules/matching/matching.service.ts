@@ -18,6 +18,7 @@ import type { JobClassification } from './role-classification';
 import { atsKeywordAudit } from './ats-keywords';
 import { opportunityScore, type HiringTrend } from './opportunity-score';
 import { SourceTrustService } from '../source-trust/source-trust.service';
+import { AiUsageService } from '../ai/ai-usage.service';
 
 const SIMILARITY_TOP_K = 40; // pgvector prefilter size
 const LLM_SCORE_TOP_N = 15; // how many get deep LLM scoring
@@ -173,6 +174,7 @@ export class MatchingService {
     private readonly notifications: NotificationsService,
     private readonly classifier: JobClassifierService,
     private readonly sourceTrust: SourceTrustService,
+    private readonly ai: AiUsageService,
   ) {}
 
   /**
@@ -305,7 +307,50 @@ export class MatchingService {
 
   /** Reconcile every user with a parsed primary resume (system-driven catch-up:
    *  runs after a resume re-parse and on a schedule). */
-  async reconcileAll(cap = 60): Promise<{ users: number; scored: number; apply: number }> {
+  /**
+   * Daily LLM spend ceiling for the evaluation belt, USD. The belt runs
+   * unattended every 15 minutes forever, so without this a config slip — or
+   * simply the calendar — turns into an open-ended bill.
+   *
+   * The calendar part is not hypothetical: the GCP free credit funding this
+   * (₹23,435 remaining of ₹28,320.75, ~$248) EXPIRES 2026-10-07. On 8 October
+   * nothing about the belt changes; the same ticks simply start charging the
+   * attached card instead. A ceiling is what makes that a stopped queue rather
+   * than a surprise invoice.
+   *
+   * Override with AI_DAILY_BUDGET_USD. Set to 0 to disable evaluation entirely.
+   */
+  private dailyBudgetUsd(): number {
+    // An EMPTY value means "unset", not "0". Number('') is 0, so parsing
+    // naively would let a blank or deleted env var silently pause evaluation —
+    // indistinguishable from a belt with nothing left to judge, which is the
+    // exact failure class this whole scheduler exists to remove. An explicit
+    // "0" still means pause.
+    const raw = process.env.AI_DAILY_BUDGET_USD?.trim();
+    if (!raw) return 8;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 8;
+  }
+
+  async reconcileAll(
+    cap = 60,
+  ): Promise<{ users: number; scored: number; apply: number; skipped?: string }> {
+    // Checked BEFORE any candidate work: the point is to spend nothing once the
+    // ceiling is hit, not to notice afterwards.
+    const budget = this.dailyBudgetUsd();
+    const spent = await this.ai.spentTodayUsd();
+    if (spent >= budget) {
+      this.logger.warn(
+        `evaluation skipped: $${spent.toFixed(2)} spent today >= $${budget.toFixed(2)} budget`,
+      );
+      return {
+        users: 0,
+        scored: 0,
+        apply: 0,
+        skipped: `daily AI budget reached ($${spent.toFixed(2)}/$${budget.toFixed(2)})`,
+      };
+    }
+
     const users = await this.prisma.user.findMany({
       where: {
         resumes: { some: { isPrimary: true, versions: { some: { embedding: { isNot: null } } } } },

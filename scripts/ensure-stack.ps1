@@ -99,10 +99,16 @@ function Stop-Tree([int]$processId) {
    by an earlier bad tick or a half-finished restart. #>
 function Remove-DuplicateProcs([string]$match, [string]$label) {
   $procs = @(Get-NodeProcs $match | Sort-Object CreationDate)
-  if ($procs.Count -le 1) { return $procs }
-  Log "found $($procs.Count) $label instances - killing $($procs.Count - 1) duplicate(s)"
-  foreach ($p in $procs[1..($procs.Count - 1)]) { Stop-Tree $p.ProcessId }
-  return @($procs[0])
+  if ($procs.Count -gt 1) {
+    Log "found $($procs.Count) $label instances - killing $($procs.Count - 1) duplicate(s)"
+    foreach ($p in $procs[1..($procs.Count - 1)]) { Stop-Tree $p.ProcessId }
+    $procs = @($procs[0])
+  }
+  # `,` forces an array through the return: PowerShell unrolls a single-element
+  # array, so the caller would receive a bare object whose .Count reads oddly
+  # and whose comparisons silently misbehave. That made -Restart a no-op for
+  # workers, which would have been invisible if tsx watch had not hot-reloaded.
+  return , $procs
 }
 
 function Start-Detached([string]$cmd, [string]$workdir, [string]$logFile) {

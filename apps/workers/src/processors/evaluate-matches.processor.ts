@@ -35,8 +35,20 @@ export interface EvaluateMatchesJobData {
   cap?: number;
 }
 
-/** Per-user candidates evaluated per tick. At 15m ticks this is the throttle. */
-const DEFAULT_CAP = 60;
+/**
+ * Per-user candidates evaluated per tick. At 15m ticks this is the throttle.
+ *
+ * 100 measured against a 900s window: a cap=60 tick took 264s, so 100 lands
+ * near 440s — comfortably inside, with room for a slow LLM day. 150 would risk
+ * overrunning the window and stacking ticks.
+ *
+ * Sized to the funding, not to the hardware: the GCP free credit paying for
+ * this (~$248 remaining) expires 2026-10-07, and running slower than this
+ * would simply leave credit unspent when it evaporates. Spend is bounded
+ * independently by the API's daily budget guard (AI_DAILY_BUDGET_USD), which
+ * is what keeps the belt safe after that date.
+ */
+const DEFAULT_CAP = 100;
 
 export function startEvaluateMatchesWorker(api: ApiClient): Worker {
   return new Worker<EvaluateMatchesJobData>(
@@ -49,10 +61,15 @@ export function startEvaluateMatchesWorker(api: ApiClient): Worker {
 
       // Logged every tick because this is the number that answers "why so few
       // jobs?" — a belt that silently stops looks identical to a belt with
-      // nothing left to do.
-      console.log(
-        `[evaluate-matches] cap=${cap} users=${res.users} scored=${res.scored} apply=${res.apply} in ${seconds}s`,
-      );
+      // nothing left to do. The budget skip is called out explicitly for the
+      // same reason: a paused belt must never be mistaken for an idle one.
+      if (res.skipped) {
+        console.warn(`[evaluate-matches] SKIPPED — ${res.skipped}`);
+      } else {
+        console.log(
+          `[evaluate-matches] cap=${cap} users=${res.users} scored=${res.scored} apply=${res.apply} in ${seconds}s`,
+        );
+      }
       return res;
     },
     {
