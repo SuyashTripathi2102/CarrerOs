@@ -67,6 +67,57 @@ numbers instead.
 | Conversion events | 0 | table cleared; experiment not yet started |
 | Tests | 492 green | |
 
+### 🔴 THE FUNNEL — where 20,671 became 7 *(measured 2026-08-15)*
+
+`scripts/opportunity-funnel.sql`. Each stage is a strict subset of the one
+above, so every drop is a real loss with a real cause.
+
+| Stage | Jobs | Lost here | Kept |
+|---|---:|---:|---:|
+| 1. discovered (all time) | 22,751 | | |
+| 2. status = ACTIVE | 20,671 | 2,080 | 90.9% |
+| 3. India or remote | 11,585 | 9,086 | 56.0% |
+| 4. fresh (≤ 45 days) | 7,488 | 4,097 | 64.6% |
+| 5. embedded | 7,409 | 79 | 98.9% |
+| 6. similarity ≥ 0.45 | 7,409 | **0** | **100.0%** |
+| 7. **role classified** | **663** | **6,746** | **8.9%** ⬅ **the cliff** |
+| 8. deep scored | 89 | 574 | 13.4% |
+| 9. CONSIDER | 23 | | |
+| 10. APPLY | 7 | | |
+
+**Stages 2–6 are all working correctly.** Removed jobs, wrong geography and
+stale postings *should* be dropped, and stage 6 loses **zero** jobs — every
+fresh India job clears the similarity bar, so neither the vector prefilter nor
+`MIN_SIMILARITY` is filtering anything here.
+
+**The decisive number:**
+
+```
+eligible pool        7,409
+judged                  89
+NEVER LOOKED AT      7,320   = 98.8%
+```
+
+Those 7,320 were **not rejected**. They are unopened envelopes.
+
+**Root cause — evaluation has no scheduler.** Discovery has repeatable BullMQ
+jobs (`refresh-all` 15m, `discovery-fanout` 10m, `jooble-daily`). **Matching has
+none.** It runs only on resume activation or a manual `POST /matches/reconcile`.
+The decided-per-hour histogram confirms it: sporadic bursts (175, then 67, 21,
+19, then 1–3/hour) rather than a steady rate.
+
+```
+DISCOVERY   automated, every 10-15 min, forever
+EVALUATION  manual trigger only
+```
+
+So the pipeline has an automated intake bolted to a hand-cranked judgement step.
+
+**This is good news:** the fix is a repeatable job, not a budget. It was never a
+cost, rate-limit or threshold problem — nothing was asking the evaluator to run.
+Clearing the current eligible backlog is ~7,320 × $0.019 ≈ **$139 one-off**, and
+the steady-state cost is only whatever *fresh* eligible supply arrives daily.
+
 ### The one number that should drive planning
 
 ```
