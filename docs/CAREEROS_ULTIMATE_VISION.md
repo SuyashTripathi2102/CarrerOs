@@ -293,7 +293,146 @@ and it names the constraint automatically.
 
 ---
 
-## 7. The Command Center — what "done" looks like
+## 7. The Capability Gate — the definition of "no gaps left"
+
+The standard is deliberately higher than "it works":
+
+> **For Suyash's current career situation, no important capability gap remains.
+> Anything further is optimization, not a missing capability.**
+
+A phase does not close until **every** item in its checklist is in one of four
+states — and the last two are first-class outcomes, not excuses:
+
+| State | Meaning | Evidence required |
+|---|---|---|
+| 🟢 **BUILT** | shipped + tested | passing tests, named |
+| 🟢 **MEASURED** | working in real life | a number, dated |
+| ⚪ **INTENTIONALLY UNSUPPORTED** | decided against | ADR with the reason |
+| 🟡 **PROVEN UNNECESSARY** | measured, found not to be the bottleneck | the measurement |
+
+### 7.1 Rules that make this a gate and not a wish list
+
+**Every checklist item needs a metric and a query.** "Source health ✅" is an
+opinion. `source_health: 8/8 adapters reporting, 0 stale > 48h` is a gate. If an
+item cannot be expressed as something re-runnable, it is not a gate item — it is
+a feeling.
+
+**The gate is re-runnable, not one-time.** Capabilities silently regress:
+`country='India'` was green until it wasn't, and 567 India jobs went missing for
+weeks with every test still passing. Gates run continuously (`scripts/*.sql`),
+and a green item that turns red is a P0.
+
+**"Proven unnecessary" must be recorded with its evidence.** Four rebuilds have
+already been correctly rejected on measurement (see the roadmap's Deliberately
+Rejected table). Those are *wins* and must be logged as loudly as builds —
+otherwise the next session rebuilds them.
+
+**Every source and feature needs kill criteria.** The plan says when to build;
+nothing says when to *stop*. A source producing 500 jobs and 0 applications in
+30 days should be turned off, and that threshold is decided in advance.
+
+**State the cost ceiling before the work, not after.** Classification is
+~$0.019/job; evaluating the current corpus is ~$390. Without a stated monthly
+budget, throughput gets decided by accident.
+
+### 7.2 GATE 0 — Durability *(unlisted everywhere, highest severity)*
+
+**[MEASURED 2026-08-15] There are zero backups.** No dump, no cron, no script.
+The whole corpus — jobs, evaluations, resume, company intelligence, and every
+future outcome event — lives in one Docker volume on one laptop. Production data
+was already destroyed once this month; the backups lived on the same disk.
+
+Every phase below is built on this data, and Phase 11 (self-improving CareerOS)
+is valuable *only* because of accumulated outcome history. Losing it does not
+cost a rebuild; it costs the moat.
+
+- [ ] Automated `pg_dump` on a schedule
+- [ ] Stored **off** the machine that runs Postgres
+- [ ] A restore actually **tested**, not assumed
+- [ ] Resume + `confirmedProfile` exported separately (irreplaceable, tiny)
+- [ ] Outcome events treated as the crown jewels once collection starts
+
+This gate outranks every feature in this document.
+
+### 7.3 The full checklist
+
+**Discovery** — jobs · ATS · aggregators · career pages · email alerts · startup
+sources · funding signals · company signals · India-specific · international ·
+source health · dedup · freshness · **extraction drift detection**
+
+**Intelligence** — personal career graph · company intelligence · recruiter
+intelligence · funding intelligence · opportunity prediction · market trends
+
+**Job winning** — matching · ranking · resume tailoring · cover letters · ATS
+optimization · referral discovery · outreach · applications · follow-ups ·
+tracking
+
+**Interview** — job-specific · company-specific questions · technical · DSA ·
+system design · behavioural · mock interviews · weakness tracking · learning
+recommendations
+
+**Business** — freelance opportunities · client discovery · new-business
+detection · startup intelligence · website opportunities · international leads ·
+outreach · proposals · follow-up · CRM
+
+**Automation** — daily intelligence · alerts · email processing · automatic
+research · automatic preparation · approval workflows · safe autonomous actions ·
+outcome feedback · self-improvement
+
+**Trust** — no fabricated resume claims · no fake outreach · source provenance ·
+audit trail · consent · unsubscribe/suppression · rate limiting · account
+protection · privacy/security · compliance review · human approval for risky
+actions · **durability (Gate 0)**
+
+> **Resume truth needs an automated audit, not a promise.** "No fabricated
+> claims" is only a gate when every generated bullet carries a claim ID
+> resolving to real career evidence, and a test fails when one does not.
+
+### 7.4 The permanent rule — optimize for outcomes, not features
+
+| Never say | Say |
+|---|---|
+| "We have 50 scrapers" | "40 relevant opportunities → 12 worth applying → 8 applied → 3 interviews → 1 offer" |
+| "We generated 500 resumes" | "Tailored resume B raised interview rate 6% → 15%" |
+| "We sent 2,000 emails" | "20 targeted messages produced 6 conversations" |
+
+Completeness is judged by whether CareerOS has exhausted the *meaningful* ways
+it can create opportunities — never by lines of code or count of integrations.
+
+---
+
+## 8. What happens next — both tracks, in parallel
+
+Two different questions, and waiting on one to answer the other wastes time:
+
+```
+                         NOW
+                          │
+          ┌───────────────┴───────────────┐
+          ↓                               ↓
+   5-day real usage              Evaluation-throughput
+          │                        design + Gate 0
+          ↓                               ↓
+  Does it pick good jobs?         Is 1.14% enough?
+   (quality of the 7)              (coverage of 20,671)
+          └───────────────┬───────────────┘
+                          ↓
+                  Phase 1 decision
+```
+
+**Track A — baseline (needs Suyash, not code).** SEE → CLICK → TAILOR → APPLY →
+RESPONSE → INTERVIEW. Measures recommendation *quality*, which is independent of
+coverage — the 7 APPLY jobs are either good or they are not.
+
+**Track B — evaluation throughput + Gate 0 (engineering).** Coverage is 1.14%
+and evaluation absorbs 8–12% of intake (§2). Gate 0 first: no amount of
+capability survives losing the disk.
+
+Phase 1 opens only when both have answered.
+
+---
+
+## 9. The Command Center — what "done" looks like
 
 ```
 🔥 DO THESE TODAY
