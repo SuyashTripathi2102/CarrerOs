@@ -346,13 +346,31 @@ Every phase below is built on this data, and Phase 11 (self-improving CareerOS)
 is valuable *only* because of accumulated outcome history. Losing it does not
 cost a rebuild; it costs the moat.
 
-- [ ] Automated `pg_dump` on a schedule
-- [ ] Stored **off** the machine that runs Postgres
-- [ ] A restore actually **tested**, not assumed
-- [ ] Resume + `confirmedProfile` exported separately (irreplaceable, tiny)
-- [ ] Outcome events treated as the crown jewels once collection starts
+- [x] Automated `pg_dump` on a schedule — `scripts/backup.ps1`, Windows task
+      `CareerOS-Backup`, nightly 02:00
+- [x] Stored **off** the machine that runs Postgres — OneDrive, size-verified
+      after copy (local copy also lands on `D:`, a different physical drive from
+      Docker's WSL2 vhdx on `C:`)
+- [x] A restore actually **tested**, not assumed — `scripts/verify-restore.ps1`
+      restores into a throwaway DB and compares every table.
+      **2026-08-15: 30/30 tables match, pgvector usable, 20,645 embeddings**
+- [x] Resume + `confirmedProfile` exported separately — `profile_*.json`,
+      readable without a running Postgres
+- [x] Outcome events covered — `opportunity_events` is asserted by the verifier,
+      so the moat is checked on every run
 
-This gate outranks every feature in this document.
+**Status: PASSING as of 2026-08-15** (174 MB dump, both copies byte-identical).
+
+Two traps this hit, worth remembering:
+- Piping `pg_dump -Fc` through a PowerShell pipeline **corrupts the archive** —
+  PowerShell reinterprets the byte stream as text. Dump inside the container and
+  `docker cp` it out. The corrupt version looks fine and cannot be restored.
+- The verifier exercises **pgvector specifically**. `job_embeddings` restores as
+  rows but is worthless if the `vector` type did not come with it, and a plain
+  row-count check would call that a success.
+
+Re-run `verify-restore.ps1` after any schema change. This gate outranks every
+feature in this document.
 
 ### 7.3 The full checklist
 
