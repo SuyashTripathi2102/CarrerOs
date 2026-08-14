@@ -2,7 +2,18 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { apiGet } from '@/lib/api';
+import { apiGet, apiPost } from '@/lib/api';
+
+/**
+ * Fire-and-forget outcome logging — never blocks navigation, never throws.
+ *
+ * `displayedScore` is the number this page actually put on screen, which is NOT
+ * the persisted verdict in job_matches — the two are different scoring paths and
+ * are known to disagree. Sending it lets the event record what the user saw.
+ */
+function track(jobId: string, type: 'CLICKED', rank: number, displayedScore?: number) {
+  apiPost('/events', { jobId, type, surface: 'today', rank, displayedScore }).catch(() => {});
+}
 
 type Impact = 'DO_FIRST' | 'HIGH' | 'MEDIUM' | 'LOW';
 interface Action {
@@ -15,6 +26,10 @@ interface Action {
   href: string;
   value?: string;
   why?: string[];
+  /** Present only on job-bound kinds (APPLY / TAILOR / REFERRAL). */
+  jobId?: string;
+  /** The score this card displays — the live surface score, not the stored verdict. */
+  opportunity?: number;
 }
 interface Today {
   greeting: string;
@@ -47,7 +62,25 @@ export default function TodayPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    apiGet<Today>('/today').then(setData).catch((e) => setError(String(e)));
+    apiGet<Today>('/today')
+      .then((d) => {
+        setData(d);
+        // Log impressions once per load — the CTR/apply-rate denominator.
+        // Rank is the position in the rendered list, so a later comparison of
+        // "shown at rank 1" vs "shown at rank 5" is possible. Actions with no
+        // jobId (MASTER_RESUME, LEARN, outreach) are not opportunities and are
+        // deliberately excluded rather than logged against a placeholder.
+        const items = d.actions
+          .map((a, i) => ({ jobId: a.jobId, rank: i + 1, displayedScore: a.opportunity }))
+          .filter(
+            (x): x is { jobId: string; rank: number; displayedScore: number | undefined } =>
+              Boolean(x.jobId),
+          );
+        if (items.length > 0) {
+          apiPost('/events/impressions', { surface: 'today', items }).catch(() => {});
+        }
+      })
+      .catch((e) => setError(String(e)));
   }, []);
 
   if (error) return <Shell><p className="text-red-400">{error}</p></Shell>;
@@ -132,6 +165,11 @@ function ActionCard({ a, step, total }: { a: Action; step: number; total: number
     <li>
       <Link
         href={a.href}
+        onClick={() => {
+          // `step` is the same 1-based rank sent with the impression, so CTR
+          // by position is computable without joining on anything else.
+          if (a.jobId) track(a.jobId, 'CLICKED', step, a.opportunity);
+        }}
         className={`block rounded-xl border bg-neutral-900 p-4 transition hover:border-neutral-600 ${
           a.impact === 'DO_FIRST' ? 'border-emerald-900/60' : 'border-neutral-800'
         }`}

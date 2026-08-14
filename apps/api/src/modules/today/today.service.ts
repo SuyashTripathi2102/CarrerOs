@@ -32,6 +32,24 @@ export interface TodayAction {
   href: string; // into an existing feature
   value?: string; // e.g. "unlocks 6 strong matches"
   why?: string[]; // "why this first" — only on the lead action
+  /**
+   * The opportunity this action is about, when there is one. Present only for
+   * job-bound kinds (APPLY / TAILOR / REFERRAL); MASTER_RESUME, LEARN and the
+   * outreach kinds are not about a specific job and correctly omit it.
+   *
+   * Exists so /today can log SHOWN and CLICKED against a real job — the CTR
+   * denominator. `opportunity_events.jobId` is NOT NULL, so without this the
+   * surface cannot be measured at all.
+   */
+  jobId?: string;
+  /**
+   * The Opportunity Score this action actually puts on screen, when it shows
+   * one (APPLY cards render "Opportunity {n}"). This is `browseByFit`'s live
+   * score, NOT the persisted verdict in job_matches — the two are separate
+   * scoring paths and are known to disagree. Surfaced so analytics can record
+   * what was displayed rather than re-deriving a number the user never saw.
+   */
+  opportunity?: number;
 }
 
 // Lower = earlier when priority ties. Time-sensitive replies first; passive
@@ -171,6 +189,8 @@ export class TodayService {
         minutes: 10,
         href: `/jobs/${m.jobId}`,
         why,
+        jobId: m.jobId,
+        opportunity: m.opportunity,
       });
     }
 
@@ -185,6 +205,7 @@ export class TodayService {
           stars: 4,
           minutes: 3,
           href: `/resumes/tailor/${top.jobId}`,
+          jobId: top.jobId,
         });
       }
       if (top.referral === 'NONE') {
@@ -196,6 +217,7 @@ export class TodayService {
           stars: 4,
           minutes: 5,
           href: `/referrals/${top.jobId}`,
+          jobId: top.jobId,
         });
       }
     }

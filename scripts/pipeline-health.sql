@@ -80,7 +80,21 @@ LEFT JOIN job_embeddings e ON e."jobId" = j.id
 WHERE j.status = 'ACTIVE' AND e."jobId" IS NULL;
 
 \echo ''
-\echo '=== 5. NORTH STAR — fresh actionable opportunities/day ==='
+\echo '=== 5. [INVALIDATED 2026-08-14] fresh actionable opportunities/day ==='
+-- ┌──────────────────────────────────────────────────────────────────────────┐
+-- │ INVALIDATED — score/surface divergence. Do NOT quote as the KPI.         │
+-- └──────────────────────────────────────────────────────────────────────────┘
+-- This counts job_matches.verdict='APPLY' — the persisted deep decision. But
+-- /today and /browse do not read job_matches; they render `browseByFit`'s live
+-- 7-input score. Measured 2026-08-14: 7 of the 9 stored-APPLY jobs (78.3–92.1)
+-- were absent from the top-100 surface feed, while /today's #2 card
+-- ("Apply — Opportunity 71") held a stored verdict of SKIP at 16.9.
+--
+-- So this query describes jobs the user largely never sees. It is retained as
+-- evidence, not deleted, and stays invalid as the operational KPI until the
+-- surface and decision layers are unified. The eventual metric is a staged
+-- funnel (discovered → eligible → evaluated → APPLY surfaced → clicked →
+-- tailored → applied → interview), not a single number.
 -- NOT jobs discovered, embedded, classified, or scored. The only number that
 -- tracks the product goal: opportunities the user could act on today.
 --
@@ -89,16 +103,22 @@ WHERE j.status = 'ACTIVE' AND e."jobId" IS NULL;
 -- verdict='APPLY' and opportunityScore>=70 are DIFFERENT metrics and are
 -- reported separately here on purpose — conflating them has inflated this
 -- figure three times already.
+-- TIME-ANCHORING: freshness is measured against `decidedAt`, NOT now(). A
+-- past day's number must never change when this is re-run later. Anchoring on
+-- now() would silently shrink every historical day as jobs age, and the
+-- `status='ACTIVE'` join would retroactively erase days when a job is later
+-- marked REMOVED — making a 5-day baseline drift underneath us.
 SELECT
   date_trunc('day', m."decidedAt")::date AS day,
   count(*) FILTER (WHERE m.verdict = 'APPLY')            AS apply_verdicts,
   count(*) FILTER (WHERE m."opportunityScore" >= 70)     AS score_70_plus,
   count(*) FILTER (WHERE m.verdict = 'APPLY'
-                     AND now()::date - COALESCE(j."postedAt", j."firstSeenAt")::date <= 14)
+                     AND m."decidedAt"::date
+                         - COALESCE(j."postedAt", j."firstSeenAt")::date <= 14)
                                                           AS fresh_actionable
 FROM job_matches m
-JOIN jobs j ON j.id = m."jobId" AND j.status = 'ACTIVE'
-WHERE m."decidedAt" > now() - interval '7 days'
+JOIN jobs j ON j.id = m."jobId"
+WHERE m."decidedAt" > now() - interval '14 days'
 GROUP BY 1 ORDER BY 1 DESC;
 
 \echo ''

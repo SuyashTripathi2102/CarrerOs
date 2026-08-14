@@ -9,6 +9,22 @@ import {
 
 const EVENT_TYPES = new Set(['SHOWN', 'CLICKED', 'DISMISSED', 'APPLIED']);
 
+/**
+ * What the surface rendered, as reported by the surface itself.
+ *
+ * CareerOS has two Opportunity Scores: the live `browseByFit` score that
+ * /today and /browse actually display (never persisted), and the deep
+ * 10-module score with its verdict in job_matches. They were measured on
+ * 2026-08-14 to disagree severely, so an event that records only the stored
+ * decision attributes the user's action to a number they never saw.
+ *
+ * Both are therefore written, and neither overwrites the other.
+ */
+export interface DisplayedSnapshot {
+  displayedScore?: number;
+  displayedVerdict?: string;
+}
+
 @Injectable()
 export class AnalyticsService {
   private readonly logger = new Logger(AnalyticsService.name);
@@ -27,6 +43,7 @@ export class AnalyticsService {
     type: string,
     surface?: string,
     rank?: number,
+    displayed?: DisplayedSnapshot,
   ): Promise<{ ok: boolean }> {
     const t = type.toUpperCase();
     if (!EVENT_TYPES.has(t)) return { ok: false };
@@ -58,6 +75,10 @@ export class AnalyticsService {
           jobSource: job?.source ?? null,
           breakdown: (match?.scoreBreakdown ?? undefined) as Prisma.InputJsonValue | undefined,
           decisionVersion: match?.decisionVersion ?? null,
+          // Recorded as reported, NOT reconciled against the stored decision —
+          // where the two differ, that difference is the finding.
+          displayedScore: displayed?.displayedScore ?? null,
+          displayedVerdict: displayed?.displayedVerdict ?? null,
         },
       });
       return { ok: true };
@@ -75,7 +96,7 @@ export class AnalyticsService {
   async recordImpressions(
     userId: string,
     surface: string,
-    items: { jobId: string; rank?: number }[],
+    items: ({ jobId: string; rank?: number } & DisplayedSnapshot)[],
   ): Promise<{ recorded: number }> {
     if (items.length === 0) return { recorded: 0 };
     try {
@@ -105,6 +126,10 @@ export class AnalyticsService {
             verdict: m?.verdict ?? null,
             jobSource: sourceByJob.get(i.jobId) ?? null,
             decisionVersion: m?.decisionVersion ?? null,
+            // As rendered. A SHOWN row where displayedVerdict='APPLY' and
+            // verdict='SKIP' is a true record of the divergence, not an error.
+            displayedScore: i.displayedScore ?? null,
+            displayedVerdict: i.displayedVerdict ?? null,
           };
         }),
       });

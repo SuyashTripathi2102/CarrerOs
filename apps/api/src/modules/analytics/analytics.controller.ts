@@ -6,17 +6,34 @@ import { AnalyticsService } from './analytics.service';
 
 const SURFACES = ['browse', 'today', 'telegram', 'tracker'] as const;
 
+/**
+ * What the surface actually rendered. Optional: server-side emitters (the
+ * application tracker) legitimately have nothing on screen to report, and that
+ * is recorded as NULL rather than guessed at.
+ */
+const DisplayedSchema = {
+  displayedScore: z.number().min(0).max(100).optional(),
+  displayedVerdict: z.string().min(1).max(32).optional(),
+};
+
 const EventSchema = z.object({
   jobId: z.string().min(1),
   type: z.enum(['SHOWN', 'CLICKED', 'DISMISSED', 'APPLIED']),
   surface: z.enum(SURFACES).optional(),
   rank: z.number().int().min(0).optional(),
+  ...DisplayedSchema,
 });
 
 const ImpressionsSchema = z.object({
   surface: z.enum(SURFACES),
   items: z
-    .array(z.object({ jobId: z.string().min(1), rank: z.number().int().min(0).optional() }))
+    .array(
+      z.object({
+        jobId: z.string().min(1),
+        rank: z.number().int().min(0).optional(),
+        ...DisplayedSchema,
+      }),
+    )
     .max(200),
 });
 
@@ -29,8 +46,11 @@ export class AnalyticsController {
   record(@CurrentUser() user: AuthenticatedUser, @Body() body: unknown) {
     const parsed = EventSchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
-    const { jobId, type, surface, rank } = parsed.data;
-    return this.analytics.record(user.id, jobId, type, surface, rank);
+    const { jobId, type, surface, rank, displayedScore, displayedVerdict } = parsed.data;
+    return this.analytics.record(user.id, jobId, type, surface, rank, {
+      displayedScore,
+      displayedVerdict,
+    });
   }
 
   /** Batch-record SHOWN impressions for a rendered list — the CTR denominator. */

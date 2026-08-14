@@ -119,7 +119,12 @@ concurrency, batch size and provider limits are *not* touched. Re-run
 `scripts/pipeline-health.sql` to re-check; do not re-litigate from a single
 coverage percentage again.
 
-### The scoreboard — `fresh actionable opportunities/day`
+### ⛔ The scoreboard — `fresh actionable opportunities/day` — **INVALIDATED 2026-08-14**
+
+> **Do not quote this number.** It counts `job_matches.verdict='APPLY'`, but
+> `/today` and `/browse` do not read `job_matches` — see *Two competing
+> Opportunity Scores* below. It therefore measures a surface the user does not
+> use. Retained as evidence; superseded once the two layers are unified.
 
 Adopted 2026-08-13 as the single operational number. **Not** jobs discovered,
 embedded, classified, sources added, or Opportunity Score. Those are stage
@@ -147,11 +152,67 @@ Measured by `scripts/pipeline-health.sql`, which is the permanent operational
 metric: stage coverage, discovery→embedded p50/p95, throughput vs intake,
 backlog age, and the scoreboard.
 
+### 🚨 Two competing Opportunity Scores (discovered 2026-08-14) — **BLOCKS the baseline**
+
+Found while verifying that `/today` analytics actually recorded anything. It is
+a product-integrity problem, not an analytics bug.
+
+| | Surface score | Deep score |
+|---|---|---|
+| Code | `browseByFit` ([matching.service.ts:964]) | deep-scoring path |
+| Drives | **`/today` + `/browse`** — what the user acts on | `job_matches` |
+| Inputs | 7; `resumeFit` = raw cosine × 100 | 10 modules; LLM fit/experience/skillGap |
+| Verdict | none | APPLY / CONSIDER / SKIP + `decisionVersion` |
+| Persisted | **never** — recomputed per request | yes |
+
+Measured divergence — top 12 of the live feed: **0 APPLY · 6 SKIP · 1 CONSIDER
+· 5 never scored**, all live 69–72.
+
+- `/today` #1 "Apply to jobgether — **Opportunity 72**" → **no stored match**
+- `/today` #2 "Apply to XO Health — **Opportunity 71**" → stored **SKIP, 16.9**
+- The 9 stored-APPLY jobs score **74.6–92.1**, all ACTIVE, fresh (0–14 d),
+  embedded, passing the India filter, similarity 0.76–0.83 (only 27 jobs in the
+  corpus beat the best one) — yet **7 of 9 are absent from the top-100 feed**;
+  the 2 present rank #24 and #66 at live 68 and 66.
+
+The `today.service.ts:99` comment says the surface path is deliberate — *"not
+the sparse LLM verdicts"* — so this may be an unfinished architecture rather
+than a bug: **Browse/Today = candidate discovery, `job_matches` = evaluated
+recommendation.** The open question is which layer is canonical, and it is not
+answered by picking whichever score looks better.
+
+**Consequences.** The scoreboard above is invalidated. Impression events were
+snapshotting only the *stored* decision, so a click on "Opportunity 72" recorded
+`verdict=NULL` — five days of conversion data would have been confidently wrong.
+
+**Done:** analytics now records `displayedScore`/`displayedVerdict` alongside
+the stored pair, neither overwriting the other (migration
+`20260814000000_opportunity_event_displayed_score`, 5 regression tests).
+
+**Not done, deliberately:** nothing in discovery, retrieval, scoring, gating or
+thresholds. The canonical-layer decision comes after a module-by-module audit of
+why the two paths diverge.
+
+**A likely resolution to design toward** (not yet agreed): the surface should
+consume the canonical decision rather than invent a second score, while still
+showing unevaluated jobs — as an explicit *state*, not a fabricated number.
+
+```
+Evaluated            Opportunity 89 · APPLY
+Pending evaluation   Potential match · similarity high · evaluation pending
+```
+
+That preserves recall without implying an unscored job carries a trustworthy
+score.
+
 **Success metric:** a stable daily funnel — new → India → SWE → stack → ≤3 YOE →
 eligible → scored → APPLY → applied — measured across ≥5 consecutive days.
 
-**Exit criteria:** we can state relevant-jobs/day with a real denominator, and
-no scoring module treats missing data as bad data.
+**Exit criteria:** we can state relevant-jobs/day with a real denominator, no
+scoring module treats missing data as bad data, **and one canonical decision
+layer drives every surface.**
+
+[matching.service.ts:964]: ../apps/api/src/modules/matching/matching.service.ts
 
 ---
 

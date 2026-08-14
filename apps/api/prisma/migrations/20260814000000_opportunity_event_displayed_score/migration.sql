@@ -1,0 +1,22 @@
+-- Record what the SURFACE showed, alongside what the DECISION LAYER stored.
+--
+-- CareerOS currently has two Opportunity Scores. /today and /browse render
+-- `browseByFit`'s live 7-input score (resumeFit = raw cosine similarity),
+-- recomputed per request and never persisted. The deep 10-module score and its
+-- APPLY/CONSIDER/SKIP verdict live in job_matches.
+--
+-- Measured 2026-08-14, they disagree severely:
+--   * "Apply to XO Health — Opportunity 71" carried a stored verdict of SKIP (16.9)
+--   * "Apply to jobgether — Opportunity 72" had no stored match at all
+--   * 7 of the 9 stored-APPLY jobs (78.3–92.1) were absent from the top-100 feed
+--
+-- The existing opportunityScore/verdict columns snapshot the STORED decision, so
+-- attributing a click to them records a number the user never saw. These two
+-- columns capture what was actually on screen. Neither side overwrites the
+-- other — where they differ, the divergence IS the evidence, and it is exactly
+-- what the audit of the two scoring paths needs.
+--
+-- NULL means the surface reported no displayed value (e.g. server-side APPLIED
+-- events from the tracker), which is distinct from "displayed as zero".
+ALTER TABLE "opportunity_events" ADD COLUMN "displayedScore" DOUBLE PRECISION;
+ALTER TABLE "opportunity_events" ADD COLUMN "displayedVerdict" TEXT;

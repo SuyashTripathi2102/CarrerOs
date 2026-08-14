@@ -527,12 +527,30 @@ model OpportunityEvent {
   type             String // SHOWN | CLICKED | DISMISSED | APPLIED
   surface          String? // where it was shown: browse | today | telegram | tracker
   rank             Int? // position in the ranked list when shown/acted — for position-bias analysis
+  // --- STORED: the persisted deep decision (job_matches) at the moment of the action.
   opportunityScore Float? // score at the moment of the action
   verdict          String? // APPLY | CONSIDER | SKIP at that moment
   jobSource        String? // job provenance/extractor version (e.g. career-page-deterministic-v1)
   breakdown        Json? // [{module, score, weight, reason}] snapshot — the "why"
   decisionVersion  Int? // score/decision logic version at the moment (immutable metadata)
-  createdAt        DateTime @default(now())
+
+  // --- DISPLAYED: what the surface actually rendered to the user.
+  //
+  // These exist because the two are NOT the same system. /today and /browse are
+  // driven by `browseByFit`'s live 7-input score, which is recomputed per request
+  // and never persisted; the deep 10-module verdict lives in job_matches. On
+  // 2026-08-14 they were measured to disagree severely — a job displayed as
+  // "Opportunity 71 · Apply" carried a stored verdict of SKIP at 16.9, and 7 of
+  // the 9 stored-APPLY jobs (78–92) were absent from the top-100 feed entirely.
+  //
+  // Attributing a click to the stored verdict would therefore record something
+  // the user never saw. Both are kept, and NEITHER overwrites the other: the
+  // divergence itself is the evidence. Null means the surface did not report a
+  // displayed value (e.g. server-side APPLIED events from the tracker).
+  displayedScore   Float? // Opportunity Score as rendered on the surface
+  displayedVerdict String? // verdict as rendered, when the surface shows one
+
+  createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   job  Job  @relation(fields: [jobId], references: [id], onDelete: Cascade)
