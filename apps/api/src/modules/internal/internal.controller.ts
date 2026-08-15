@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { z } from 'zod';
@@ -12,6 +13,7 @@ import { BoardJobSchema, NormalizedJobSchema } from '@careeros/shared';
 import { Public } from '../../common/decorators/public.decorator';
 import { CompaniesService } from '../companies/companies.service';
 import { IngestService } from './ingest.service';
+import { CompanyIdentityService } from './company-identity.service';
 import { InternalTokenGuard } from './internal-token.guard';
 
 const SyncBodySchema = z.object({
@@ -37,6 +39,7 @@ export class InternalController {
   constructor(
     private readonly ingest: IngestService,
     private readonly companies: CompaniesService,
+    private readonly identity: CompanyIdentityService,
   ) {}
 
   @Get('companies/due')
@@ -57,5 +60,28 @@ export class InternalController {
     const parsed = BoardBodySchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
     return this.ingest.ingestBoardJobs(parsed.data.source, parsed.data.entries);
+  }
+
+  // ── ADR-11 company identity ──────────────────────────────────────────────
+
+  /** Derive identity tokens from apply URLs. Idempotent, no merging. */
+  @Post('company-identity/backfill-tokens')
+  backfillTokens() {
+    return this.identity.backfillIdentityTokens().then((companies) => ({ companies }));
+  }
+
+  /**
+   * Resolve aliases. DRY RUN BY DEFAULT — `?apply=true` is required to write,
+   * and even then only STRONG evidence merges.
+   */
+  @Post('company-identity/resolve')
+  resolveIdentity(@Query('apply') apply?: string) {
+    return this.identity.resolve(apply !== 'true');
+  }
+
+  /** Alias candidates awaiting a human decision. Read-only. */
+  @Get('company-identity/review')
+  identityReview() {
+    return this.identity.pendingReview();
   }
 }

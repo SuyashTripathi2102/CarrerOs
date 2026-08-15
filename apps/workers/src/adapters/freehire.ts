@@ -113,7 +113,11 @@ export function mapFreehireJobs(jobs: FreehireJob[]): BoardJob[] {
     seen.add(externalId);
 
     out.push({
-      company: { name: company },
+      // company_slug is present on 100% of rows (measured over 3,000). It
+      // fragments exactly like the name does — `zensar` vs
+      // `zensar-technologies` — so under ADR-11 it is corroborating evidence,
+      // never a canonical id. The confirming signal is the apply-URL tenant.
+      company: { name: company, sourceSlug: j.company_slug?.trim() || null },
       job: {
         externalId,
         title,

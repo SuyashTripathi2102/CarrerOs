@@ -353,8 +353,26 @@ model Company {
   watches      CompanyWatch[]
   snapshot     ExtractionSnapshot?
 
+  // ADR-11 company identity. `aliasOf` points a duplicate row at its canonical
+  // company; null means this row IS canonical. Nothing is rewritten — jobs keep
+  // their original companyId and resolve through here — so a merge is
+  // reversible and an over-merge is recoverable.
+  aliasOfId String?
+  aliasOf   Company?  @relation("CompanyAlias", fields: [aliasOfId], references: [id], onDelete: SetNull)
+  aliases   Company[] @relation("CompanyAlias")
+  /** Evidence that justified the merge: STRONG only, per ADR-11. */
+  aliasConfidence String?
+  /** Apply-URL derived tenant token (ADR-11). NOT atsIdentifier, which is
+   *  name-derived and fragments identically to the names it would disambiguate. */
+  identityToken   String?
+  /** Source-provided company key (e.g. FreeHire company_slug) — identity
+   *  evidence, kept even though it fragments like a name. */
+  sourceSlug      String?
+
   // One company per ATS board — prevents two rows crawling the same source.
   @@unique([atsProvider, atsIdentifier])
+  @@index([aliasOfId])
+  @@index([identityToken])
   @@index([name])
   @@index([nextCrawlAt]) // the "due now" scheduler query
   @@index([discoveryStage, lastProbedAt]) // the discovery prober's due query

@@ -30,6 +30,13 @@ export const BoardJobSchema = z.object({
     website: z.string().url().nullish(),
     /** Apply URL — the API detects the company's ATS from this and starts direct crawls. */
     atsHintUrl: z.string().url().nullish(),
+    /**
+     * Source-provided company key (e.g. FreeHire `company_slug`). Identity
+     * evidence under ADR-11, kept even though it fragments like a name
+     * (`zensar` vs `zensar-technologies`) — it is corroboration, never a
+     * canonical id.
+     */
+    sourceSlug: z.string().nullish(),
   }),
   job: NormalizedJobSchema,
 });

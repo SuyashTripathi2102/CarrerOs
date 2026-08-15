@@ -91,6 +91,101 @@ not from scraping Glassdoor/Crunchbase/etc.
 **Why:** Free, legal, always fresh, and surprisingly complete — a company's job postings ARE
 its hiring profile. External sources (funding, ratings) come later as links/references only.
 
+## ADR-11: Company identity — names propose, ATS tenancy confirms (ACCEPTED, 2026-08-15)
+
+**Status:** accepted 2026-08-15. FreeHire pagination is blocked on this being implemented —
+scaling discovery before identity is protected would fragment company intelligence at a scale
+that cannot be retrofitted.
+
+**Context.** Fingerprint dedup keys on `companyId`, so a company that exists under two
+names becomes two companies and its jobs, hiring velocity, referrals and outcomes split
+between them. Measured in the live corpus:
+
+```
+key            variants  jobs  detail
+paytm                 2   246  Paytm [LEVER:paytm] | PAYTM SERVICES PVT LTD [WORKABLE:...]
+zensar                2    22  Zensar | Zensar Technologies          (11 / 11 split)
+fefundinfo            2    15  fe-fundinfo | FE fundinfo
+jpmorganchase         2    14  JP Morgan Chase | JPMorganChase        (7 / 7 split)
+hexaware              2     4  HEXAWARE | Hexaware Technologies       (2 / 2 split)
+nordson               2     3  Nordson | Nordson Corporation
+danaher               2     3  Danaher | Danaher Corporation
+```
+
+7 groups, 307 jobs. Projected onto a paginated FreeHire (2,703-job sample): **33 groups,
+530 jobs — 20%**. The even splits (Zensar 11/11, JPMorganChase 7/7) are the damaging ones:
+they halve every company-level signal.
+
+**Decision.**
+
+1. **Normalized name PROPOSES a match; it never merges on its own.** Normalization tiers,
+   measured against the FreeHire sample:
+
+   ```
+   T1  case + punctuation            19 groups   no risk
+   T2  + legal (Inc/LLC/Corp/Ltd)    24 groups   no risk
+   T3  + geo (India)                 25 groups   judgement (DoorDash India = DoorDash?)
+   T4  + industry (Technologies…)    33 groups   unsafe on name alone
+   ```
+
+2. **The apply-URL tenant is the confirming signal — not the stored ATS columns.**
+   `companies.atsIdentifier` is derived from the name (`zensar` vs `zensar-technologies`),
+   so it fragments identically and confirms nothing. `companies.atsProvider` is also
+   unreliable: HEXAWARE is stored as `WORKABLE` while its jobs serve from
+   `fa-etqo-saasfaprod1.fa.ocs.oraclecloud.com`. The job URL is the ground truth.
+
+   ```
+   Zensar               fa-etvl-saasfaprod1.fa.ocs.oraclecloud.com  ┐ same tenant
+   Zensar Technologies  fa-etvl-saasfaprod1.fa.ocs.oraclecloud.com  ┘ → STRONG
+   ```
+
+3. **Confidence hierarchy. Only STRONG may auto-merge.**
+
+   ```
+   STRONG   compatible normalized name + SAME first-party ATS tenant   → auto-merge
+   MEDIUM   same canonical website domain                              → review
+   WEAK     normalized name only                                       → review
+   UNKNOWN  no reliable identity evidence                              → review
+   ```
+
+4. **Aggregator hosts are never company identity.** `echojobs.io`, `remoteOK.com`,
+   `himalayas.app`, `jobstash`, `whatjobs`, `telegram` and similar carry jobs for arbitrary
+   companies. An explicit denylist is required; without it a URL rule collapses every
+   company an aggregator touches into one. Multi-tenant ATS hosts
+   (`job-boards.greenhouse.io`, `jobs.lever.co`, `jobs.smartrecruiters.com`) are identity
+   only when combined with their **path token** (`jobs.lever.co/paytm`), never by host.
+
+5. **A differing tenant is NOT evidence of distinctness.** Originally proposed as such;
+   the Paytm row disproves it — `Paytm` serves from `jobs.lever.co/paytm` while
+   `PAYTM SERVICES PVT LTD` came via `remoteOK.com`. Companies also legitimately run more
+   than one ATS. Differing tenants therefore yield UNKNOWN → review, never an auto-split
+   and never an auto-merge.
+
+6. **Non-destructive.** A `company_aliases` table points variants at a canonical
+   `companyId`. Existing `jobs.companyId` foreign keys are never rewritten by inference;
+   resolution happens through the alias table.
+
+7. **Ambiguity goes to review, never to a guess.** Under-merging costs a duplicate row.
+   Over-merging silently fuses two companies' funding, hiring velocity, contacts and
+   outcomes — invisible, and unrecoverable once downstream signals are computed.
+
+**Backfill (first pass, evidence-confirmed only).** `Zensar`/`Zensar Technologies` and
+`HEXAWARE`/`Hexaware Technologies` — both STRONG, same Oracle tenant. Everything else in
+the table above goes to review: `Paytm` (aggregator host on one side), `JPMorganChase` and
+`fe-fundinfo` (one side has no ATS evidence), `Nordson` and `Danaher` (no tenancy on
+either side). `Motorola Solutions` exists in the corpus with no duplicate — nothing to merge.
+
+**Tests must protect the dangerous cases.** `Apple` ≠ `Apple Bank`; a shared
+`job-boards.greenhouse.io` host must not merge; an aggregator host must never confer
+identity; same tenant + compatible name merges; differing tenants go to review, not split;
+absent tenancy goes to review.
+
+**Why:** the Company Intelligence Graph (ADR-9) computes hiring velocity, role mix and
+referral paths per company. Every one of those is wrong if a company is two rows — or, far
+worse, if two companies are one. This ADR fixes the identity layer *before* FreeHire
+pagination multiplies the corpus, because retrofitting identity after signals are computed
+means recomputing everything downstream.
+
 ## ADR-10: Opportunity Score will be modular scorers, not one formula (Phase C)
 
 **Decision (planned):** Independent scorer modules (resume fit, experience match, freshness,
