@@ -1,7 +1,8 @@
-import { CLASSIFIER_VERSION } from './job-classifier.service';
+import { PIPELINE_DECISION_VERSION } from './pipeline-version';
 
 /**
- * Regression suite for the candidate-queue starvation bug (2026-08-12).
+ * Regression suite for the candidate-queue starvation bug (2026-08-12) and its
+ * second incarnation, the decisionVersion split-brain (2026-08-15).
  *
  * `reconcileForUser` excludes candidates with
  *   NOT EXISTS (job_matches WHERE decidedAt IS NOT NULL ...)
@@ -9,12 +10,12 @@ import { CLASSIFIER_VERSION } from './job-classifier.service';
  * job_matches row was ever written. The refusal therefore satisfied NOT EXISTS
  * on every subsequent run and permanently consumed a slot under LIMIT.
  *
- * Measured before the fix: 19 of 60 top slots dead, 106 pool-wide and rising —
+ * Measured before the fix: 19 of 60 top slots dead, 106 pool-wide and rising --
  * 796 jobs had never been classified at all. Left alone, once 60 refusals
  * accumulate at the top of the similarity ordering the pipeline stops
  * evaluating new jobs entirely.
  *
- * These tests pin the exclusion *predicate* — the SQL and the recording logic
+ * These tests pin the exclusion *predicate* -- the SQL and the recording logic
  * must agree about which rows are binding.
  */
 
@@ -26,19 +27,19 @@ function isExcludedFromCandidates(row: {
 }): boolean {
   if (row.decidedAt === null) return false;
   if (row.decidedAt < row.profileUpdatedAt) return false;
-  return row.decisionVersion === null || row.decisionVersion >= CLASSIFIER_VERSION;
+  return row.decisionVersion === null || row.decisionVersion >= PIPELINE_DECISION_VERSION;
 }
 
 describe('candidate exclusion predicate', () => {
   const epoch = new Date('2026-01-01');
   const later = new Date('2026-08-12');
 
-  it('a recorded gate refusal at the current classifier version is excluded', () => {
+  it('a recorded gate refusal at the current pipeline version is excluded', () => {
     // The whole point: refusals must stop consuming candidate slots.
     expect(
       isExcludedFromCandidates({
         decidedAt: later,
-        decisionVersion: CLASSIFIER_VERSION,
+        decisionVersion: PIPELINE_DECISION_VERSION,
         profileUpdatedAt: epoch,
       }),
     ).toBe(true);
@@ -50,12 +51,12 @@ describe('candidate exclusion predicate', () => {
     ).toBe(false);
   });
 
-  it('a refusal from an OLDER classifier re-opens', () => {
-    // Versioning the classifier is pointless if its old verdicts stay binding.
+  it('a refusal from an OLDER pipeline version re-opens', () => {
+    // Versioning is pointless if old verdicts stay binding.
     expect(
       isExcludedFromCandidates({
         decidedAt: later,
-        decisionVersion: CLASSIFIER_VERSION - 1,
+        decisionVersion: PIPELINE_DECISION_VERSION - 1,
         profileUpdatedAt: epoch,
       }),
     ).toBe(false);
@@ -73,20 +74,96 @@ describe('candidate exclusion predicate', () => {
     expect(
       isExcludedFromCandidates({
         decidedAt: epoch,
-        decisionVersion: CLASSIFIER_VERSION,
+        decisionVersion: PIPELINE_DECISION_VERSION,
         profileUpdatedAt: later,
       }),
     ).toBe(false);
   });
 
-  it('a profile edit re-opens even a current-classifier refusal', () => {
+  it('a profile edit re-opens even a current-version refusal', () => {
     expect(
       isExcludedFromCandidates({
         decidedAt: new Date('2026-06-01'),
-        decisionVersion: CLASSIFIER_VERSION,
+        decisionVersion: PIPELINE_DECISION_VERSION,
         profileUpdatedAt: later,
       }),
     ).toBe(false);
+  });
+});
+
+/**
+ * THE DECISION PERSISTENCE INVARIANT (2026-08-15).
+ *
+ * Every terminal decision must be persisted with the current pipeline version,
+ * and every consumer must respect that version.
+ *
+ * Two writers stamp `job_matches.decisionVersion`:
+ *
+ *   recordGateRejections  (matching.service)    -- the free path, gate refusals
+ *   scoreAndPersist       (opportunity.service) -- the paid path, deep scoring
+ *
+ * They stamped 2 and 1 respectively while the predicate tested `>= 2`, so the
+ * expensive decisions were the ones that failed to stick. The belt re-judged
+ * the same 89 jobs every tick: decided_total held at 1,488 across a full tick
+ * while spend rose $0.2156 (~$1.29/hour for zero new decisions), and the
+ * 4,908-job backlog behind them was unreachable.
+ *
+ * Both writers are modelled here rather than trusting one constant, because a
+ * single shared constant is precisely what was missing.
+ */
+describe('decision persistence invariant', () => {
+  const epoch = new Date('2026-01-01');
+  const now = new Date('2026-08-15');
+
+  /** What matching.service.recordGateRejections writes. */
+  const gateRefusalStamp = () => PIPELINE_DECISION_VERSION;
+  /** What opportunity.service.scoreAndPersist writes. */
+  const deepScoreStamp = () => PIPELINE_DECISION_VERSION;
+
+  it('both writers stamp the SAME version', () => {
+    expect(deepScoreStamp()).toBe(gateRefusalStamp());
+  });
+
+  it('a gate refusal is not re-admitted', () => {
+    expect(
+      isExcludedFromCandidates({
+        decidedAt: now,
+        decisionVersion: gateRefusalStamp(),
+        profileUpdatedAt: epoch,
+      }),
+    ).toBe(true);
+  });
+
+  it('a DEEP-SCORED decision is not re-admitted either', () => {
+    // The regression itself. This returned false before the fix, which is what
+    // made the belt loop forever over the jobs that cost money to judge.
+    expect(
+      isExcludedFromCandidates({
+        decidedAt: now,
+        decisionVersion: deepScoreStamp(),
+        profileUpdatedAt: epoch,
+      }),
+    ).toBe(true);
+  });
+
+  it('neither writer can satisfy the predicate while the other cannot', () => {
+    // Generalised: whatever the constant becomes, the two paths move together.
+    const paths = [gateRefusalStamp(), deepScoreStamp()];
+    const excluded = paths.map((v) =>
+      isExcludedFromCandidates({ decidedAt: now, decisionVersion: v, profileUpdatedAt: epoch }),
+    );
+    expect(new Set(excluded).size).toBe(1);
+  });
+
+  it('bumping the version re-opens BOTH paths, not just one', () => {
+    // The capability versioning exists for. A bump must invalidate every
+    // terminal decision, or the cheap ones would outlive a taxonomy change.
+    const stale = PIPELINE_DECISION_VERSION - 1;
+    for (const v of [stale, stale]) {
+      expect(
+        isExcludedFromCandidates({ decidedAt: now, decisionVersion: v, profileUpdatedAt: epoch }),
+      ).toBe(false);
+    }
   });
 });
 
@@ -99,7 +176,7 @@ describe('what gets recorded', () => {
     expect(shouldRecord({ eligible: false, needsReview: false })).toBe(true);
   });
 
-  it('does NOT record an eligible job — it proceeds to scoring', () => {
+  it('does NOT record an eligible job -- it proceeds to scoring', () => {
     expect(shouldRecord({ eligible: true, needsReview: false })).toBe(false);
   });
 

@@ -10,11 +10,19 @@ import {
   type Eligibility,
   type JobClassification,
 } from '../matching/role-classification';
+import { PIPELINE_DECISION_VERSION } from '../matching/pipeline-version';
 import { companyTier, isEvergreen } from './company-tier';
 import { SourceTrustService } from '../source-trust/source-trust.service';
 
-/** Bump when decide() changes: stored verdicts say which logic produced them. */
-export const DECISION_VERSION = 1;
+/**
+ * Deep-scored decisions stamp the SAME canonical version as gate refusals.
+ *
+ * This used to be a private `DECISION_VERSION = 1` while the candidate query
+ * excluded on `>= CLASSIFIER_VERSION` (2), so every job that survived the gate
+ * and cost an LLM call was re-admitted on the very next tick — forever. Bump
+ * decide()'s logic by raising PIPELINE_DECISION_VERSION, not by adding a
+ * second constant here.
+ */
 
 /**
  * Opportunity Score (ADR-10): modular scorers, each returning a 0-100 score,
@@ -218,7 +226,7 @@ export class OpportunityService {
               capsAtConsider: elig.capsAtConsider,
             })
           : 'SKIP',
-        decisionVersion: DECISION_VERSION,
+        decisionVersion: PIPELINE_DECISION_VERSION,
         decidedAt: new Date(),
       },
     });

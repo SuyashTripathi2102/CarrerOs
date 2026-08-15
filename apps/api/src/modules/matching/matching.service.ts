@@ -8,6 +8,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { OpportunityService } from '../opportunity/opportunity.service';
 import type { ParsedResume } from '../resumes/resume-intelligence.service';
 import { CLASSIFIER_VERSION, JobClassifierService } from './job-classifier.service';
+import { PIPELINE_DECISION_VERSION } from './pipeline-version';
 import {
   DEFAULT_ROLE_PROFILE,
   eligibility,
@@ -449,10 +450,12 @@ export class MatchingService {
             AND m."resumeVersionId" = ${resume.resumeVersionId}
             AND m."decidedAt" IS NOT NULL
             AND m."decidedAt" >= ${profileUpdatedAt}
-            -- A gate refusal is only binding while the classifier that made it
-            -- is current. Bump CLASSIFIER_VERSION and every refusal re-opens;
-            -- scored matches (decisionVersion NULL) are unaffected.
-            AND (m."decisionVersion" IS NULL OR m."decisionVersion" >= ${CLASSIFIER_VERSION})
+            -- A decision is only binding while the pipeline that made it is
+            -- current. Bump PIPELINE_DECISION_VERSION and every decision
+            -- re-opens; scored matches (decisionVersion NULL) are unaffected.
+            -- BOTH writers must stamp this same constant — see
+            -- pipeline-version.ts for what happened when they did not.
+            AND (m."decisionVersion" IS NULL OR m."decisionVersion" >= ${PIPELINE_DECISION_VERSION})
         )
       -- FRESHNESS TIERS BEFORE SIMILARITY (2026-08-15). Ordering purely by
       -- similarity meant a 40-day-old listing at 0.85 was evaluated ahead of a
@@ -732,9 +735,9 @@ export class MatchingService {
    * 106 pool-wide and climbing) — and `/excluded` reads exactly these rows,
    * so the audit surface showed nothing.
    *
-   * decisionVersion carries CLASSIFIER_VERSION: bump the classifier and every
-   * refusal it made becomes a candidate again, which is the point of versioning
-   * the classifier at all.
+   * decisionVersion carries PIPELINE_DECISION_VERSION — the SAME constant the
+   * deep scorer stamps and the candidate query tests. Bump it and every refusal
+   * becomes a candidate again, which is the point of versioning at all.
    */
   private async recordGateRejections(
     userId: string,
@@ -761,14 +764,14 @@ export class MatchingService {
           verdictCode: r.code,
           verdictReason: r.reason,
           decidedAt: now,
-          decisionVersion: CLASSIFIER_VERSION,
+          decisionVersion: PIPELINE_DECISION_VERSION,
         },
         update: {
           verdict: 'SKIP',
           verdictCode: r.code,
           verdictReason: r.reason,
           decidedAt: now,
-          decisionVersion: CLASSIFIER_VERSION,
+          decisionVersion: PIPELINE_DECISION_VERSION,
         },
       });
       written++;
