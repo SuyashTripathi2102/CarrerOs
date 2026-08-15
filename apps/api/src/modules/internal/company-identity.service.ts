@@ -2,9 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { normalizeCompanyName } from '../companies/company-name';
 import {
-  identityConfidence,
+  assessPair,
   identityTokenFromUrl,
   shouldAutoMerge,
+  type IdentityBasis,
   type IdentityConfidence,
 } from './company-identity';
 
@@ -15,6 +16,8 @@ export interface AliasCandidate {
   duplicateId: string;
   duplicateName: string;
   confidence: IdentityConfidence;
+  /** Which evidence produced this verdict — shown in review. */
+  basis: IdentityBasis;
   canonicalToken: string | null;
   duplicateToken: string | null;
   jobs: number;
@@ -90,21 +93,26 @@ export class CompanyIdentityService {
       },
     });
 
-    // Group by the shared name key: this PROPOSES, it never decides.
-    const groups = new Map<string, typeof companies>();
+    // TWO grouping passes, because either alone is blind:
+    //   by name  — finds Zensar / Zensar Technologies
+    //   by tenant — finds Deutsche Bank / db, which no name rule can propose
+    const byName = new Map<string, typeof companies>();
+    const byTenant = new Map<string, typeof companies>();
     for (const c of companies) {
       const key = normalizeCompanyName(c.name);
-      if (!key) continue;
-      const g = groups.get(key) ?? [];
-      g.push(c);
-      groups.set(key, g);
+      if (key) byName.set(key, [...(byName.get(key) ?? []), c]);
+      if (c.identityToken) {
+        byTenant.set(c.identityToken, [...(byTenant.get(c.identityToken) ?? []), c]);
+      }
     }
 
     const candidates: AliasCandidate[] = [];
+    const seenPairs = new Set<string>();
     let merged = 0;
     let escalated = 0;
     let groupsExamined = 0;
 
+    const groups: [string, typeof companies][] = [...byName, ...byTenant];
     for (const [key, members] of groups) {
       if (members.length < 2) continue;
       groupsExamined++;
@@ -115,10 +123,17 @@ export class CompanyIdentityService {
       const canonical = sorted[0];
 
       for (const dup of sorted.slice(1)) {
-        const confidence = identityConfidence(
+        // A pair can surface in both passes; assess it once.
+        const pairKey = [canonical.id, dup.id].sort().join('|');
+        if (seenPairs.has(pairKey)) continue;
+        seenPairs.add(pairKey);
+
+        const { confidence, basis } = assessPair(
           { name: canonical.name, token: canonical.identityToken, domain: canonical.website },
           { name: dup.name, token: dup.identityToken, domain: dup.website },
         );
+        if (basis === 'NONE') continue; // co-grouped but unrelated
+
         candidates.push({
           key,
           canonicalId: canonical.id,
@@ -126,6 +141,7 @@ export class CompanyIdentityService {
           duplicateId: dup.id,
           duplicateName: dup.name,
           confidence,
+          basis,
           canonicalToken: canonical.identityToken,
           duplicateToken: dup.identityToken,
           jobs: dup._count.jobs,

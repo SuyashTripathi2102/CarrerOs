@@ -1,6 +1,8 @@
 import {
+  assessPair,
   identityConfidence,
   identityTokenFromUrl,
+  isReviewCandidate,
   normalizeCompanyName,
   shouldAutoMerge,
 } from './company-identity';
@@ -213,6 +215,46 @@ describe('confidence hierarchy -- only STRONG automates', () => {
     expect(a.token).toBeNull();
     expect(b.token).toBeNull();
     expect(shouldAutoMerge(identityConfidence(a, b))).toBe(false);
+    // And crucially NOT even a review candidate: two nulls are not a tenant
+    // match, or every aggregator-sourced company would pair with every other.
+    expect(assessPair(a, b).basis).toBe('NONE');
+    expect(isReviewCandidate(assessPair(a, b))).toBe(false);
+  });
+
+  it('unrelated companies with no shared evidence are not candidates at all', () => {
+    const a = assessPair(
+      { name: 'Acme', token: 'acme.wd1.myworkdayjobs.com' },
+      { name: 'Globex', token: 'globex.wd1.myworkdayjobs.com' },
+    );
+    expect(a.basis).toBe('NONE');
+    expect(isReviewCandidate(a)).toBe(false);
+  });
+
+  it('records WHY, so review shows evidence rather than a bare verdict', () => {
+    const t = 'fa-etvl-saasfaprod1.fa.ocs.oraclecloud.com';
+    expect(assessPair({ name: 'Zensar', token: t }, { name: 'Zensar Technologies', token: t })).toEqual(
+      { confidence: 'STRONG', basis: 'NAME_AND_TENANT' },
+    );
+    expect(
+      assessPair(
+        { name: 'Danaher', token: 'jobs.danaher.com' },
+        { name: 'Danaher Corporation', token: 'danaher.wd1.myworkdayjobs.com' },
+      ),
+    ).toEqual({ confidence: 'UNKNOWN', basis: 'NAME_TENANT_CONFLICT' });
+    expect(assessPair({ name: 'Nordson' }, { name: 'Nordson Corporation' })).toEqual({
+      confidence: 'WEAK',
+      basis: 'NAME_ONLY',
+    });
+  });
+
+  it('MUST NOT MERGE: unrelated names sharing a tenant are review, never merge', () => {
+    // A tenant can host a parent brand and a subsidiary. TENANT_ONLY surfaces
+    // the pair for a human; it must never automate.
+    const t = 'jpmc.fa.oraclecloud.com';
+    const a = assessPair({ name: 'JP Morgan Chase', token: t }, { name: 'JPMorganChase', token: t });
+    expect(a).toEqual({ confidence: 'UNKNOWN', basis: 'TENANT_ONLY' });
+    expect(shouldAutoMerge(a.confidence)).toBe(false);
+    expect(isReviewCandidate(a)).toBe(true);
   });
 
   it('Motorola/Motorola Solutions stays UNKNOWN even sharing a tenant', () => {

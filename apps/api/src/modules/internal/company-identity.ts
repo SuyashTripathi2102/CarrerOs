@@ -201,19 +201,62 @@ export interface IdentityCandidate {
  * than one ATS, and one side may simply have arrived via an aggregator.
  */
 export function identityConfidence(a: IdentityCandidate, b: IdentityCandidate): IdentityConfidence {
-  // Names that do not even propose a match are not candidates at all.
-  // `Apple` vs `Apple Bank` stops here and can never reach STRONG, whatever
-  // tenancy says.
-  if (proposalKey(a.name) !== proposalKey(b.name)) return 'UNKNOWN';
+  return assessPair(a, b).confidence;
+}
 
-  if (a.token && b.token) {
-    if (a.token === b.token) return 'STRONG';
-    return 'UNKNOWN'; // differing tenants prove nothing either way
+/**
+ * Why a pair reached its confidence. Carried into review so a human sees the
+ * evidence rather than a bare verdict.
+ */
+export type IdentityBasis =
+  | 'NAME_AND_TENANT' // same key + same company-specific tenant
+  | 'NAME_TENANT_CONFLICT' // same key, different tenants
+  | 'NAME_AND_DOMAIN'
+  | 'NAME_ONLY'
+  | 'TENANT_ONLY' // ADR-11 rule 5: same tenant, names too different to propose
+  | 'NONE'; // unrelated
+
+export interface PairAssessment {
+  confidence: IdentityConfidence;
+  basis: IdentityBasis;
+}
+
+/**
+ * Assess whether two company rows are the same company.
+ *
+ * Only NAME_AND_TENANT automates. TENANT_ONLY is the amendment that lets the
+ * system *find* aliases a name-first rule structurally cannot — `Deutsche Bank`
+ * / `db`, `Blue Yonder` / `jda` — without ever merging them, because one tenant
+ * can host a parent brand and its subsidiary (Currencies Direct / Redpin).
+ */
+export function assessPair(a: IdentityCandidate, b: IdentityCandidate): PairAssessment {
+  const sameTenant = Boolean(a.token && b.token && a.token === b.token);
+
+  if (proposalKey(a.name) !== proposalKey(b.name)) {
+    // Names do not propose. Company-specific tenancy is still real evidence —
+    // aggregator hosts and route literals already yield a null token, so a
+    // non-null match here means a shared ATS tenant.
+    return sameTenant
+      ? { confidence: 'UNKNOWN', basis: 'TENANT_ONLY' }
+      : { confidence: 'UNKNOWN', basis: 'NONE' };
   }
 
-  if (a.domain && b.domain && a.domain.toLowerCase() === b.domain.toLowerCase()) return 'MEDIUM';
+  if (a.token && b.token) {
+    return sameTenant
+      ? { confidence: 'STRONG', basis: 'NAME_AND_TENANT' }
+      : { confidence: 'UNKNOWN', basis: 'NAME_TENANT_CONFLICT' };
+  }
 
-  return 'WEAK';
+  if (a.domain && b.domain && a.domain.toLowerCase() === b.domain.toLowerCase()) {
+    return { confidence: 'MEDIUM', basis: 'NAME_AND_DOMAIN' };
+  }
+
+  return { confidence: 'WEAK', basis: 'NAME_ONLY' };
+}
+
+/** A pair worth a human decision — everything except "unrelated". */
+export function isReviewCandidate(a: PairAssessment): boolean {
+  return a.basis !== 'NONE' && !shouldAutoMerge(a.confidence);
 }
 
 /** Only STRONG automates. Everything else is escalated, never guessed. */

@@ -155,17 +155,36 @@ they halve every company-level signal.
    (`job-boards.greenhouse.io`, `jobs.lever.co`, `jobs.smartrecruiters.com`) are identity
    only when combined with their **path token** (`jobs.lever.co/paytm`), never by host.
 
-5. **A differing tenant is NOT evidence of distinctness.** Originally proposed as such;
+5. **Same tenant + substantially different names → UNKNOWN → review.** (Amendment,
+   2026-08-15, after implementation surfaced the blind spot.) A name-first rule can never
+   discover an alias whose names do not resemble each other, and the corpus contains seven:
+
+   ```
+   JP Morgan Chase | JPMorganChase        jpmc.fa.oraclecloud.com
+   Deutsche Bank   | db                   db.wd3.myworkdayjobs.com
+   Blue Yonder     | jda                  jda.wd5.myworkdayjobs.com
+   Modulr          | Modulr Finance       boards.greenhouse.io/modulrfinance
+   Weekday         | weekdayworks         jobs.lever.co/weekdayworks
+   Travel Leaders Group | travelhrportal  travelhrportal.wd1.myworkdayjobs.com
+   Currencies Direct    | Redpin          job-boards.eu.greenhouse.io/currenciesdirect
+   ```
+
+   Sharing a company-specific ATS tenant is real evidence, but a tenant can host a parent
+   brand and a subsidiary (Currencies Direct / Redpin), so this **never auto-merges**. It
+   raises a review candidate carrying its evidence, and the human decision becomes
+   permanent evidence for later ingestion.
+
+6. **A differing tenant is NOT evidence of distinctness.** Originally proposed as such;
    the Paytm row disproves it — `Paytm` serves from `jobs.lever.co/paytm` while
    `PAYTM SERVICES PVT LTD` came via `remoteOK.com`. Companies also legitimately run more
    than one ATS. Differing tenants therefore yield UNKNOWN → review, never an auto-split
    and never an auto-merge.
 
-6. **Non-destructive.** A `company_aliases` table points variants at a canonical
+7. **Non-destructive.** A `company_aliases` table points variants at a canonical
    `companyId`. Existing `jobs.companyId` foreign keys are never rewritten by inference;
    resolution happens through the alias table.
 
-7. **Ambiguity goes to review, never to a guess.** Under-merging costs a duplicate row.
+8. **Ambiguity goes to review, never to a guess.** Under-merging costs a duplicate row.
    Over-merging silently fuses two companies' funding, hiring velocity, contacts and
    outcomes — invisible, and unrecoverable once downstream signals are computed.
 
