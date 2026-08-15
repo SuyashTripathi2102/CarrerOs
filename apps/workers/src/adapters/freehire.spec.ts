@@ -1,4 +1,4 @@
-import { mapFreehireJobs } from './freehire';
+import { mapFreehireJobs, maxPerQuery } from './freehire';
 
 /**
  * FreeHire adapter contract.
@@ -106,5 +106,53 @@ describe('mapFreehireJobs', () => {
     const [j] = mapFreehireJobs([row({ location: undefined, description: undefined })]);
     expect(j.job.location).toBeNull();
     expect(j.job.description).toBe('');
+  });
+});
+
+/**
+ * Pagination cap (2026-08-15). The adapter went from one page per role to
+ * controlled pagination once measurement showed the first page was 5.6% of the
+ * source, ~85% of it genuinely new, and the real cost $0.0073/decision rather
+ * than the assumed $0.019/job.
+ *
+ * Parsing is pinned because the same shape already caused an incident: a blank
+ * AI_DAILY_BUDGET_USD parsed as 0 and would have silently paused evaluation.
+ * Here a bad value must never silently disable the best discovery source.
+ */
+describe('FREEHIRE_MAX_PER_QUERY', () => {
+  const original = process.env.FREEHIRE_MAX_PER_QUERY;
+  afterEach(() => {
+    if (original === undefined) delete process.env.FREEHIRE_MAX_PER_QUERY;
+    else process.env.FREEHIRE_MAX_PER_QUERY = original;
+  });
+  const set = (v: string | undefined) => {
+    if (v === undefined) delete process.env.FREEHIRE_MAX_PER_QUERY;
+    else process.env.FREEHIRE_MAX_PER_QUERY = v;
+  };
+
+  it('defaults to 300 when unset', () => {
+    set(undefined);
+    expect(maxPerQuery()).toBe(300);
+  });
+
+  it('reads a configured cap, so the ladder can be walked without a code change', () => {
+    set('1000');
+    expect(maxPerQuery()).toBe(1000);
+    set('100');
+    expect(maxPerQuery()).toBe(100);
+  });
+
+  it('treats blank/garbage as UNSET rather than as zero', () => {
+    // Number('') === 0. Falling through to 0 would fetch nothing and look
+    // exactly like an upstream outage.
+    for (const v of ['', '   ', 'abc', '-5', '0']) {
+      set(v);
+      expect(maxPerQuery()).toBe(300);
+    }
+  });
+
+  it('floors fractional values rather than producing a partial page', () => {
+    set('250.7');
+    expect(maxPerQuery()).toBe(250);
   });
 });
