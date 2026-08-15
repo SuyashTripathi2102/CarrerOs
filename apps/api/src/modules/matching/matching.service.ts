@@ -202,8 +202,9 @@ export class MatchingService {
     this.logger.log(`Prefilter: ${candidates.length} candidates by cosine similarity`);
 
     // Role eligibility before scoring — similarity ranks, it never admits.
-    const { eligible, rejected } = await this.gateByRole(userId, candidates);
+    const { eligible, rejected, needsReview } = await this.gateByRole(userId, candidates);
     await this.recordGateRejections(userId, resume.resumeVersionId, rejected);
+    await this.recordNeedsReview(userId, resume.resumeVersionId, needsReview);
     const toScore = eligible.slice(0, LLM_SCORE_TOP_N);
     const { matchIds } = await this.scoreAndUpsert(userId, resume, toScore);
 
@@ -493,6 +494,15 @@ export class MatchingService {
     );
     if (recorded > 0) this.logger.log(`recorded ${recorded} gate refusals as decided SKIPs`);
 
+    // Undecided jobs are recorded too, or they stay invisible AND keep
+    // consuming candidate slots on every tick — the same early return applies.
+    const escalated = await this.recordNeedsReview(
+      userId,
+      resume.resumeVersionId,
+      gate.needsReview,
+    );
+    if (escalated > 0) this.logger.log(`escalated ${escalated} jobs to Needs Review`);
+
     if (gate.eligible.length === 0) {
       const empty = emptyReconcileReport();
       empty.inspected = candidates.length;
@@ -616,11 +626,16 @@ export class MatchingService {
      *  job_matches row — so `NOT EXISTS(decided)` re-admitted it on every
      *  run, and refusals silently ate the candidate cap forever. */
     rejected: { id: string; code: string; reason: string }[];
-    needsReview: string[];
+    /** Genuinely undecided. Carries code+reason so the caller can RECORD them
+     *  as NEEDS_REVIEW — until 2026-08-15 this was `string[]` and the caller
+     *  ignored it entirely, which left every uncertain job with no
+     *  job_matches row: invisible to /needs-review, unable to collect human
+     *  feedback, and re-fetched by the belt on every tick forever. */
+    needsReview: { id: string; code: string; reason: string }[];
   }> {
     const rejectedByCode: Record<string, number> = {};
     const rejected: { id: string; code: string; reason: string }[] = [];
-    const needsReview: string[] = [];
+    const needsReview: { id: string; code: string; reason: string }[] = [];
     if (candidates.length === 0)
       return { eligible: [], rejectedByCode, rejected, needsReview };
 
@@ -716,10 +731,11 @@ export class MatchingService {
       if (e.eligible) eligible.push(cand);
       else {
         rejectedByCode[e.code] = (rejectedByCode[e.code] ?? 0) + 1;
-        // needsReview jobs stay un-recorded: they are genuinely undecided and
-        // must remain candidates for the Needs Review surface.
-        if (e.needsReview) needsReview.push(cand.id);
-        else rejected.push({ id: cand.id, code: e.code, reason: e.reason ?? e.code });
+        // "I am not confident" is a terminal outcome, not the absence of one,
+        // so it is recorded as NEEDS_REVIEW — a distinct verdict, never a SKIP.
+        const row = { id: cand.id, code: e.code, reason: e.reason ?? e.code };
+        if (e.needsReview) needsReview.push(row);
+        else rejected.push(row);
       }
     }
     return { eligible, rejectedByCode, rejected, needsReview };
@@ -744,30 +760,81 @@ export class MatchingService {
     resumeVersionId: string,
     rejected: { id: string; code: string; reason: string }[],
   ): Promise<number> {
-    if (rejected.length === 0) return 0;
+    return this.recordGateDecisions(userId, resumeVersionId, rejected, 'SKIP');
+  }
+
+  /**
+   * Record gate uncertainty as decided NEEDS_REVIEW matches.
+   *
+   * `gateByRole` has always separated "refused" from "genuinely undecided", but
+   * until 2026-08-15 the undecided list was returned and then dropped on the
+   * floor. The comment said they must "stay candidates for the Needs Review
+   * surface" — except `ReviewService.needsReview()` reads
+   * `jobMatch.verdict = 'NEEDS_REVIEW'`, and no such row was ever written.
+   * Measured: 0 NEEDS_REVIEW rows, 0 review-feedback rows, and 16 India jobs
+   * with no job_matches row at all, re-fetched by the belt on every tick.
+   *
+   * The surface, the endpoints and the enum value all existed; only the write
+   * connecting them was missing. Same bug class as the queue-starvation and
+   * decisionVersion incidents: a decision the system reached and did not store.
+   *
+   * NEEDS_REVIEW is deliberately NOT a SKIP. Four states must stay distinct:
+   *   APPLY        recommend applying
+   *   CONSIDER     possibly worth it
+   *   SKIP         recommend rejecting
+   *   NEEDS_REVIEW not confident enough to decide — a human should look
+   *
+   * Collapsing the fourth into SKIP would silently discard the jobs the
+   * classifier is least sure about, which are exactly the ones worth learning
+   * from.
+   */
+  private async recordNeedsReview(
+    userId: string,
+    resumeVersionId: string,
+    uncertain: { id: string; code: string; reason: string }[],
+  ): Promise<number> {
+    return this.recordGateDecisions(userId, resumeVersionId, uncertain, 'NEEDS_REVIEW');
+  }
+
+  /**
+   * One writer for every gate outcome.
+   *
+   * Both verdicts stamp PIPELINE_DECISION_VERSION and set decidedAt, so both
+   * are excluded from the candidate query by the same predicate and both
+   * re-open together when the version is bumped. Two near-identical upserts
+   * maintained separately is precisely how the decisionVersion split-brain
+   * happened; there is one upsert here on purpose.
+   */
+  private async recordGateDecisions(
+    userId: string,
+    resumeVersionId: string,
+    rows: { id: string; code: string; reason: string }[],
+    verdict: 'SKIP' | 'NEEDS_REVIEW',
+  ): Promise<number> {
+    if (rows.length === 0) return 0;
     const now = new Date();
     let written = 0;
-    for (const r of rejected) {
+    for (const r of rows) {
       await this.prisma.jobMatch.upsert({
         where: { userId_jobId_resumeVersionId: { userId, jobId: r.id, resumeVersionId } },
         create: {
           userId,
           jobId: r.id,
           resumeVersionId,
-          // No personalized scoring happened — the gate refused before any LLM
+          // No personalized scoring happened — the gate decided before any LLM
           // call. Zero is "not scored", not "scored badly"; verdictCode carries
           // the real explanation.
           overallScore: 0,
           technicalScore: 0,
           experienceScore: 0,
-          verdict: 'SKIP',
+          verdict,
           verdictCode: r.code,
           verdictReason: r.reason,
           decidedAt: now,
           decisionVersion: PIPELINE_DECISION_VERSION,
         },
         update: {
-          verdict: 'SKIP',
+          verdict,
           verdictCode: r.code,
           verdictReason: r.reason,
           decidedAt: now,

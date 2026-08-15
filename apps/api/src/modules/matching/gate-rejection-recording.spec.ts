@@ -167,22 +167,105 @@ describe('decision persistence invariant', () => {
   });
 });
 
-describe('what gets recorded', () => {
-  /** Mirrors the branch in gateByRole that decides whether to record. */
-  const shouldRecord = (e: { eligible: boolean; needsReview: boolean }) =>
-    !e.eligible && !e.needsReview;
+/**
+ * Mirrors the routing in gateByRole: every non-eligible job goes to exactly one
+ * recorder, and both recorders write a row.
+ */
+type GateOutcome = 'SCORE' | 'SKIP' | 'NEEDS_REVIEW';
+const route = (e: { eligible: boolean; needsReview: boolean }): GateOutcome =>
+  e.eligible ? 'SCORE' : e.needsReview ? 'NEEDS_REVIEW' : 'SKIP';
 
-  it('records a hard refusal', () => {
-    expect(shouldRecord({ eligible: false, needsReview: false })).toBe(true);
+describe('what gets recorded', () => {
+  it('records a hard refusal as SKIP', () => {
+    expect(route({ eligible: false, needsReview: false })).toBe('SKIP');
   });
 
   it('does NOT record an eligible job -- it proceeds to scoring', () => {
-    expect(shouldRecord({ eligible: true, needsReview: false })).toBe(false);
+    expect(route({ eligible: true, needsReview: false })).toBe('SCORE');
   });
 
-  it('does NOT record a needs-review job', () => {
-    // Genuinely undecided: it must stay a candidate and reach Needs Review,
-    // not be buried as a decided SKIP.
-    expect(shouldRecord({ eligible: false, needsReview: true })).toBe(false);
+  it('records a needs-review job as NEEDS_REVIEW, not SKIP', () => {
+    // Was dropped entirely until 2026-08-15. "Not confident" is a terminal
+    // outcome and must be stored as its own verdict -- collapsing it into SKIP
+    // would silently discard the jobs the classifier is least sure about.
+    expect(route({ eligible: false, needsReview: true })).toBe('NEEDS_REVIEW');
+  });
+});
+
+/**
+ * THE NEEDS_REVIEW ESCALATION PATH (2026-08-15).
+ *
+ * `ReviewService.needsReview()` selects jobMatch rows with
+ * `verdict = 'NEEDS_REVIEW'`. gateByRole collected uncertain jobs into an array
+ * that reconcileForUser never read, so no such row was ever written:
+ *
+ *   NEEDS_REVIEW rows in job_matches   0
+ *   job_review_feedback rows           0
+ *   uncertain India jobs with no row  16
+ *
+ * The surface, the endpoints and the enum value all existed. Only the write
+ * connecting them was missing -- a feature wired at both ends and disconnected
+ * in the middle. These tests pin the middle.
+ */
+describe('needs-review escalation', () => {
+  const epoch = new Date('2026-01-01');
+  const now = new Date('2026-08-15');
+
+  /** What recordNeedsReview writes. */
+  const needsReviewRow = () => ({
+    verdict: 'NEEDS_REVIEW' as const,
+    decidedAt: now,
+    decisionVersion: PIPELINE_DECISION_VERSION,
+  });
+
+  it('is a row the review surface can actually see', () => {
+    // ReviewService filters on exactly this value.
+    expect(needsReviewRow().verdict).toBe('NEEDS_REVIEW');
+  });
+
+  it('is never recorded as SKIP', () => {
+    // /excluded filters verdict='SKIP'; burying uncertainty there would make
+    // it read as a decision CareerOS never actually made.
+    expect(needsReviewRow().verdict).not.toBe('SKIP');
+  });
+
+  it('stops the job re-entering the candidate queue', () => {
+    // The 16 were re-fetched every tick precisely because no row existed.
+    const r = needsReviewRow();
+    expect(
+      isExcludedFromCandidates({
+        decidedAt: r.decidedAt,
+        decisionVersion: r.decisionVersion,
+        profileUpdatedAt: epoch,
+      }),
+    ).toBe(true);
+  });
+
+  it('re-opens when the pipeline version is bumped', () => {
+    // Uncertainty is a judgement of the CURRENT classifier. A better one must
+    // get another look rather than inheriting the old escalation.
+    expect(
+      isExcludedFromCandidates({
+        decidedAt: now,
+        decisionVersion: PIPELINE_DECISION_VERSION - 1,
+        profileUpdatedAt: epoch,
+      }),
+    ).toBe(false);
+  });
+
+  it('re-opens when the profile changes, like every other verdict', () => {
+    expect(
+      isExcludedFromCandidates({
+        decidedAt: epoch,
+        decisionVersion: PIPELINE_DECISION_VERSION,
+        profileUpdatedAt: now,
+      }),
+    ).toBe(false);
+  });
+
+  it('carries the same version as the other two writers', () => {
+    // Three writers now stamp this column. The moment they disagree, the
+    // candidate query starts re-admitting whichever one falls behind.
+    expect(needsReviewRow().decisionVersion).toBe(PIPELINE_DECISION_VERSION);
   });
 });
