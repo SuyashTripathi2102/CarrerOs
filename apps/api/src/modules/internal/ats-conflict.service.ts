@@ -12,12 +12,16 @@ export interface AtsConflict {
   urlIdentifier: string | null;
   evidenceUrl: string;
   crawlable: boolean;
+  /** Another company already holds this tenant -> ADR-11 alias candidate. */
+  tenantCollision?: boolean;
 }
 
 export interface AtsConflictReport {
   companiesExamined: number;
   conflicts: number;
   corrected: number;
+  /** Skipped because the tenant is already claimed by another company row. */
+  collisions: number;
   rows: AtsConflict[];
 }
 
@@ -72,6 +76,7 @@ export class AtsConflictService {
 
     const rows: AtsConflict[] = [];
     let corrected = 0;
+    let collisions = 0;
 
     for (const c of companies) {
       // Most recent job URL — the freshest evidence of where this employer
@@ -100,22 +105,41 @@ export class AtsConflictService {
       });
 
       if (!dryRun) {
-        await this.prisma.company.update({
-          where: { id: c.id },
-          data: { atsProvider: d.provider, atsIdentifier: d.identifier },
-        });
-        corrected++;
+        try {
+          await this.prisma.company.update({
+            where: { id: c.id },
+            data: { atsProvider: d.provider, atsIdentifier: d.identifier },
+          });
+          corrected++;
+        } catch (err) {
+          // `@@unique([atsProvider, atsIdentifier])` — another company already
+          // holds this tenant. That is not a failure to route around: two rows
+          // sharing an ATS tenant is exactly the STRONG evidence ADR-11 uses to
+          // merge companies. Skip the write, flag it for identity review, and
+          // keep going so one collision cannot abort the whole correction.
+          if ((err as { code?: string }).code === 'P2002') {
+            rows[rows.length - 1].tenantCollision = true;
+            collisions++;
+            this.logger.warn(
+              `${c.name}: ${d.provider}/${d.identifier} already claimed — ` +
+                `ADR-11 alias candidate, left unchanged`,
+            );
+          } else {
+            throw err;
+          }
+        }
       }
     }
 
     this.logger.log(
       `ats conflicts${dryRun ? ' (dry run)' : ''}: ${rows.length} of ${companies.length} companies ` +
-        `contradicted by their own apply URLs · corrected ${corrected}`,
+        `contradicted by their own apply URLs · corrected ${corrected} · tenant collisions ${collisions}`,
     );
     return {
       companiesExamined: companies.length,
       conflicts: rows.length,
       corrected,
+      collisions,
       rows,
     };
   }

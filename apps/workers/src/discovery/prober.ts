@@ -290,6 +290,25 @@ async function guessAtsToken(name: string, log: string[]): Promise<AtsDetection>
         validate: (p) => Array.isArray(p),
       },
     ];
+    // A board that EXISTS is not the same as a board a company POSTS ON.
+    // These validators accept `Array.isArray(payload.jobs)`, which is true for
+    // `[]`, so the first provider holding an empty shell account won an
+    // employer that hires elsewhere. Verified live 2026-08-16:
+    //
+    //   apply.workable.com/api/v1/widget/accounts/zensar   -> 200 {"jobs":[]}
+    //   apply.workable.com/api/v1/widget/accounts/nonsense -> 404
+    //
+    // Zensar genuinely holds a Workable account; their postings are on Oracle.
+    // Result: 169 companies labelled WORKABLE produced 1,172 zero-find crawls
+    // of 1,426, and — before the reconciliation guards — each of those wiped
+    // the company's jobs.
+    //
+    // So probes are no longer first-past-the-post. Every provider is tried, and
+    // one with ACTUAL POSTINGS always beats one with an empty shell. An empty
+    // board is still recorded (the company may simply not be hiring today) but
+    // it only wins if nothing better exists.
+    let emptyBoard: AtsDetection | null = null;
+
     for (const probe of probes) {
       try {
         const res = await fetch(probe.url, {
@@ -305,14 +324,41 @@ async function guessAtsToken(name: string, log: string[]): Promise<AtsDetection>
             continue; // HTML/garbage — not a board
           }
           if (probe.validate(parsed)) {
-            log.push(`ATS from token guess: ${probe.provider}/${slug}`);
-            return { provider: probe.provider, identifier: slug };
+            if (boardHasPostings(parsed)) {
+              log.push(`ATS from token guess: ${probe.provider}/${slug} (has postings)`);
+              return { provider: probe.provider, identifier: slug };
+            }
+            // Remember the first empty shell; keep probing for a live board.
+            emptyBoard ??= { provider: probe.provider, identifier: slug };
           }
         }
       } catch {
         /* timeout/network — try next */
       }
     }
+
+    if (emptyBoard) {
+      log.push(
+        `ATS from token guess: ${emptyBoard.provider}/${slug} (EMPTY board — exists but no postings)`,
+      );
+      return emptyBoard;
+    }
   }
   return { provider: 'UNKNOWN', identifier: null };
+}
+
+/**
+ * Does this probe payload contain actual postings?
+ *
+ * Deliberately separate from `validate`: validate answers "is this a board?",
+ * this answers "is the company hiring HERE?". Conflating them is what let an
+ * empty shell account outrank the ATS an employer actually posts on.
+ */
+export function boardHasPostings(parsed: unknown): boolean {
+  if (Array.isArray(parsed)) return parsed.length > 0; // Lever, Breezy
+  const p = parsed as { jobs?: unknown[]; offers?: unknown[]; totalFound?: number };
+  if (Array.isArray(p?.jobs)) return p.jobs.length > 0; // Greenhouse, Ashby, Workable
+  if (Array.isArray(p?.offers)) return p.offers.length > 0; // Recruitee
+  if (typeof p?.totalFound === 'number') return p.totalFound > 0; // SmartRecruiters
+  return false;
 }
