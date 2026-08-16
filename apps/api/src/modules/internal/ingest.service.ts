@@ -10,6 +10,7 @@ import { computeConfidence } from '../discovery/discovery.service';
 import { normalizeCountry } from './country';
 import { jobFingerprint } from './job-fingerprint';
 import { adaptiveTier, TIER_INTERVAL_MS, type Tier } from './crawl-scheduling';
+import { decideReconciliation } from './crawl-reconciliation';
 import { EMBED_JOBS_QUEUE } from './internal.constants';
 
 export interface SyncResult {
@@ -53,16 +54,33 @@ export class IngestService {
     try {
       const { created, updated, newJobIds } = await this.batchUpsert(companyId, jobs, source);
 
-      // Anything ACTIVE we did NOT see this run has been taken down.
+      // Retire what this crawl is authoritative for — see crawl-reconciliation.ts.
+      // TWO guards, both of which were missing and together destroyed 18 of 31
+      // actionable FreeHire opportunities on 2026-08-15:
+      //
+      //   1. An EMPTY crawl retires nothing. `notIn: []` matches every row, so
+      //      a failed/rate-limited/misrouted crawl wiped the whole board.
+      //   2. A crawl only reconciles ITS OWN source. A Workable board being
+      //      empty says nothing about a job discovered via FreeHire.
       const seenIds = jobs.map((j) => j.externalId);
-      const { count: removed } = await this.prisma.job.updateMany({
-        where: {
-          companyId,
-          status: JobStatus.ACTIVE,
-          externalId: { notIn: seenIds },
-        },
-        data: { status: JobStatus.REMOVED },
-      });
+      const decision = decideReconciliation({ seenExternalIds: seenIds, crawlSucceeded: true });
+      let removed = 0;
+      if (decision.retire) {
+        ({ count: removed } = await this.prisma.job.updateMany({
+          where: {
+            companyId,
+            source,
+            status: JobStatus.ACTIVE,
+            externalId: { notIn: seenIds },
+          },
+          data: { status: JobStatus.REMOVED },
+        }));
+      } else {
+        this.logger.warn(
+          `[${source}] company ${companyId}: reconciliation skipped (${decision.reason}) — ` +
+            `existing jobs preserved`,
+        );
+      }
 
       await this.prisma.crawlRun.update({
         where: { id: run.id },

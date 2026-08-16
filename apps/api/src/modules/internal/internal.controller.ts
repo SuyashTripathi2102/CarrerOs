@@ -1,4 +1,4 @@
-import {
+﻿import {
   BadRequestException,
   Body,
   Controller,
@@ -14,6 +14,7 @@ import { Public } from '../../common/decorators/public.decorator';
 import { CompaniesService } from '../companies/companies.service';
 import { IngestService } from './ingest.service';
 import { CompanyIdentityService } from './company-identity.service';
+import { AtsConflictService } from './ats-conflict.service';
 import { InternalTokenGuard } from './internal-token.guard';
 
 const SyncBodySchema = z.object({
@@ -40,6 +41,7 @@ export class InternalController {
     private readonly ingest: IngestService,
     private readonly companies: CompaniesService,
     private readonly identity: CompanyIdentityService,
+    private readonly ats: AtsConflictService,
   ) {}
 
   @Get('companies/due')
@@ -83,5 +85,14 @@ export class InternalController {
   @Get('company-identity/review')
   identityReview() {
     return this.identity.pendingReview();
+  }
+
+  /**
+   * Companies whose stored ATS is contradicted by their own apply URLs.
+   * DRY RUN BY DEFAULT — `?apply=true` writes the correction.
+   */
+  @Post('ats-conflicts/resolve')
+  resolveAtsConflicts(@Query('apply') apply?: string) {
+    return this.ats.resolve(apply !== 'true');
   }
 }
