@@ -272,7 +272,32 @@ async function guessAtsToken(name: string, log: string[]): Promise<AtsDetection>
       {
         provider: 'WORKABLE',
         url: `https://apply.workable.com/api/v1/widget/accounts/${slug}`,
-        validate: (p) => Array.isArray((p as { jobs?: unknown[] })?.jobs),
+        // POSTINGS REQUIRED, like SmartRecruiters below — this endpoint 200s
+        // with {jobs:[]} for ANY plausible company name, so an empty board is
+        // not evidence of anything. Measured 2026-08-17 against the live API:
+        //
+        //   slug        greenhouse  lever  ashby  recruitee  workable  smartrec
+        //   zensar         404       404    404     404      200 n=0   200 n=0
+        //   kyndryl        404       404    404     404      200 n=0   200 n=0
+        //   pepsico        404       404    404     404      200 n=0   200 n=0
+        //   barclays       404       404    404     404      200 n=0   200 n=0
+        //   qwzxnonsense   404       404    404     404      404       200 n=0
+        //
+        // Every other provider 404s for non-customers, so THEIR empty boards
+        // are meaningful ("real customer, nothing open today") and still
+        // validate. Only the two permissive endpoints demand postings.
+        //
+        // Cost of not doing this: 22 of 22 newly-probed companies were assigned
+        // WORKABLE and every one crawled empty; historically 1,866 of 2,604
+        // Workable runs (71.7%) found nothing. Before the reconciliation
+        // guards, each of those wiped the company's jobs.
+        // Array.isArray FIRST: a bare `.length > 0` is true for a string, so
+        // a malformed payload like {jobs:"unavailable"} would confirm the
+        // provider. Caught by the malformed-payload test.
+        validate: (p) => {
+          const jobs = (p as { jobs?: unknown })?.jobs;
+          return Array.isArray(jobs) && jobs.length > 0;
+        },
       },
       {
         provider: 'SMARTRECRUITERS',
