@@ -16,9 +16,9 @@ interface Quality {
 }
 interface SignalLift {
   module: string;
-  avgWhenEngaged: number;
-  avgWhenDismissed: number;
-  lift: number;
+  avgWhenEngaged: number | null;
+  avgWhenDismissed: number | null;
+  lift: number | null;
   nEngaged: number;
   nDismissed: number;
 }
@@ -123,22 +123,32 @@ export default function AnalyticsPage() {
                         <tr key={s.module} className="border-t border-neutral-800">
                           <td className="py-2 text-neutral-200">{s.module}</td>
                           <td className="py-2 text-right tabular-nums text-neutral-300">
-                            {s.avgWhenEngaged}
+                            {s.avgWhenEngaged ?? '—'}
+                            <span className="ml-1 text-[10px] text-neutral-600">
+                              n={s.nEngaged}
+                            </span>
                           </td>
                           <td className="py-2 text-right tabular-nums text-neutral-500">
-                            {s.avgWhenDismissed}
+                            {s.avgWhenDismissed ?? '—'}
+                            <span className="ml-1 text-[10px] text-neutral-600">
+                              n={s.nDismissed}
+                            </span>
                           </td>
+                          {/* A signal seen only in clicks has no measured lift.
+                              Rendering it as a big green "+100" would report a
+                              conclusion drawn from zero dismissals. */}
                           <td
                             className={`py-2 text-right font-medium tabular-nums ${
-                              s.lift > 5
-                                ? 'text-emerald-400'
-                                : s.lift < -5
-                                  ? 'text-red-400'
-                                  : 'text-neutral-400'
+                              s.lift == null
+                                ? 'text-neutral-600'
+                                : s.lift > 5
+                                  ? 'text-emerald-400'
+                                  : s.lift < -5
+                                    ? 'text-red-400'
+                                    : 'text-neutral-400'
                             }`}
                           >
-                            {s.lift > 0 ? '+' : ''}
-                            {s.lift}
+                            {s.lift == null ? 'not yet measured' : `${s.lift > 0 ? '+' : ''}${s.lift}`}
                           </td>
                         </tr>
                       ))}

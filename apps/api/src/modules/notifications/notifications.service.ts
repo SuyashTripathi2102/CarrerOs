@@ -4,7 +4,7 @@ import { NotificationType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { jobMatchesCountries, locationTags } from '../matching/location-filter';
 import { companyTier, isEvergreen } from '../opportunity/company-tier';
-import type { ScoreModule } from '../opportunity/opportunity.service';
+import { readScoreModules, type ScoreModule } from '../opportunity/opportunity.service';
 import { InlineButton, TelegramChannel } from './channels';
 
 // Telegram caps a message at 4096 characters; the rest of the card needs room.
@@ -129,9 +129,7 @@ export class NotificationsService {
     // Until 2026-07-10 this path called decide() while the dashboard filtered
     // on opportunityScore, so a marketing role blocked here still appeared
     // under "Apply today". One decision, one source, every consumer.
-    const modules = Array.isArray(match.scoreBreakdown)
-      ? (match.scoreBreakdown as unknown as ScoreModule[])
-      : ((match.scoreBreakdown as { modules?: ScoreModule[] })?.modules ?? []);
+    const modules = readScoreModules(match.scoreBreakdown);
 
     // Only APPLY interrupts. NEEDS_REVIEW is visible on the dashboard and
     // never pushed; SKIP stays in-app as audit history.
@@ -175,8 +173,11 @@ export class NotificationsService {
       where: { id: match.id },
       data: {
         notifiedAt: new Date(),
+        // Wrap the NORMALIZED modules, never the raw column: on a re-notify
+        // the column is already an envelope, and wrapping it again would bury
+        // the modules a level deeper on every send.
         scoreBreakdown: {
-          modules: match.scoreBreakdown as object,
+          modules,
           notifiedScore: match.opportunityScore,
         } as unknown as Prisma.InputJsonValue,
       },

@@ -1,5 +1,5 @@
 import { HiringTrend } from '@prisma/client';
-import { OpportunityService } from './opportunity.service';
+import { OpportunityService, readScoreModules } from './opportunity.service';
 
 /** compute() is pure — no Prisma or SourceTrust needed for these tests. */
 const service = new OpportunityService(null as never, null as never);
@@ -419,5 +419,29 @@ describe('verification is a trust signal, not an opportunity signal', () => {
     );
     expect(r.opportunityScore).toBeGreaterThan(75); // APPLY territory
     expect(r.breakdown.find((m) => m.module === 'verification')?.status).toBe('UNKNOWN');
+  });
+});
+
+describe('readScoreModules — one reader for two persisted shapes', () => {
+  const mods = [{ module: 'resumeFit', score: 95, weight: 35, reason: '95% resume match' }];
+
+  it('passes a flat array through (831 rows in the corpus)', () => {
+    expect(readScoreModules(mods)).toEqual(mods);
+  });
+
+  it('unwraps the notifier envelope (31 rows, all of them APPLY)', () => {
+    expect(readScoreModules({ modules: mods, notifiedScore: 94.4 })).toEqual(mods);
+  });
+
+  it('returns [] for shapes that carry no modules, and never throws', () => {
+    for (const bad of [null, undefined, {}, 'unavailable', 42, { modules: 'nope' }]) {
+      expect(readScoreModules(bad)).toEqual([]);
+    }
+  });
+
+  it('is idempotent, so a re-notify cannot bury modules a level deeper', () => {
+    const once = { modules: readScoreModules(mods), notifiedScore: 90 };
+    const twice = { modules: readScoreModules(once), notifiedScore: 95 };
+    expect(readScoreModules(twice)).toEqual(mods);
   });
 });

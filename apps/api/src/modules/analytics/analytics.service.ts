@@ -1,6 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { readScoreModules } from '../opportunity/opportunity.service';
+import {
+  aggregateSourceOutcomes,
+  type SourceApplicationInput,
+  type SourceEventInput,
+} from './source-outcomes';
 import {
   aggregateSignalOutcomes,
   recommendationQuality,
@@ -154,9 +160,58 @@ export class AnalyticsService {
     const events: OppEventInput[] = rows.map((r) => ({
       type: r.type,
       opportunityScore: r.opportunityScore,
-      breakdown: (r.breakdown as OppEventInput['breakdown']) ?? null,
+      breakdown: readScoreModules(r.breakdown),
     }));
     return { window: `${days}d`, ...aggregateSignalOutcomes(events) };
+  }
+
+  /**
+   * Source → outcome: which channels produce interviews, not which produce
+   * high-scoring jobs.
+   *
+   * `discoveredBy` is JOINED from the company rather than denormalized onto the
+   * event, deliberately. It is a slowly-changing fact we have already had to
+   * correct once — 868 companies were rewritten from the collapsed literal
+   * 'board' to the specific board on 2026-08-21 — and a denormalized copy would
+   * have frozen every historical event at the wrong value. `acquiredFrom` is
+   * read from the event's own `jobSource`, which is correctly a snapshot: it
+   * records where the job came from at the moment it was shown.
+   */
+  async sourceOutcomes(userId: string, days = 90) {
+    const since = new Date(Date.now() - days * 86_400_000);
+
+    const [eventRows, appRows] = await Promise.all([
+      this.prisma.opportunityEvent.findMany({
+        where: { userId, createdAt: { gte: since } },
+        select: {
+          type: true,
+          jobSource: true,
+          job: { select: { company: { select: { discoverySource: true } } } },
+        },
+      }),
+      this.prisma.application.findMany({
+        where: { userId, createdAt: { gte: since } },
+        select: {
+          status: true,
+          job: {
+            select: { source: true, company: { select: { discoverySource: true } } },
+          },
+        },
+      }),
+    ]);
+
+    const events: SourceEventInput[] = eventRows.map((r) => ({
+      type: r.type,
+      discoveredBy: r.job?.company?.discoverySource ?? null,
+      acquiredFrom: r.jobSource ?? null,
+    }));
+    const applications: SourceApplicationInput[] = appRows.map((r) => ({
+      status: r.status,
+      discoveredBy: r.job?.company?.discoverySource ?? null,
+      acquiredFrom: r.job?.source ?? null,
+    }));
+
+    return aggregateSourceOutcomes(events, applications, `${days}d`);
   }
 
   /**
@@ -173,7 +228,7 @@ export class AnalyticsService {
     const events: OppEventInput[] = rows.map((r) => ({
       type: r.type,
       opportunityScore: r.opportunityScore,
-      breakdown: (r.breakdown as OppEventInput['breakdown']) ?? null,
+      breakdown: readScoreModules(r.breakdown),
     }));
     return {
       window: `${days}d`,

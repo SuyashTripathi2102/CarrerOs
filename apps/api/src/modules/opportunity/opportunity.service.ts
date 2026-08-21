@@ -43,6 +43,27 @@ export interface ScoreModule {
   status?: 'UNKNOWN' | 'FAILED';
 }
 
+/**
+ * Read the modules out of a persisted `scoreBreakdown`, whichever shape it is
+ * in. The column holds two: the flat `ScoreModule[]` this service writes, and
+ * the `{ modules, notifiedScore }` envelope the notifier wraps around it to
+ * remember which score it last announced.
+ *
+ * Both are live in the corpus (measured 2026-08-21: 831 flat, 31 wrapped — and
+ * every wrapped one is an APPLY, because only APPLY notifies). So each consumer
+ * must normalize, and must do it HERE rather than inline: `?? []` guards null
+ * but not a non-array, so a wrapped breakdown reached `for (const m of ...)`
+ * and crashed /analytics/quality and /analytics/signals with "object is not
+ * iterable" the moment the first real outcome was logged. Those surfaces
+ * returned 200 while the tables were empty and 500 once they had something to
+ * show — an emptiness that looked like health.
+ */
+export function readScoreModules(raw: unknown): ScoreModule[] {
+  if (Array.isArray(raw)) return raw as ScoreModule[];
+  const nested = (raw as { modules?: unknown } | null)?.modules;
+  return Array.isArray(nested) ? (nested as ScoreModule[]) : [];
+}
+
 export interface OpportunityResult {
   opportunityScore: number;
   breakdown: ScoreModule[];

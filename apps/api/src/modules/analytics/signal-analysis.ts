@@ -21,9 +21,20 @@ export interface OppEventInput {
 
 export interface SignalLift {
   module: string;
-  avgWhenEngaged: number; // avg module score across CLICKED/APPLIED events
-  avgWhenDismissed: number; // avg module score across DISMISSED events
-  lift: number; // engaged − dismissed: positive = the signal predicts engagement
+  /** avg module score across CLICKED/APPLIED events; null if never observed there */
+  avgWhenEngaged: number | null;
+  /** avg module score across DISMISSED events; null if never observed there */
+  avgWhenDismissed: number | null;
+  /**
+   * engaged − dismissed: positive = the signal predicts engagement.
+   *
+   * null unless BOTH sides were actually observed. A module seen only in
+   * clicks has no measured lift, and substituting 0 for the unobserved side
+   * would read "never dismissed" as "scores 0 when dismissed" — manufacturing
+   * maximum lift out of no counter-evidence. UNKNOWN ≠ LOW applies to the
+   * measurements as much as to the scores.
+   */
+  lift: number | null;
   nEngaged: number;
   nDismissed: number;
 }
@@ -99,7 +110,9 @@ export function aggregateSignalOutcomes(events: OppEventInput[]): SignalOutcome 
     if (e.opportunityScore != null) {
       (engaged ? engagedScores : dismissedScores).push(e.opportunityScore);
     }
-    for (const m of e.breakdown ?? []) {
+    // Array.isArray, not `?? []`: this originates in a JSON column, where a
+    // null guard alone still lets an object through to be iterated.
+    for (const m of Array.isArray(e.breakdown) ? e.breakdown : []) {
       const bucket = byModule.get(m.module) ?? { engaged: [], dismissed: [] };
       (engaged ? bucket.engaged : bucket.dismissed).push(m.score);
       byModule.set(m.module, bucket);
@@ -112,14 +125,21 @@ export function aggregateSignalOutcomes(events: OppEventInput[]): SignalOutcome 
     const d = avg(b.dismissed);
     signals.push({
       module,
-      avgWhenEngaged: e ?? 0,
-      avgWhenDismissed: d ?? 0,
-      lift: Math.round(((e ?? 0) - (d ?? 0)) * 10) / 10,
+      avgWhenEngaged: e,
+      avgWhenDismissed: d,
+      lift: e != null && d != null ? Math.round((e - d) * 10) / 10 : null,
       nEngaged: b.engaged.length,
       nDismissed: b.dismissed.length,
     });
   }
-  signals.sort((a, b) => b.lift - a.lift);
+  // Measured lift ranks first, descending. Unmeasured modules sort last, by
+  // how much evidence they have: an absent lift must never outrank a real one.
+  signals.sort((a, b) => {
+    if (a.lift != null && b.lift != null) return b.lift - a.lift;
+    if (a.lift != null) return -1;
+    if (b.lift != null) return 1;
+    return b.nEngaged + b.nDismissed - (a.nEngaged + a.nDismissed);
+  });
 
   return {
     counts,
