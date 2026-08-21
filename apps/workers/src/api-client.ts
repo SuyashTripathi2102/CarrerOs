@@ -63,8 +63,21 @@ export class ApiClient {
     });
   }
 
-  ingestBoardJobs(source: string, entries: BoardJob[]): Promise<SyncResult> {
-    return this.request('POST', '/internal/boards/ingest', { source, entries });
+  /**
+   * @param source          where the JOB came from (acquiredFrom)
+   * @param discoverySource what introduced the COMPANY (discoveredBy), when it
+   *                        differs from the board. Omit when the board is both.
+   */
+  ingestBoardJobs(
+    source: string,
+    entries: BoardJob[],
+    discoverySource?: string,
+  ): Promise<SyncResult> {
+    return this.request('POST', '/internal/boards/ingest', {
+      source,
+      entries,
+      ...(discoverySource ? { discoverySource } : {}),
+    });
   }
 
   // ── Company Discovery Engine ──

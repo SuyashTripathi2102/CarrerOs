@@ -126,7 +126,11 @@ export class IngestService {
    * No removed-detection here: a job leaving a board says nothing about the
    * company's own career page.
    */
-  async ingestBoardJobs(source: string, entries: BoardJob[]): Promise<SyncResult> {
+  async ingestBoardJobs(
+    source: string,
+    entries: BoardJob[],
+    discoverySource?: string,
+  ): Promise<SyncResult> {
     const run = await this.prisma.crawlRun.create({
       data: { source, status: CrawlStatus.RUNNING },
     });
@@ -151,7 +155,13 @@ export class IngestService {
         // Pass the board through: without it every board collapses to the
         // literal 'board' and the discovery-vs-acquisition distinction — the
         // one that separates 67.1% from 92.7% — is destroyed at write time.
-        const company = await this.companies.findOrCreateFromBoard(entry, source);
+        // discoverySource overrides it where the two genuinely differ: a
+        // company found via a directory, whose jobs are crawled from its own
+        // ATS, is discoveredBy the directory and acquiredFrom the ATS.
+        const company = await this.companies.findOrCreateFromBoard(
+          entry,
+          discoverySource ?? source,
+        );
         const res = await this.batchUpsert(company.id, jobs, source);
         created += res.created;
         updated += res.updated;

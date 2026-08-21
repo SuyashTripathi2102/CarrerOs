@@ -29,7 +29,17 @@ const SyncBodySchema = z.object({
 });
 
 const BoardBodySchema = z.object({
+  /** Where the JOB came from — the ATS or board actually crawled (acquiredFrom). */
   source: z.string().min(1),
+  /**
+   * What introduced the COMPANY (discoveredBy), when that differs from the
+   * board the job was fetched from. A company found through an India company
+   * directory whose jobs are then crawled from Greenhouse is discoveredBy that
+   * directory and acquiredFrom greenhouse — collapsing the two is what made
+   * FreeHire read as 67.1% of actionable when the real figure was 92.7%.
+   * Defaults to `source`, which is correct whenever a board is both.
+   */
+  discoverySource: z.string().min(1).optional(),
   entries: z.array(BoardJobSchema),
 });
 
@@ -72,7 +82,11 @@ export class InternalController {
   ingestBoard(@Body() body: unknown) {
     const parsed = BoardBodySchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
-    return this.ingest.ingestBoardJobs(parsed.data.source, parsed.data.entries);
+    return this.ingest.ingestBoardJobs(
+      parsed.data.source,
+      parsed.data.entries,
+      parsed.data.discoverySource,
+    );
   }
 
   // ── ADR-11 company identity ──────────────────────────────────────────────

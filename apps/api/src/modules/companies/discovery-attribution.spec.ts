@@ -58,3 +58,44 @@ describe('findOrCreateFromBoard records WHICH board discovered the company', () 
     expect(created[0].discoverySource).toBe('board');
   });
 });
+
+/**
+ * The ingest boundary must preserve the split, not just the writer.
+ *
+ * A company found through an India company directory, whose jobs are then
+ * crawled from its own Greenhouse board, is discoveredBy the DIRECTORY and
+ * acquiredFrom GREENHOUSE. Writing one value into both is what made FreeHire
+ * read as 67.1% of actionable when the true figure was 92.7%.
+ */
+describe('discoverySource can differ from the board a job was acquired from', () => {
+  const makeService = () => {
+    const created: Array<Record<string, unknown>> = [];
+    const repo = {
+      findByAts: async () => null,
+      findByName: async () => null,
+      findByNormalizedName: async () => null,
+      update: async () => ({}),
+      create: async (data: Record<string, unknown>) => {
+        created.push(data);
+        return { id: 'c1', ...data };
+      },
+    };
+    return { svc: new CompaniesService(repo as never), created };
+  };
+
+  it('records the discovery channel, not the acquisition board', async () => {
+    const { svc, created } = makeService();
+    await svc.findOrCreateFromBoard({ name: 'Acme' }, 'bangalore-map');
+    expect(created[0].discoverySource).toBe('bangalore-map');
+  });
+
+  it('a company crawled from its own ATS still keeps its discovery channel', async () => {
+    // The job's source will be GREENHOUSE; the company's origin is unchanged by
+    // that. If this ever regresses, the source→outcome funnel starts crediting
+    // Greenhouse for companies it never found.
+    const { svc, created } = makeService();
+    await svc.findOrCreateFromBoard({ name: 'Beta', atsHintUrl: 'https://boards.greenhouse.io/beta' }, 'bangalore-map');
+    expect(created[0].discoverySource).toBe('bangalore-map');
+    expect(created[0].atsProvider).toBe('GREENHOUSE');
+  });
+});
