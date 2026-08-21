@@ -11,7 +11,7 @@ import { apiGet, apiPost } from '@/lib/api';
  * the persisted verdict in job_matches — the two are different scoring paths and
  * are known to disagree. Sending it lets the event record what the user saw.
  */
-function track(jobId: string, type: 'CLICKED', rank: number, a: Action) {
+function track(jobId: string, type: 'CLICKED' | 'DISMISSED', rank: number, a: Action) {
   apiPost('/events', {
     jobId,
     type,
@@ -70,6 +70,8 @@ const IMPACT: Record<Impact, { label: string; cls: string }> = {
 export default function TodayPage() {
   const [data, setData] = useState<Today | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Session-local, exactly as /browse does it — see the note by `dismiss`. */
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     apiGet<Today>('/today')
@@ -107,6 +109,34 @@ export default function TodayPage() {
   if (error) return <Shell><p className="text-red-400">{error}</p></Shell>;
   if (!data) return <Shell><p className="text-neutral-400">Planning your day…</p></Shell>;
 
+  // Rank is the position at IMPRESSION time and must NOT shift when a card is
+  // dismissed: the SHOWN and CLICKED rows for one job have to agree or CTR by
+  // position stops being computable. Display position is a separate number, so
+  // the list renumbers on screen while the logged rank stays put.
+  const visible = data.actions
+    .map((a, i) => ({ a, rank: i + 1 }))
+    .filter(({ a }) => !(a.jobId && dismissed.has(a.jobId)));
+  // today.service.ts computes this as the plain sum of card minutes, so the
+  // same sum over the visible cards keeps the header honest after a dismissal.
+  const totalMinutes = visible.reduce((n, { a }) => n + a.minutes, 0);
+
+  /**
+   * Record the outcome, then hide the card. The event is what matters: /today
+   * could previously only ever emit SHOWN and CLICKED, so the dismissed half of
+   * every signal-lift comparison was structurally unobservable and `lift` was
+   * null by construction.
+   *
+   * Nothing server-side suppresses a dismissed job yet, so this holds for the
+   * session only and the card returns on reload — the same behaviour /browse
+   * has. Worth knowing before reading nDismissed: one job dismissed on three
+   * days counts three times.
+   */
+  const dismiss = (a: Action, rank: number) => {
+    if (!a.jobId) return;
+    track(a.jobId, 'DISMISSED', rank, a);
+    setDismissed((prev) => new Set(prev).add(a.jobId as string));
+  };
+
   const goalDone = data.goal.done >= data.goal.target;
   const pct = Math.min(100, Math.round((data.goal.done / data.goal.target) * 100));
 
@@ -130,12 +160,12 @@ export default function TodayPage() {
           Today&apos;s mission
         </div>
         <h2 className="mt-1 text-2xl font-semibold tracking-tight">
-          {data.actions.length === 0
+          {visible.length === 0
             ? 'Line up your next opportunity'
             : 'Your fastest path to an interview today'}
         </h2>
         <p className="mt-1 text-sm text-neutral-400">
-          {data.actions.length} action{data.actions.length === 1 ? '' : 's'} · ~{data.totalMinutes} min ·{' '}
+          {visible.length} action{visible.length === 1 ? '' : 's'} · ~{totalMinutes} min ·{' '}
           <span className="text-neutral-500">{data.probabilityReason}</span>
         </p>
       </section>
@@ -163,7 +193,7 @@ export default function TodayPage() {
         )}
       </section>
 
-      {data.actions.length === 0 ? (
+      {visible.length === 0 ? (
         <p className="mt-6 rounded-xl border border-neutral-800 bg-neutral-900/60 p-6 text-sm text-neutral-400">
           Nothing queued right now. Head to the{' '}
           <Link href="/" className="text-sky-300 hover:underline">board</Link> — as soon as there&apos;s a
@@ -171,8 +201,15 @@ export default function TodayPage() {
         </p>
       ) : (
         <ol className="mt-5 space-y-3">
-          {data.actions.map((a, i) => (
-            <ActionCard key={i} a={a} step={i + 1} total={data.actions.length} />
+          {visible.map(({ a, rank }, i) => (
+            <ActionCard
+              key={a.jobId ?? `${a.kind}-${rank}`}
+              a={a}
+              rank={rank}
+              step={i + 1}
+              total={visible.length}
+              onDismiss={() => dismiss(a, rank)}
+            />
           ))}
         </ol>
       )}
@@ -180,20 +217,39 @@ export default function TodayPage() {
   );
 }
 
-function ActionCard({ a, step, total }: { a: Action; step: number; total: number }) {
+function ActionCard({
+  a,
+  rank,
+  step,
+  total,
+  onDismiss,
+}: {
+  a: Action;
+  /** Position at impression time — what gets logged. Never renumbered. */
+  rank: number;
+  /** Position on screen right now — what gets displayed. */
+  step: number;
+  total: number;
+  onDismiss: () => void;
+}) {
   const imp = IMPACT[a.impact];
+  // The border lives on the <li> so the dismiss control can sit inside the same
+  // card frame while remaining OUTSIDE the <Link>: a <button> nested in an <a>
+  // is invalid markup, and the click would navigate as well as dismiss.
   return (
-    <li>
+    <li
+      className={`overflow-hidden rounded-xl border bg-neutral-900 transition hover:border-neutral-600 ${
+        a.impact === 'DO_FIRST' ? 'border-emerald-900/60' : 'border-neutral-800'
+      }`}
+    >
       <Link
         href={a.href}
         onClick={() => {
-          // `step` is the same 1-based rank sent with the impression, so CTR
-          // by position is computable without joining on anything else.
-          if (a.jobId) track(a.jobId, 'CLICKED', step, a);
+          // `rank`, not `step`: this must match the rank sent with the
+          // impression so CTR by position is computable without a join.
+          if (a.jobId) track(a.jobId, 'CLICKED', rank, a);
         }}
-        className={`block rounded-xl border bg-neutral-900 p-4 transition hover:border-neutral-600 ${
-          a.impact === 'DO_FIRST' ? 'border-emerald-900/60' : 'border-neutral-800'
-        }`}
+        className="block p-4"
       >
         <div className="flex items-center gap-2 text-[10px]">
           <span className="text-neutral-500">STEP {step} OF {total}</span>
@@ -240,6 +296,23 @@ function ActionCard({ a, step, total }: { a: Action; step: number; total: number
           <span className="self-center text-neutral-500">→</span>
         </div>
       </Link>
+
+      {/* Only job-bound cards are dismissible. MASTER_RESUME and LEARN are not
+          opportunities, so a dismissal there would say nothing about ranking.
+          Kept plainly visible rather than hover-revealed: /browse hides its ×
+          behind `opacity-0 group-hover`, and produced no dismissals at all. */}
+      {a.jobId && (
+        <div className="flex justify-end border-t border-neutral-800 px-4 py-1.5">
+          <button
+            type="button"
+            onClick={onDismiss}
+            aria-label={`Dismiss "${a.title}" as not relevant`}
+            className="rounded px-2 py-0.5 text-[11px] text-neutral-500 transition hover:bg-neutral-800 hover:text-neutral-300"
+          >
+            Not relevant
+          </button>
+        </div>
+      )}
     </li>
   );
 }
