@@ -7,9 +7,27 @@ const FETCH_TIMEOUT_MS = 12_000;
 /** Common career-page paths, ordered by hit rate. Probed politely (~6 max). */
 const CAREER_PATHS = ['/careers', '/jobs', '/careers/jobs', '/join', '/company/careers', '/about/careers'];
 
+/** Careers-related URL shapes, matched in either an anchor href or a frame src. */
+const CAREER_URL_PATTERN =
+  '(?:career|careers|jobs|join-us|joinus|work-with-us|hiring|greenhouse\\.io|lever\\.co|ashbyhq\\.com|myworkdayjobs\\.com|recruitee\\.com|teamtailor\\.com|smartrecruiters\\.com)';
+
 /** Anchor-href patterns that mark a link as careers-related. */
-const CAREER_LINK_RE =
-  /href=["']([^"']*(?:career|careers|jobs|join-us|joinus|work-with-us|hiring|greenhouse\.io|lever\.co|ashbyhq\.com|myworkdayjobs\.com|recruitee\.com|teamtailor\.com|smartrecruiters\.com)[^"']*)["']/gi;
+const CAREER_LINK_RE = new RegExp(`href=["']([^"']*${CAREER_URL_PATTERN}[^"']*)["']`, 'gi');
+
+/**
+ * The same shapes, but in an <iframe>/<frame> src.
+ *
+ * A board is as often EMBEDDED as linked. This file's own comment below has
+ * always said boards are "usually embedded or linked from it" while the code
+ * only ever read hrefs. Measured 2026-08-21 across 50 Bangalore companies:
+ * Jupiter serves a Keka board — an ATS CareerOS already crawls — entirely
+ * inside an iframe. It was invisible to the prober and would have been filed
+ * UNKNOWN: a company we can crawl today, recorded as one we cannot.
+ */
+const CAREER_FRAME_RE = new RegExp(
+  `<i?frame\\b[^>]*src=["']([^"']*${CAREER_URL_PATTERN}[^"']*)["']`,
+  'gi',
+);
 
 export interface ProbeInput {
   name: string;
@@ -171,13 +189,26 @@ async function resolveUrl(url: string, log: string[], headOnly = false): Promise
   }
 }
 
+/** Test seam: the extraction rules are worth pinning without a live probe. */
+export const extractCareerLinksForTest = (html: string, baseUrl: string): string[] =>
+  extractCareerLinks(html, baseUrl);
+
 function extractCareerLinks(html: string, baseUrl: string): string[] {
   const out = new Set<string>();
-  for (const m of html.matchAll(CAREER_LINK_RE)) {
-    try {
-      out.add(new URL(m[1], baseUrl).toString());
-    } catch {
-      /* malformed href */
+  // Frames FIRST. An embedded board IS the board; an anchor is often a nav item
+  // pointing at another marketing page. Callers only probe the first few links,
+  // so this ordering decides what actually gets checked.
+  for (const re of [CAREER_FRAME_RE, CAREER_LINK_RE]) {
+    for (const m of html.matchAll(re)) {
+      try {
+        const u = new URL(m[1], baseUrl);
+        // http(s) only. A `data:`/`javascript:`/`mailto:` src resolves fine and
+        // would consume one of the four probe slots on something that can never
+        // be a board — sandboxed embeds legitimately use data: URIs.
+        if (u.protocol === 'http:' || u.protocol === 'https:') out.add(u.toString());
+      } catch {
+        /* malformed href/src */
+      }
     }
   }
   return [...out];
