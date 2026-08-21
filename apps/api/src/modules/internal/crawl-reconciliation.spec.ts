@@ -146,3 +146,62 @@ describe('the real failures, reproduced', () => {
     ).toEqual([]);
   });
 });
+
+/**
+ * GUARD 3 — the truncated walk (2026-08-21).
+ *
+ * The first two guards catch a crawl that failed and a crawl that returned
+ * nothing. A walk that stopped at its page cap is neither: it SUCCEEDED and it
+ * returned plenty. It then retires every job past the last page it read.
+ *
+ * Found by reading FreeHire's `crawlAllPagedLinks`, which inverts its own
+ * page-failure rule wherever the sweep is catalogue-scoped, for this reason.
+ */
+describe('a partial board is not authority over the whole board', () => {
+  it('does not retire when the walk stopped short', () => {
+    expect(
+      decideReconciliation({
+        seenExternalIds: ['wd-1', 'wd-2'],
+        crawlSucceeded: true,
+        boardComplete: false,
+      }),
+    ).toEqual({ retire: false, reason: 'PARTIAL_BOARD' });
+  });
+
+  it('still retires when the walk reached the end', () => {
+    expect(
+      decideReconciliation({
+        seenExternalIds: ['wd-1'],
+        crawlSucceeded: true,
+        boardComplete: true,
+      }),
+    ).toEqual({ retire: true });
+  });
+
+  it('treats an omitted flag as complete, so non-paginating adapters are unchanged', () => {
+    // Eight adapters never report completeness because they cannot walk off the
+    // end of a board. Defaulting to "unknown" would silently stop all retirement
+    // and let dead jobs accumulate forever — the opposite failure.
+    expect(decideReconciliation({ seenExternalIds: ['gh-1'], crawlSucceeded: true })).toEqual({
+      retire: true,
+    });
+  });
+
+  it('reports the EARLIER failure when a crawl is both partial and empty', () => {
+    // Order matters for the log line: "empty" is the more actionable diagnosis,
+    // and an empty partial walk is the shape a rate-limited first page takes.
+    expect(
+      decideReconciliation({ seenExternalIds: [], crawlSucceeded: true, boardComplete: false }),
+    ).toEqual({ retire: false, reason: 'EMPTY_RESULT' });
+  });
+
+  it('a failed crawl outranks completeness entirely', () => {
+    expect(
+      decideReconciliation({
+        seenExternalIds: ['wd-1'],
+        crawlSucceeded: false,
+        boardComplete: true,
+      }),
+    ).toEqual({ retire: false, reason: 'CRAWL_FAILED' });
+  });
+});

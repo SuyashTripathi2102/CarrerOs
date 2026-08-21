@@ -58,13 +58,19 @@ export interface ReconciliationInput {
   seenExternalIds: string[];
   /** Did the crawl complete successfully? A thrown adapter never reaches here. */
   crawlSucceeded: boolean;
+  /**
+   * Did the crawl see the WHOLE board? Defaults true — an adapter that cannot
+   * paginate always sees all of it. False means the walk stopped short of the
+   * listing's end, so absence from `seenExternalIds` proves nothing.
+   */
+  boardComplete?: boolean;
 }
 
 export interface ReconciliationDecision {
   /** May this crawl retire absent jobs at all? */
   retire: boolean;
   /** Why not — recorded on the CrawlRun so a skipped reconcile is visible. */
-  reason?: 'EMPTY_RESULT' | 'CRAWL_FAILED';
+  reason?: 'EMPTY_RESULT' | 'CRAWL_FAILED' | 'PARTIAL_BOARD';
 }
 
 /**
@@ -79,5 +85,17 @@ export interface ReconciliationDecision {
 export function decideReconciliation(input: ReconciliationInput): ReconciliationDecision {
   if (!input.crawlSucceeded) return { retire: false, reason: 'CRAWL_FAILED' };
   if (input.seenExternalIds.length === 0) return { retire: false, reason: 'EMPTY_RESULT' };
+  // GUARD 3 (2026-08-21). A truncated walk is a SUCCESSFUL, NON-EMPTY crawl —
+  // it passes both guards above and then retires the entire tail it never
+  // reached. Workday caps at 25 pages (500 listings); 5 of the 9 canary tenants
+  // hit that cap, and Accenture holds ~43k India postings behind it. Nothing
+  // has fired yet only because the canary was the FIRST crawl, with nothing to
+  // retire; the second one is where the tail disappears.
+  //
+  // Found by reading FreeHire's crawlAllPagedLinks, which inverts its own
+  // page-failure rule for exactly this reason: where a sweep is catalogue-
+  // scoped, a silently short walk "looks like a shrunken catalogue and would
+  // mass-close every posting past the failed page".
+  if (input.boardComplete === false) return { retire: false, reason: 'PARTIAL_BOARD' };
   return { retire: true };
 }

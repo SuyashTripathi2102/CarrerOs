@@ -50,8 +50,17 @@ export class ApiClient {
     return this.request('POST', '/internal/intelligence/derive-signals');
   }
 
-  syncCompanyJobs(companyId: string, source: string, jobs: NormalizedJob[]): Promise<SyncResult> {
-    return this.request('POST', `/internal/companies/${companyId}/jobs/sync`, { source, jobs });
+  syncCompanyJobs(
+    companyId: string,
+    source: string,
+    jobs: NormalizedJob[],
+    boardComplete = true,
+  ): Promise<SyncResult> {
+    return this.request('POST', `/internal/companies/${companyId}/jobs/sync`, {
+      source,
+      jobs,
+      boardComplete,
+    });
   }
 
   ingestBoardJobs(source: string, entries: BoardJob[]): Promise<SyncResult> {

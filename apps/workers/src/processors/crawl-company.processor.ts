@@ -42,8 +42,24 @@ export function startCrawlCompanyWorker(api: ApiClient): Worker<CrawlCompanyJobD
       const adapter = ADAPTERS[atsProvider];
       if (!adapter) throw new Error(`No adapter for ATS provider ${atsProvider}`);
 
-      const jobs = await adapter.fetchJobs(atsIdentifier);
-      const result = await api.syncCompanyJobs(companyId, adapter.source, jobs);
+      // An adapter that can walk off the end of a board reports whether it saw
+      // all of it. One that cannot paginate always sees the whole board, so the
+      // absence of fetchBoard is a genuine "complete", not an unknown.
+      const board = adapter.fetchBoard
+        ? await adapter.fetchBoard(atsIdentifier)
+        : { jobs: await adapter.fetchJobs(atsIdentifier), complete: true as const };
+      if (!board.complete) {
+        console.warn(
+          `[crawl-company] ${companyName}: PARTIAL board (${board.reason ?? 'unknown'}) — ` +
+            `ingesting ${board.jobs.length} jobs, retiring nothing`,
+        );
+      }
+      const result = await api.syncCompanyJobs(
+        companyId,
+        adapter.source,
+        board.jobs,
+        board.complete,
+      );
       console.log(
         `[crawl-company] ${companyName}: found=${result.found} new=${result.created} removed=${result.removed}`,
       );

@@ -20,6 +20,12 @@ import { InternalTokenGuard } from './internal-token.guard';
 const SyncBodySchema = z.object({
   source: z.string().min(1),
   jobs: z.array(NormalizedJobSchema),
+  /**
+   * Did the crawl see the WHOLE board? Defaults true so every existing caller
+   * keeps its current behaviour; only an adapter that knows it walked off the
+   * end sends false. A partial board must never drive retirement.
+   */
+  boardComplete: z.boolean().optional().default(true),
 });
 
 const BoardBodySchema = z.object({
@@ -54,7 +60,12 @@ export class InternalController {
     const parsed = SyncBodySchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
     await this.companies.get(companyId); // 404 if unknown
-    return this.ingest.syncCompanyJobs(companyId, parsed.data.source, parsed.data.jobs);
+    return this.ingest.syncCompanyJobs(
+      companyId,
+      parsed.data.source,
+      parsed.data.jobs,
+      parsed.data.boardComplete,
+    );
   }
 
   @Post('boards/ingest')

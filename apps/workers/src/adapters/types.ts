@@ -1,9 +1,31 @@
 import type { NormalizedJob } from '@careeros/shared';
 
+/**
+ * What a board walk saw, and whether it saw ALL of it.
+ *
+ * `complete: false` means the walk stopped short — a page cap, or a listing
+ * request that failed mid-walk. The postings are still good; what is NOT good
+ * is treating them as the whole board, because reconciliation retires every
+ * ACTIVE job whose externalId is absent from the crawl.
+ */
+export interface BoardFetch {
+  jobs: NormalizedJob[];
+  complete: boolean;
+  /** Why the walk stopped short. Present only when `complete` is false. */
+  reason?: string;
+}
+
 /** One adapter per ATS: fetch a company's board and normalize it. */
 export interface AtsAdapter {
   source: string;
   fetchJobs(identifier: string): Promise<NormalizedJob[]>;
+  /**
+   * OPTIONAL. An adapter that can walk off the end of a board implements this
+   * so the pipeline learns the walk was partial. An adapter that always sees
+   * the whole board (one request, no pagination) omits it and is treated as
+   * complete — which is the truth for every adapter that has one.
+   */
+  fetchBoard?(identifier: string): Promise<BoardFetch>;
 }
 
 const USER_AGENT = 'CareerOS/0.1 (personal job-search agent)';

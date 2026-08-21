@@ -46,6 +46,7 @@ export class IngestService {
     companyId: string,
     source: string,
     jobs: NormalizedJob[],
+    boardComplete = true,
   ): Promise<SyncResult> {
     const run = await this.prisma.crawlRun.create({
       data: { companyId, source, status: CrawlStatus.RUNNING },
@@ -62,8 +63,15 @@ export class IngestService {
       //      a failed/rate-limited/misrouted crawl wiped the whole board.
       //   2. A crawl only reconciles ITS OWN source. A Workable board being
       //      empty says nothing about a job discovered via FreeHire.
+      //   3. A PARTIAL board retires nothing. A walk that stopped at a page cap
+      //      is successful and non-empty, so it clears both guards above and
+      //      then retires every job past the last page it read.
       const seenIds = jobs.map((j) => j.externalId);
-      const decision = decideReconciliation({ seenExternalIds: seenIds, crawlSucceeded: true });
+      const decision = decideReconciliation({
+        seenExternalIds: seenIds,
+        crawlSucceeded: true,
+        boardComplete,
+      });
       let removed = 0;
       if (decision.retire) {
         ({ count: removed } = await this.prisma.job.updateMany({
@@ -140,7 +148,10 @@ export class IngestService {
 
     for (const { entry, jobs } of byCompany.values()) {
       try {
-        const company = await this.companies.findOrCreateFromBoard(entry);
+        // Pass the board through: without it every board collapses to the
+        // literal 'board' and the discovery-vs-acquisition distinction — the
+        // one that separates 67.1% from 92.7% — is destroyed at write time.
+        const company = await this.companies.findOrCreateFromBoard(entry, source);
         const res = await this.batchUpsert(company.id, jobs, source);
         created += res.created;
         updated += res.updated;
