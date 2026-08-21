@@ -180,10 +180,27 @@ export class DiscoveryService {
 
     const prevSignals = (company.confidenceSignals ?? {}) as Partial<ConfidenceSignals>;
     const atsProvider = result.atsProvider ? AtsProvider[result.atsProvider] : null;
-    const monitorable =
-      !!atsProvider &&
-      !!result.atsIdentifier &&
-      CRAWLABLE_PROVIDERS.includes(result.atsProvider!);
+    /**
+     * IDENTIFIED — the probe proved which ATS this company uses.
+     * MONITORABLE — that ATS is also one we have an adapter for.
+     *
+     * These are different facts and must be stored separately. Until
+     * 2026-08-22 the ATS identity was written ONLY when monitorable, so a
+     * probe that logged "ATS from career page: DARWINBOX/clevertap" still left
+     * the row at atsProvider=UNKNOWN. We held the evidence and discarded it —
+     * absence of an adapter recorded as absence of knowledge.
+     *
+     * The cost: the company universe undercounts known boards, "which ATS
+     * should we build next?" reads the wrong answer, and the day a Darwinbox
+     * adapter ships none of these companies can be found without re-probing
+     * every one.
+     *
+     * Safe because the crawl handout gates independently: companies.repository
+     * filters due-companies by CRAWLABLE_PROVIDERS, so recording DARWINBOX
+     * cannot cause a crawl attempt against an adapter that does not exist.
+     */
+    const identified = !!atsProvider && !!result.atsIdentifier;
+    const monitorable = identified && CRAWLABLE_PROVIDERS.includes(result.atsProvider!);
 
     // Detected board already claimed by another company row? Merge signal — skip claim.
     if (monitorable) {
@@ -230,10 +247,13 @@ export class DiscoveryService {
       lastProbedAt: new Date(),
       website: result.website ?? company.website,
       careerPageUrl: result.careerPageUrl ?? company.careerPageUrl,
+      // What we KNOW: recorded whenever the probe proved it, adapter or not.
+      ...(identified
+        ? { atsProvider: atsProvider!, atsIdentifier: result.atsIdentifier! }
+        : {}),
+      // What we can ACT on: scheduling stays gated on having an adapter.
       ...(monitorable
         ? {
-            atsProvider: atsProvider!,
-            atsIdentifier: result.atsIdentifier!,
             crawlTier: CrawlTier.WARM,
             nextCrawlAt: new Date(), // first crawl on the next 15-min tick
           }
