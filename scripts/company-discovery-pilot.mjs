@@ -31,7 +31,7 @@
  * own site, so what this reports is our own verified fact set, never a
  * redistribution of whoever compiled the list.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { detectAts } from '../packages/shared/dist/ats.js';
 
@@ -240,6 +240,21 @@ site unreachable                ${n((r) => !r.siteReached)}
 Zero slug guesses. A guessed slug answering 200 is never accepted here.
 Baselines, actionable/company: YC-India 0.152 | jooble 0.320 | freehire 0.376
 `);
+
+// Emit the verified boards so the next step — measuring their actual job
+// supply — does not require re-running the whole funnel. Identifiers are the
+// part the summary drops, and they are what a fetch-only supply count needs.
+const verified = rows.filter((r) => r.atsProvider !== 'UNKNOWN' && r.atsIdentifier);
+if (verified.length > 0) {
+  const out = seedPath.replace(/\.tsv$/, '') + '.boards.tsv';
+  writeFileSync(
+    out,
+    verified
+      .map((r) => [r.name, r.atsProvider, r.atsIdentifier, r.boardAlreadyKnown ? 'KNOWN' : 'NEW'].join('\t'))
+      .join('\n') + '\n',
+  );
+  console.log(`\nverified boards written to ${out} (${verified.length})`);
+}
 
 const byProvider = {};
 for (const r of rows) {
