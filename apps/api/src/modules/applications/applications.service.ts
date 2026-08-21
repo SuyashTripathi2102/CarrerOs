@@ -5,6 +5,12 @@ import {
 } from '@nestjs/common';
 import { ApplicationStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  APPLIED_STATUSES,
+  INTERVIEW_STATUSES,
+  OFFER_STATUSES,
+  MIN_APPLIED_FOR_RATE,
+} from './status-sets';
 import { AnalyticsService } from '../analytics/analytics.service';
 import {
   funnelInsights,
@@ -130,23 +136,21 @@ export class ApplicationsService {
       _count: { _all: true },
     });
     const byStatus = Object.fromEntries(rows.map((r) => [r.status, r._count._all]));
-    const applied =
-      (byStatus.APPLIED ?? 0) +
-      (byStatus.OA ?? 0) +
-      (byStatus.INTERVIEW ?? 0) +
-      (byStatus.OFFER ?? 0) +
-      (byStatus.ACCEPTED ?? 0) +
-      (byStatus.REJECTED ?? 0);
-    const interviews =
-      (byStatus.INTERVIEW ?? 0) + (byStatus.OFFER ?? 0) + (byStatus.ACCEPTED ?? 0);
+    // Shared with the source→outcome funnel (status-sets.ts). Two independent
+    // definitions of "reached interview" is the displayed-vs-stored bug again.
+    const sum = (statuses: readonly string[]) =>
+      statuses.reduce((n, s) => n + (byStatus[s] ?? 0), 0);
+    const applied = sum(APPLIED_STATUSES);
+    const interviews = sum(INTERVIEW_STATUSES);
 
     return {
       byStatus,
       applied,
       interviews,
-      offers: (byStatus.OFFER ?? 0) + (byStatus.ACCEPTED ?? 0),
-      // Honest rate: needs volume before it means anything; null under 5.
-      interviewRate: applied >= 5 ? Math.round((interviews / applied) * 100) : null,
+      offers: sum(OFFER_STATUSES),
+      // Honest rate: needs volume before it means anything; null under the floor.
+      interviewRate:
+        applied >= MIN_APPLIED_FOR_RATE ? Math.round((interviews / applied) * 100) : null,
     };
   }
 

@@ -71,6 +71,15 @@ export class AnalyticsController {
   }
 
   /** Recommendation Quality: CTR / apply / dismiss funnel + score separation + lift. */
+  /** Which sources actually produce interviews — the outcome-loop payoff. */
+  @Get('analytics/sources')
+  sources(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('days', new DefaultValuePipe(90), ParseIntPipe) days: number,
+  ) {
+    return this.analytics.sourceOutcomes(user.id, Math.min(365, Math.max(1, days)));
+  }
+
   @Get('analytics/quality')
   quality(
     @CurrentUser() user: AuthenticatedUser,
