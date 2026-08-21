@@ -9,7 +9,12 @@ describe('detectAts (shared)', () => {
     ['https://jobs.lever.co/plaid', 'LEVER', 'plaid'],
     ['https://jobs.lever.co/plaid/uuid-123', 'LEVER', 'plaid'],
     ['https://jobs.ashbyhq.com/openai', 'ASHBY', 'openai'],
-    ['https://acme.wd5.myworkdayjobs.com/External', 'WORKDAY', 'acme/External'],
+    // tenant/DC/site (2026-08-20). The datacenter used to be dropped, which
+    // made the identifier unusable for crawling: `acme/External` cannot be
+    // turned back into acme.wd5, and the CXS endpoint needs all three parts —
+    // POST /wday/cxs/{tenant}/{site}/jobs on {tenant}.{dc}.myworkdayjobs.com.
+    ['https://acme.wd5.myworkdayjobs.com/External', 'WORKDAY', 'acme/wd5/External'],
+    ['https://accenture.wd103.myworkdayjobs.com/en-US/AccentureCareers/job/x', 'WORKDAY', 'accenture/wd103/AccentureCareers'],
     ['https://bunq.recruitee.com/o/lead-dev', 'RECRUITEE', 'bunq'],
     ['https://acme.teamtailor.com/jobs', 'TEAMTAILOR', 'acme'],
     ['https://jobs.smartrecruiters.com/Bosch/123', 'SMARTRECRUITERS', 'Bosch'],

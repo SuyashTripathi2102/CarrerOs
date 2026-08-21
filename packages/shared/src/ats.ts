@@ -55,10 +55,21 @@ export function detectAts(url: string): AtsDetection {
     return { provider: 'ASHBY', identifier: segments[0] ?? null };
   }
   if (host.endsWith('.myworkdayjobs.com')) {
-    // {tenant}.wd{N}.myworkdayjobs.com/{site} — needs both to build the CXS API URL
-    const tenant = host.split('.')[0];
+    // {tenant}.wd{N}.myworkdayjobs.com/{site}
+    //
+    // The CXS API needs all THREE parts:
+    //   POST https://{tenant}.{dc}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs
+    //
+    // This previously returned `tenant/site` and dropped the datacenter, which
+    // made the identifier unusable for crawling — abb/External_Career_Page
+    // cannot be turned back into abb.wd3. Widening the identifier rather than
+    // the AtsAdapter interface keeps Workday out of the generic pipeline:
+    // `atsIdentifier` is already free-form per provider (Greenhouse stores a
+    // board token, Lever a slug), so three segments is data, not schema.
+    const [tenant, dc] = host.split('.');
     const site = segments.find((s) => !['en-US', 'wday'].includes(s));
-    return { provider: 'WORKDAY', identifier: site ? `${tenant}/${site}` : tenant };
+    if (!site) return { provider: 'WORKDAY', identifier: null };
+    return { provider: 'WORKDAY', identifier: `${tenant}/${dc}/${site}` };
   }
   if (host.endsWith('.recruitee.com')) {
     return { provider: 'RECRUITEE', identifier: host.split('.')[0] };
