@@ -44,11 +44,24 @@ export class CompaniesService {
    * Flywheel entry point (used by internal board ingest): find or create a
    * company from the little a board job tells us about it.
    */
-  async findOrCreateFromBoard(input: {
-    name: string;
-    website?: string | null;
-    atsHintUrl?: string | null;
-  }): Promise<Company> {
+  async findOrCreateFromBoard(
+    input: {
+      name: string;
+      website?: string | null;
+      atsHintUrl?: string | null;
+    },
+    /**
+     * WHICH board introduced this company — 'freehire', 'jooble', 'remoteok'…
+     *
+     * This used to be hardcoded to the literal 'board', collapsing every board
+     * into one bucket. That is why FreeHire's dependency read 67.1% (by job
+     * source) when the real figure is 92.7% (by who discovered the company):
+     * a FreeHire-discovered company whose jobs are later acquired from
+     * Greenhouse looked like diversification. Defaults to 'board' so a caller
+     * that genuinely does not know still records something truthful.
+     */
+    discoverySource = 'board',
+  ): Promise<Company> {
     const detected = input.atsHintUrl ? detectAts(input.atsHintUrl) : null;
 
     if (detected?.identifier) {
@@ -83,7 +96,7 @@ export class CompaniesService {
       atsIdentifier: detected?.identifier ?? undefined,
       // Without this, board-discovered companies group as "manual" in funnel
       // stats — the flywheel's biggest channel was invisible in its own metrics.
-      discoverySource: 'board',
+      discoverySource,
     });
   }
 
