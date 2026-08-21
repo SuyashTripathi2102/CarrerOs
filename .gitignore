@@ -27,6 +27,10 @@ Thumbs.db
 # Docker volumes
 docker-data/
 .env.prod
+# Timestamped .env backups — hold live secrets, never commit.
+.env.bak-*
+*/.env.bak-*
+**/.env.bak-*
 
 # Vertex service-account keys (mounted into api container, never committed)
 secrets/
