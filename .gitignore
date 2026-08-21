@@ -43,3 +43,11 @@ services/renderer/package-lock.json
 # Gate 0 backups — dumps live on D:\CareerOS-Backups and OneDrive, never in git
 CareerOS-Backups/
 *.dump
+
+# Seed worklists DERIVED from a third-party directory are not committed.
+# The extractor script is reproducible and belongs in the repo; the extracted
+# selection of companies is substantially someone else's curation work, so it
+# stays local. scripts/seeds/bangalore-pilot.tsv is our own hand-compiled list
+# and IS tracked.
+scripts/seeds/bangalore-full.tsv
+scripts/seeds/bangalore-cohort250.tsv
