@@ -115,15 +115,50 @@ function classify(html, base) {
 }
 
 const seedPath = process.argv[2];
-const seeds = readFileSync(seedPath, 'utf8')
-  .split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'))
-  .map((l) => { const [name, domain] = l.split('\t'); return { name: (name ?? '').trim(), domain: (domain ?? '').trim() }; })
-  .filter((s) => s.name && s.domain);
+const raw = readFileSync(seedPath, 'utf8')
+  .split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+
+/**
+ * Two input shapes, one classifier — so the sampled pilot and the full corpus
+ * pass can never drift into two different definitions of the tiers.
+ *
+ *   name <TAB> domain              discover the career page, then classify
+ *   id <TAB> name <TAB> pageUrl    classify that page directly
+ */
+const DIRECT = raw.length > 0 && raw[0].split('\t').length >= 3;
+const seeds = DIRECT
+  ? raw.map((l) => { const [, name, url] = l.split('\t'); return { name: (name ?? '').trim(), pageUrl: (url ?? '').trim() }; })
+      .filter((s) => s.name && s.pageUrl)
+  : raw.map((l) => { const [name, domain] = l.split('\t'); return { name: (name ?? '').trim(), domain: (domain ?? '').trim() }; })
+      .filter((s) => s.name && s.domain);
 
 console.log(`classifying career pages for ${seeds.length} companies\n`);
 
 const rows = [];
 for (const s of seeds) {
+  // Direct mode: we already hold the page URL, so skip discovery entirely.
+  if (s.pageUrl) {
+    const page = await get(s.pageUrl);
+    if (!page.ok) {
+      rows.push({ ...s, tier: 'SITE_UNREACHABLE', detail: `HTTP ${page.status}`, hasAts: false });
+      console.log(`  ${s.name.slice(0, 22).padEnd(23)} SITE_UNREACHABLE   HTTP ${page.status}`);
+      continue;
+    }
+    let ats = null;
+    for (const h of links(page.body, page.url)) {
+      const d = detectAts(h);
+      if (d.provider !== 'UNKNOWN' && d.identifier) { ats = d; break; }
+    }
+    const c = classify(page.body, page.url);
+    const india = INDIA_RE.test(textOf(page.body));
+    rows.push({ ...s, ...c, url: page.url, hasAts: Boolean(ats), atsProvider: ats?.provider ?? null, india });
+    console.log(
+      `  ${s.name.slice(0, 22).padEnd(23)} ${c.tier.padEnd(19)}${(c.detail ?? '').padEnd(28)}` +
+        `${ats ? 'ATS:' + ats.provider : ''}${india ? ' [india]' : ''}`,
+    );
+    continue;
+  }
+
   const origin = 'https://' + s.domain.replace(/^https?:\/\//, '').replace(/\/+$/, '');
   const home = await get(origin);
   if (!home.ok) {
@@ -197,6 +232,17 @@ CUSTOM CAREER PAGES              ${custom.length}
 
   mentioning India                ${custom.filter((r) => r.india).length} / ${custom.length}
 `);
+
+// India x tier. Extraction capability is worthless pointed at companies that
+// do not hire in India, and this is the split that decides whether a render
+// service is worth paying for against THIS pool of companies.
+console.log('India-relevant, by tier (what extraction would actually unlock):');
+for (const t of ['JSONLD_JOBPOSTING', 'EMBEDDED_JSON', 'ATS_IFRAME', 'STATIC_HTML', 'JS_SHELL']) {
+  const all = custom.filter((r) => r.tier === t);
+  if (all.length === 0) continue;
+  console.log(`  ${t.padEnd(20)} ${String(all.filter((r) => r.india).length).padStart(3)} of ${String(all.length).padStart(3)}`);
+}
+console.log('');
 
 console.log('JS_SHELL (the expensive tier) —');
 for (const r of custom.filter((x) => x.tier === 'JS_SHELL')) {
