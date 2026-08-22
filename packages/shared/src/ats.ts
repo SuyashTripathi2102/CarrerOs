@@ -123,4 +123,9 @@ export const CRAWLABLE_PROVIDERS: AtsProviderName[] = [
   'RECRUITEE',
   'BREEZY',
   'KEKA',
+  // Added 2026-08-22. The adapter shipped on 2026-08-20 and passed a nine-check
+  // canary over 9 tenants, but was never listed here or in the workers' ADAPTERS
+  // map — "built" is not "enabled". The full Bengaluru sweep then identified 8
+  // Workday boards that could not be crawled by a component that already worked.
+  'WORKDAY',
 ];

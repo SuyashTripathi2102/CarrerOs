@@ -11,6 +11,7 @@ import { smartrecruitersAdapter } from '../adapters/smartrecruiters';
 import { recruiteeAdapter } from '../adapters/recruitee';
 import { breezyAdapter } from '../adapters/breezy';
 import { kekaAdapter } from '../adapters/keka';
+import { workdayAdapter } from '../adapters/workday';
 
 export interface CrawlCompanyJobData {
   companyId: string;
@@ -30,9 +31,22 @@ const ADAPTERS: Record<string, AtsAdapter> = {
   RECRUITEE: recruiteeAdapter,
   BREEZY: breezyAdapter,
   KEKA: kekaAdapter,
-  // DARWINBOX: JS-hydrated SPA → Python scraper via SCRAPE_HARD_TARGET
-  // WORKDAY / custom sites → same scraper route
+  // WORKDAY speaks the CXS JSON API directly — no scraper needed. The adapter
+  // shipped 2026-08-20 and passed a nine-check canary, but was never listed
+  // here, so eight boards found by the Bengaluru sweep sat uncrawlable behind a
+  // component that already worked. It reports board completeness via
+  // fetchBoard(), so a truncated walk retires nothing.
+  WORKDAY: workdayAdapter,
+  // DARWINBOX: public unauthenticated JSON API (verified 2026-08-21) — 20
+  // boards in the Bengaluru universe, the largest remaining gap. No adapter yet.
 };
+
+/**
+ * Exported so a test can assert this map and CRAWLABLE_PROVIDERS agree. Drift
+ * between them is silent in one direction and has cost twice — see
+ * adapter-registry-sync.spec.ts.
+ */
+export const CRAWLABLE_ADAPTER_NAMES = Object.keys(ADAPTERS);
 
 export function startCrawlCompanyWorker(api: ApiClient): Worker<CrawlCompanyJobData> {
   return new Worker<CrawlCompanyJobData>(
