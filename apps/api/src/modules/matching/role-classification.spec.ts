@@ -681,3 +681,81 @@ describe('the invariant that was violated in production', () => {
     expect(e.eligible).toBe(false);
   });
 });
+
+/**
+ * THE EVIDENCE GATE (2026-08-23).
+ *
+ * Measured: 880 jobs with a ZERO-LENGTH description were refused
+ * NOT_DEVELOPMENT with the reason "no coding responsibility stated" — a
+ * confident claim about a role nobody read. Lever ships 73% of postings with
+ * no body, Breezy 100%, so 6,907 ACTIVE jobs were being judged blind.
+ *
+ * With no description the classifier returns codingIntensity NONE and
+ * developmentConfidence 0. Every branch of eligibility() treats those as
+ * findings. They are not findings; they are the absence of input.
+ */
+describe('a classification made from no description is not a finding', () => {
+  /** What the classifier returns when handed nothing: all-zero signals. */
+  const emptyRead = classification({
+    primaryFunction: 'OTHER',
+    roleFamily: 'OTHER',
+    codingIntensity: 'NONE',
+    developmentConfidence: 0,
+    requiredSkills: [],
+    developmentEvidence: [],
+    classificationReason: 'no description provided',
+  });
+
+  it('refuses to call an unread posting NOT_DEVELOPMENT', () => {
+    const e = eligibility(emptyRead, SUYASH, { descriptionLength: 0 });
+    expect(e.code).toBe('INSUFFICIENT_EVIDENCE');
+    expect(e.code).not.toBe('NOT_DEVELOPMENT');
+    expect(e.eligible).toBe(false);
+  });
+
+  it('says so in the reason — never "not a software development role"', () => {
+    const e = eligibility(emptyRead, SUYASH, { descriptionLength: 0 });
+    expect(e.reason).toMatch(/description/i);
+    expect(e.reason).not.toMatch(/not a software development role/i);
+  });
+
+  it('does NOT route to Needs Review', () => {
+    // 6,907 such rows exist. Sending them to review turns it into a second
+    // inbox — exactly what the !builds branch comment warns against.
+    expect(eligibility(emptyRead, SUYASH, { descriptionLength: 0 }).needsReview).toBe(false);
+  });
+
+  it('fires on a stub description too, not only on empty', () => {
+    expect(eligibility(emptyRead, SUYASH, { descriptionLength: 42 }).code).toBe(
+      'INSUFFICIENT_EVIDENCE',
+    );
+  });
+
+  it('does NOT fire once a real description exists', () => {
+    // A genuine sales role with a real description must still be refused
+    // NOT_DEVELOPMENT — the guard must not become a blanket amnesty.
+    const realSalesRole = classification({
+      primaryFunction: 'SALES_PRE_SALES',
+      roleFamily: 'OTHER',
+      codingIntensity: 'NONE',
+      developmentConfidence: 5,
+      requiredSkills: [],
+      developmentEvidence: [],
+    });
+    const e = eligibility(realSalesRole, SUYASH, { descriptionLength: 4000 });
+    expect(e.code).not.toBe('INSUFFICIENT_EVIDENCE');
+    expect(e.eligible).toBe(false);
+  });
+
+  it('a well-described matching role is still eligible', () => {
+    const e = eligibility(classification(), SUYASH, { descriptionLength: 3000 });
+    expect(e.eligible).toBe(true);
+    expect(e.code).not.toBe('INSUFFICIENT_EVIDENCE');
+  });
+
+  it('omitting evidence preserves the old behaviour for existing callers', () => {
+    // backfill/shadow-report call eligibility() without evidence. They must
+    // keep working rather than silently flipping every verdict.
+    expect(eligibility(classification(), SUYASH).eligible).toBe(true);
+  });
+});

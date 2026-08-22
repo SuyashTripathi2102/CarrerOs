@@ -172,5 +172,8 @@ const BUCKET_LABELS: Record<string, string> = {
   TARGET_ROLE_EXPERIENCE_STRETCH: 'Experience stretch',
   TARGET_ROLE_WEAK_STACK: 'Core-stack mismatch',
   AMBIGUOUS_NEEDS_REVIEW: 'Ambiguous',
+  // A statement about our ingestion, not the job. Phrased so it can never be
+  // read as "this role is unsuitable" — the posting was never judged.
+  INSUFFICIENT_EVIDENCE: 'Not judged — posting had no description',
   UNCODED: 'Rejected before verdict codes existed',
 };

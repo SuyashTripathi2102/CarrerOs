@@ -727,6 +727,10 @@ export class MatchingService {
           classificationReason: c.classificationReason,
         },
         profile,
+        // What the classifier actually had to read. Without this the gate
+        // cannot tell "no coding in this role" from "no description existed",
+        // and refuses body-less postings as NOT_DEVELOPMENT.
+        { descriptionLength: (cand.description ?? '').length },
       );
       if (e.eligible) eligible.push(cand);
       else {

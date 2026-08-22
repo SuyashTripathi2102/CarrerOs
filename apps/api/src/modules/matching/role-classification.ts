@@ -569,7 +569,25 @@ export type EligibilityCode =
   | 'NOT_DEVELOPMENT'
   | 'LOW_CODING_RESPONSIBILITY'
   | 'LOW_CONFIDENCE'
+  /**
+   * The posting carried no usable description, so nothing was classified.
+   *
+   * This is a statement about OUR DATA, never about the role. Measured
+   * 2026-08-23: 880 jobs with a ZERO-LENGTH description were refused
+   * NOT_DEVELOPMENT with the reason "no coding responsibility stated" —
+   * absence of evidence recorded as evidence of absence, at the gate.
+   * Lever ships 73% of postings with no body, Breezy 100%.
+   */
+  | 'INSUFFICIENT_EVIDENCE'
   | 'AMBIGUOUS_NEEDS_REVIEW';
+
+/**
+ * Below this many characters a description cannot state responsibilities, so a
+ * classification drawn from it describes our ingestion, not the job. Chosen
+ * from the measured distribution: of 920 sub-200-char NOT_DEVELOPMENT refusals,
+ * 880 were exactly zero — the population is "empty", not "terse".
+ */
+export const MIN_DESCRIPTION_CHARS = 200;
 
 export interface Eligibility {
   /** Passes every hard gate — may proceed to personalized resume scoring. */
@@ -629,7 +647,16 @@ export function actionFor(input: {
  * The hard gate that runs BEFORE similarity, before resume scoring, before any
  * weighted module. Nothing downstream can overturn it.
  */
-export function eligibility(c: JobClassification, p: RoleProfile): Eligibility {
+export function eligibility(
+  c: JobClassification,
+  p: RoleProfile,
+  /**
+   * What the classifier actually had to read. Optional so existing callers
+   * keep working, but the gate cannot tell "this role involves no coding" from
+   * "there was no description" without it.
+   */
+  evidence?: { descriptionLength: number },
+): Eligibility {
   const fit = targetFit(c, p);
   const relevance = roleRelevance(c, p);
   const builds = BUILDS_SOFTWARE.includes(c.codingIntensity);
@@ -643,6 +670,32 @@ export function eligibility(c: JobClassification, p: RoleProfile): Eligibility {
     specializationFit: specializationFit(c, p.skills ?? USER_STACK),
     capsAtConsider: exp.capsAtConsider,
   };
+
+  /**
+   * EVIDENCE GATE — runs before every other branch.
+   *
+   * With no description, `codingIntensity: NONE` and `developmentConfidence: 0`
+   * mean the classifier read nothing, not that the job involves nothing. Every
+   * branch below treats those values as findings, so without this guard a
+   * body-less posting is refused NOT_DEVELOPMENT with "no coding
+   * responsibility stated" — a confident claim about a job we never saw.
+   *
+   * NOT needsReview: 6,907 such rows exist today and routing them to Needs
+   * Review would turn it into a second inbox, which is precisely what the
+   * comment on the !builds branch warns against. The honest state is "we
+   * cannot judge this yet"; hydration fixes the input, then it is re-judged.
+   */
+  if (evidence && evidence.descriptionLength < MIN_DESCRIPTION_CHARS) {
+    return {
+      ...base,
+      eligible: false,
+      needsReview: false,
+      code: 'INSUFFICIENT_EVIDENCE',
+      reason:
+        `posting carried ${evidence.descriptionLength} characters of description — ` +
+        'not judged; this says nothing about the role',
+    };
+  }
 
   // "Builds software" is decided by what the person does, not by which
   // department owns them. An SRE who writes automation daily is engineering.
