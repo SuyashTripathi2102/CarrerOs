@@ -19,6 +19,17 @@ export const NormalizedJobSchema = z.object({
   currency: z.string().nullish(),
   // offset/local allowed: Greenhouse sends "2026-07-01T10:23:45-04:00"
   postedAt: z.iso.datetime({ offset: true, local: true }).nullish(),
+  /**
+   * Where `description` came from. Optional so the eight adapters that always
+   * receive a body with the listing need no change.
+   *
+   * MISSING is load-bearing: it means the body was SOUGHT and is genuinely
+   * unavailable, and such a job must never enter normal judging. Measured
+   * 2026-08-23, 6,907 ACTIVE jobs had no description (lever 73%, breezy 100%)
+   * because both adapters defaulted to '' — and the gate then refused them as
+   * NOT_DEVELOPMENT, a confident claim about a posting nobody read.
+   */
+  descriptionSource: z.enum(['LIST', 'DETAIL', 'MISSING']).optional(),
   raw: z.unknown().optional(), // original payload, stored for reprocessing
 });
 export type NormalizedJob = z.infer<typeof NormalizedJobSchema>;

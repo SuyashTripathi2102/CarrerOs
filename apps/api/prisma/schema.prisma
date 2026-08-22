@@ -82,6 +82,23 @@ enum JobStatus {
   EXPIRED // source marked it closed
 }
 
+/// Where a job's description actually came from.
+///
+/// Without this, "short description" and "we never fetched the body" are
+/// indistinguishable — and that ambiguity cost real supply. Measured
+/// 2026-08-23: 6,907 ACTIVE jobs had NO description (lever 73%, breezy 100%)
+/// because both adapters read the body from the LIST endpoint and defaulted to
+/// empty. The gate then refused them NOT_DEVELOPMENT for "no coding
+/// responsibility stated", and every source-quality number was contaminated:
+/// breezy read as 0.2% actionable when its jobs were simply unread.
+///
+/// MISSING is load-bearing, not cosmetic — it must never enter normal judging.
+enum DescriptionSource {
+  LIST // came with the listing payload
+  DETAIL // fetched from the posting's own detail endpoint
+  MISSING // sought and genuinely unavailable — hold, never judge
+}
+
 // Monitoring cadence: HOT = companies the user follows/applied to, WARM = default
 // for monitored companies, COLD = long-tail. Intervals live in code (ingest.service).
 enum CrawlTier {
@@ -386,6 +403,10 @@ model Job {
   externalId  String // stable id from the source (ATS job id or canonical URL)
   title       String
   description String
+  /// Provenance of `description`. Nullable because rows written before
+  /// 2026-08-23 predate it and their origin is genuinely unknown — recording
+  /// them as LIST would be inventing a fact. See enum DescriptionSource.
+  descriptionSource DescriptionSource?
   location    String?
   country     String?
   workMode    WorkMode?

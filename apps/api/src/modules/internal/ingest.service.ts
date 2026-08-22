@@ -294,27 +294,34 @@ export class IngestService {
       const postedAts = chunk.map((w) => w.job.postedAt ?? null);
       const fingerprintsCol = chunk.map((w) => w.fingerprint);
       const sources = chunk.map(() => source ?? null);
+      // Provenance of the body. NULL when an adapter does not report it — the
+      // eight that always receive a description with the listing. Never
+      // defaulted to LIST: inventing provenance is the same error as inventing
+      // a description. See enum DescriptionSource.
+      const descriptionSources = chunk.map((w) => w.job.descriptionSource ?? null);
 
       const rows = await this.prisma.$queryRaw<{ id: string; inserted: boolean }[]>`
         INSERT INTO jobs (
           id, "companyId", "externalId", title, description, url,
           location, country, "workMode", "salaryMin", "salaryMax", currency,
-          "postedAt", source, fingerprint, status, "firstSeenAt", "lastSeenAt"
+          "postedAt", source, fingerprint, "descriptionSource", status, "firstSeenAt", "lastSeenAt"
         )
         SELECT
           u.id, ${companyId}, u.external_id, u.title, u.description, u.url,
           u.location, u.country, u.work_mode::"WorkMode", u.salary_min, u.salary_max, u.currency,
-          u.posted_at::timestamptz, u.source, u.fingerprint, 'ACTIVE', now(), now()
+          u.posted_at::timestamptz, u.source, u.fingerprint,
+          u.description_source::"DescriptionSource", 'ACTIVE', now(), now()
         FROM unnest(
           ${ids}::text[], ${chunkExternalIds}::text[], ${titles}::text[],
           ${descriptions}::text[], ${urls}::text[], ${locations}::text[],
           ${countries}::text[], ${workModes}::text[], ${salaryMins}::int[],
           ${salaryMaxs}::int[], ${currencies}::text[], ${postedAts}::text[],
-          ${sources}::text[], ${fingerprintsCol}::text[]
+          ${sources}::text[], ${fingerprintsCol}::text[],
+          ${descriptionSources}::text[]
         ) AS u(
           id, external_id, title, description, url, location,
           country, work_mode, salary_min, salary_max, currency, posted_at,
-          source, fingerprint
+          source, fingerprint, description_source
         )
         ON CONFLICT ("companyId", "externalId") DO UPDATE SET
           title = EXCLUDED.title,
@@ -327,6 +334,9 @@ export class IngestService {
           "salaryMax" = EXCLUDED."salaryMax",
           currency = EXCLUDED.currency,
           "postedAt" = EXCLUDED."postedAt",
+          -- COALESCE so a re-crawl by an adapter that does not report
+          -- provenance cannot erase provenance an earlier crawl established.
+          "descriptionSource" = COALESCE(EXCLUDED."descriptionSource", jobs."descriptionSource"),
           source = COALESCE(EXCLUDED.source, jobs.source),
           fingerprint = EXCLUDED.fingerprint,
           status = 'ACTIVE',
