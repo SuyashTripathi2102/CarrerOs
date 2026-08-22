@@ -47,7 +47,17 @@ param(
   [string]$DbName = 'careeros',
   # Cold boot / wake-from-sleep: Docker Desktop needs a few minutes before the
   # engine accepts connections. Wait rather than fail.
-  [int]$WaitForDockerSeconds = 600
+  #
+  # Raised 600 -> 1800 on 2026-08-23. At 600 the scheduled run FAILED on
+  # 2026-08-20 and 2026-08-22: the task fires with StartWhenAvailable, so on a
+  # machine that was asleep at 02:00 it runs on wake (08-22 fired at 03:28),
+  # Docker Desktop was still starting, and the script threw. Exactly the
+  # scenario the comment below predicted.
+  [int]$WaitForDockerSeconds = 1800,
+  # Loud if the newest dump is older than this. A backup that silently stops is
+  # indistinguishable from one that is working — which is how two days of the
+  # corpus went unprotected without anyone noticing.
+  [int]$StaleAfterHours = 36
 )
 
 $ErrorActionPreference = 'Stop'
@@ -57,7 +67,42 @@ if (-not $OffMachinePath) {
   $OffMachinePath = if ($env:OneDrive) { Join-Path $env:OneDrive 'CareerOS-Backups' } else { 'none' }
 }
 
-function Write-Step($msg) { Write-Host "[backup] $msg" }
+# Every run leaves a trace, success or failure. Until 2026-08-23 this script
+# logged NOTHING: a failed scheduled run vanished, leaving only a task exit code
+# nobody reads, so two missed days looked identical to two successful ones.
+if (-not (Test-Path $LocalPath)) { New-Item -ItemType Directory -Path $LocalPath -Force | Out-Null }
+$LogFile = Join-Path $LocalPath 'backup.log'
+function Write-Log($msg) {
+  $line = "{0} {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $msg
+  Add-Content -Path $LogFile -Value $line -Encoding utf8
+}
+function Write-Step($msg) { Write-Host "[backup] $msg"; Write-Log $msg }
+
+Write-Log "=== run start (pid $PID) ==="
+
+# Report staleness BEFORE attempting anything, so even a run that then fails
+# records how long the corpus has been unprotected.
+$newest = Get-ChildItem -Path $LocalPath -Filter '*.dump' -ErrorAction SilentlyContinue |
+  Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if ($newest) {
+  $ageH = [math]::Round(((Get-Date) - $newest.LastWriteTime).TotalHours, 1)
+  if ($ageH -gt $StaleAfterHours) {
+    Write-Warning "[backup] STALE: newest dump is $ageH h old ($($newest.Name)) - previous runs did not complete."
+    Write-Log "STALE newest=$($newest.Name) ageHours=$ageH"
+  } else {
+    Write-Log "newest=$($newest.Name) ageHours=$ageH"
+  }
+} else {
+  Write-Warning '[backup] NO PRIOR DUMP EXISTS.'
+  Write-Log 'NO PRIOR DUMP'
+}
+
+# A throw anywhere below must still land in the log, or the next silent failure
+# is as invisible as the last two.
+trap {
+  Write-Log "FAILED: $($_.Exception.Message)"
+  break
+}
 
 # --- 1. Preconditions ------------------------------------------------------
 # WAIT for Docker rather than failing. This task runs at 02:00 and with
