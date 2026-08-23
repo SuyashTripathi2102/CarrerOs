@@ -57,6 +57,29 @@ behaviour. Two real defects surfaced in one afternoon.
 | Surfaceable-APPLY gap (cosine caps the pool) | ⬜ open — measured daily, NOT fixed; a matching-path change needs BEFORE/AFTER |
 | Daily-cycle baseline (≥5 days) | ⬜ **the remaining gate** — Day 1 = 2026-08-24. 2026-08-23 is excluded: 592-minute worker outage + 3h ingestion failure |
 
+#### Baseline start — recorded 2026-08-23 18:45 IST
+
+Day 1 is **2026-08-24**. State at the start, so a later failure can be told
+apart from a pre-existing one:
+
+| Check | State |
+|---|---|
+| API | HTTP 200 |
+| Workers | 1 process, 9 schedulers registered |
+| Containers | postgres / redis / minio healthy (restarted ~15:45) |
+| Stranded embeddings | 0 |
+| ACTIVE jobs | 37,863 · decided 10,140 · 234 decisions still open |
+| Backup | `careeros_2026-08-23_020004.dump`, 384.56 MB, 16.7 h old |
+| Scheduled tasks | Backup / Watchdog / Phase0-Baseline — all last result 0 |
+
+**2026-08-23 is excluded from the five days** and its row is kept as the
+counter-example: `crawls_failed = 2,870` against 2,095 succeeded, from a
+592-minute worker outage and three hours of failed ingestion. A baseline day
+must not look like that.
+
+Do not intervene to make a day green. A genuine failure is a result, not a
+problem to be tidied away before it is recorded.
+
 ### Module audit vs UNKNOWN ≠ LOW (2026-08-13)
 
 Every module classified by how it treats missing evidence:
