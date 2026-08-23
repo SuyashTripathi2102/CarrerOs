@@ -188,6 +188,12 @@ export class IngestService {
           AS u(id, description, description_source)
         WHERE j.id = u.id
       `;
+
+      // A cleared vector that is never re-enqueued STRANDS the job: it stays
+      // ACTIVE, looks healthy in every count, and retrieval can never see it
+      // because the candidate query INNER JOINs job_embeddings. Deleting above
+      // without this line would hide the very jobs this repair just fixed.
+      await this.enqueueEmbeddings(ids);
     }
 
     this.logger.log(
@@ -561,7 +567,16 @@ export class IngestService {
       await this.embedQueue.add(
         'embed',
         { jobIds: jobIds.slice(i, i + 100) },
-        { removeOnComplete: true, removeOnFail: true, attempts: 5, backoff: { type: 'exponential', delay: 60_000 } },
+        {
+          removeOnComplete: true,
+          // NOT true. Discarding failures is how 79 repaired jobs ended up with no
+          // vector on 2026-08-23 while the queue read active:0 failed:0 -- clean.
+          // A stranded job stays ACTIVE and looks healthy in every count, so the
+          // failed batch is the only evidence that it needs re-embedding.
+          removeOnFail: 1000,
+          attempts: 5,
+          backoff: { type: 'exponential', delay: 60_000 },
+        },
       );
     }
   }
