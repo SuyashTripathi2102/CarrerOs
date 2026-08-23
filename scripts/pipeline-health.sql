@@ -80,7 +80,18 @@ LEFT JOIN job_embeddings e ON e."jobId" = j.id
 WHERE j.status = 'ACTIVE' AND e."jobId" IS NULL;
 
 \echo ''
-\echo '=== 5. [INVALIDATED 2026-08-14] fresh actionable opportunities/day ==='
+\echo '=== 5. fresh actionable opportunities/day (UN-INVALIDATED 2026-08-23) ==='
+-- UN-INVALIDATED 2026-08-23. The two-competing-scores bug that invalidated
+-- this number is fixed: /browse, /today and Telegram all derive state from the
+-- persisted decision, refused jobs are filtered before sorting, and an
+-- unevaluated job renders as a pending STATE with no score. Evidence in
+-- docs/CAREEROS_2_ROADMAP.md, 'Reconciliation, 2026-08-23'.
+--
+-- CONDITION: this counts DECISIONS, not what the user can see. browseByFit's
+-- pool is capped at 72 and ordered by cosine WITHIN evaluated jobs, so on
+-- 2026-08-23 only 4 of 60 APPLY jobs could reach /today -- and the 56 outside
+-- averaged a HIGHER opportunity score. Report this beside
+-- phase0_daily_baseline.surfaceable_apply. Never substitute one for the other.
 -- ┌──────────────────────────────────────────────────────────────────────────┐
 -- │ INVALIDATED — score/surface divergence. Do NOT quote as the KPI.         │
 -- └──────────────────────────────────────────────────────────────────────────┘

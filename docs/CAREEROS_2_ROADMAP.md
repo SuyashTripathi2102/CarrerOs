@@ -52,7 +52,10 @@ behaviour. Two real defects surfaced in one afternoon.
 | Embedding staleness (changed body kept a stale vector) | ✅ fixed 2026-08-23 — invariant + regression tests |
 | Workers killed by one malformed HTTP response | ✅ fixed 2026-08-23 — 592-minute silent outage; process guard |
 | Embedding sweeper / reconciliation | ✅ shipped 2026-08-23 — 30m tick, 30m grace window; verified live: found 7 stranded, re-enqueued, all embedded |
-| Daily-cycle baseline (≥5 days) | ⬜ **the remaining gate** |
+| Two competing Opportunity Scores | ✅ resolved — reconciled 2026-08-23 on all three surfaces |
+| Baseline collector | ✅ shipped 2026-08-23 — `scripts/phase0-baseline.sql` + `CareerOS-Phase0-Baseline` task, daily 23:45, idempotent per day |
+| Surfaceable-APPLY gap (cosine caps the pool) | ⬜ open — measured daily, NOT fixed; a matching-path change needs BEFORE/AFTER |
+| Daily-cycle baseline (≥5 days) | ⬜ **the remaining gate** — Day 1 = 2026-08-24. 2026-08-23 is excluded: 592-minute worker outage + 3h ingestion failure |
 
 ### Module audit vs UNKNOWN ≠ LOW (2026-08-13)
 
@@ -203,7 +206,7 @@ Measured by `scripts/pipeline-health.sql`, which is the permanent operational
 metric: stage coverage, discovery→embedded p50/p95, throughput vs intake,
 backlog age, and the scoreboard.
 
-### 🚨 Two competing Opportunity Scores (discovered 2026-08-14) — **BLOCKS the baseline**
+### Two competing Opportunity Scores (discovered 2026-08-14) — **RESOLVED 2026-08-23**
 
 Found while verifying that `/today` analytics actually recorded anything. It is
 a product-integrity problem, not an analytics bug.
@@ -255,6 +258,58 @@ Pending evaluation   Potential match · similarity high · evaluation pending
 
 That preserves recall without implying an unscored job carries a trustworthy
 score.
+
+#### Reconciliation, 2026-08-23 — what cleared and what did not
+
+The history above stands as written; the bug was real. Verified against the
+live code and data before clearing the marker:
+
+| Surface | Derives state from | Verified |
+|---|---|---|
+| `/browse` | `recommendationState(verdict, verdictCode, decidedAt)` + `byRecommendation` | ✅ |
+| `/today` | the same, via `browseByFit`; unevaluated render as `POTENTIAL` with **no score** | ✅ |
+| Telegram | stored `m.verdict IN ('APPLY','CONSIDER')` | ✅ |
+
+`recommendationState` treats a verdict without `decidedAt` as undecided, maps
+every gate-refusal code to REFUSED, and `browseByFit` drops REFUSED before
+sorting. `opportunity` is `null` for POTENTIAL, never 0. So the original
+violation — a refused job displayed as "Apply — Opportunity 71", and confident
+numbers on jobs that were never judged — cannot recur. Also confirmed: §6 of
+`recommendation-integrity.sql` (unnormalized country) returns 0 rows.
+
+**A DIFFERENT defect was found while verifying this, and it is still open.**
+
+`browseByFit` builds its pool with
+
+```sql
+ORDER BY (m."decidedAt" IS NOT NULL) DESC, je.vector <=> re.vector LIMIT 72
+```
+
+Evaluated jobs come first, which is the 2026-08-15 fix. But with 8,743 evaluated
+jobs the pool fills entirely from them **ordered by cosine**, so similarity still
+decides which APPLYs are *eligible to be displayed* — and similarity is not the
+decision. Measured 2026-08-23 against the live corpus:
+
+| | APPLY jobs | best opportunity | avg opportunity |
+|---|---|---|---|
+| inside `/today`'s pool (72) | **4** | 84.5 | 79.4 |
+| outside it | **56** | **94.5** | 83.6 |
+
+The best opportunity in the corpus cannot reach `/today`, and the jobs outside
+the pool score *higher* on average than those inside. This is not the old
+two-scores bug — nothing fabricates a score any more — it is a recall ceiling in
+how the pool is built.
+
+**Not fixed here, deliberately.** Changing pool construction is a change to the
+matching path and must be measured BEFORE/AFTER like any scoring change. It is
+now tracked instead: `phase0_daily_baseline` records `decided_apply` and
+`surfaceable_apply` as separate columns every day.
+
+**Therefore §5 of `pipeline-health.sql` is un-invalidated, with one condition:**
+"fresh actionable opportunities/day" counts *decisions*, not what the user can
+see. The two numbers must be reported side by side and never summed or
+substituted — the same rule that already applies to `verdict='APPLY'` versus
+`opportunityScore >= 70`.
 
 **Success metric:** a stable daily funnel — new → India → SWE → stack → ≤3 YOE →
 eligible → scored → APPLY → applied — measured across ≥5 consecutive days.
