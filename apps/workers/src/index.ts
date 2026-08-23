@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { installProcessGuard } from './process-guard';
 import { ApiClient } from './api-client';
 import { startCrawlCompanyWorker } from './processors/crawl-company.processor';
 import { ensureBoardSchedules, startCrawlBoardWorker } from './processors/crawl-board.processor';
@@ -30,6 +31,9 @@ import {
 } from './processors/extract-career-pages.processor';
 
 async function main() {
+  // One malformed response from a third-party board must not be able to take
+  // the crawls and the evaluation belt down with it.
+  installProcessGuard();
   const api = new ApiClient();
 
   const workers = [
