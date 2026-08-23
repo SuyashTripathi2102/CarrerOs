@@ -47,6 +47,11 @@ behaviour. Two real defects surfaced in one afternoon.
 | UNKNOWN ≠ LOW in `companyQuality` / `hiringVelocity` | ✅ fixed and verified |
 | Full module audit against the invariant | ✅ done 2026-08-13 — see below |
 | Evaluation-latency measurement | ✅ done — cap is NOT the bottleneck |
+| Blind judging — 6,907 ACTIVE jobs with no description | ✅ fixed 2026-08-23 — `descriptionSource` + `INSUFFICIENT_EVIDENCE` guard |
+| Description repair (5,270 recovered) + re-judge | ✅ measured 2026-08-23 — **0** of 223 escaped `NOT_DEVELOPMENT` |
+| Embedding staleness (changed body kept a stale vector) | ✅ fixed 2026-08-23 — invariant + regression tests |
+| Workers killed by one malformed HTTP response | ✅ fixed 2026-08-23 — 592-minute silent outage; process guard |
+| **Embedding sweeper / reconciliation** | ⬜ **open** — no producer but ingest; see correction below |
 | Daily-cycle baseline (≥5 days) | ⬜ **the remaining gate** |
 
 ### Module audit vs UNKNOWN ≠ LOW (2026-08-13)
@@ -118,6 +123,47 @@ toward 90% means the system is self-healing faster than intake, so worker
 concurrency, batch size and provider limits are *not* touched. Re-run
 `scripts/pipeline-health.sql` to re-check; do not re-litigate from a single
 coverage percentage again.
+
+#### ⛔ CORRECTED 2026-08-23 — "nothing is stranded" was wrong
+
+> The paragraph above says *"There is no chronic bottleneck and nothing is
+> stranded."* That is **false**, and it is corrected here rather than quietly
+> deleted, per this file's own convention.
+
+**What the 2026-08-13 analysis could not see.** It segmented coverage by
+*ingestion day* and found yesterday's cohort at 100%. A cohort measurement
+cannot distinguish a job that is **in flight** from one that is **permanently
+stranded** — both look like "not embedded yet", and the stranded ones are
+invisible the moment their cohort is no longer today's.
+
+**Measured 2026-08-23:**
+
+| Evidence | Reading |
+|---|---|
+| ACTIVE jobs with no vector | **1,673**, none of them in flight |
+| Newly stranded during one repair episode | **79**, inside two hours |
+| Embed batches failed and discarded | 10 (`job stalled more than allowable limit`) |
+| Queue state while 79 sat stranded | `active:0 waiting:0 failed:0` — **clean** |
+
+**Mechanism.** `enqueueEmbeddings` is the only producer and it runs once, at
+ingest. Nothing sweeps behind it. Any id lost between ingest and embed is lost
+permanently: the job stays ACTIVE, looks healthy in every count, and can never
+be retrieved because the candidate query INNER JOINs `job_embeddings`. The
+queue options set `removeOnFail: true`, so the failed batch — the only record
+that those ids still needed embedding — was destroyed on the way out.
+
+This is a **recurrence**. `cc1ccd8` repaired 1,780 stranded jobs on 2026-08-21
+and concluded they were "a stranded remnant and not an ongoing leak". That
+conclusion was wrong by the same reasoning error as above.
+
+**Fixed:** the embedding invariant (a changed description clears its vector and
+re-enqueues it), `repairDescriptions` now enqueues what it clears, and failures
+are retained instead of discarded.
+
+**Still open:** there is no sweeper. The invariant that must hold is *every job
+requiring an embedding is eventually either embedded or explicitly observable
+as failed — never silently stranded.* Until a reconciliation pass exists, a
+lost id still requires running `repair-embeddings.ts` by hand.
 
 ### ⛔ The scoreboard — `fresh actionable opportunities/day` — **INVALIDATED 2026-08-14**
 
@@ -230,6 +276,48 @@ Indian roles live on channels we don't touch.
 | Darwinbox / Zoho Recruit / freshteam | `ROADMAP.md:44` estimates ~2× India supply | med | none (public boards) |
 | RSS / sitemap / JSON-LD ingestion | Google documents `JobPosting` structured data | low | none |
 | `DiscoverySource` plugin contract | stop each source touching the core | med | refactor risk |
+
+### Verified status — 2026-08-23
+
+Checked against the code, not reconstructed from conversation.
+
+| # | Item | Status |
+|---|---|---|
+| 1 | `ADZUNA_APP_ID` | 🔴 **credential only** — adapter `adzuna.ts` + spec exist; `APP_ID` is a 2-char placeholder, `APP_KEY` is real |
+| 2 | Gmail connector (OAuth) | 🔴 not built — 0 files |
+| 3 | LinkedIn job-alert parser | 🔴 not built |
+| 4 | Naukri / Indeed alert parsers | 🔴 not built |
+| 5 | Darwinbox / Zoho Recruit / freshteam | ⚫ Darwinbox **blocked** (ADR-8 + TLS-fingerprint WAF, investigation closed); Zoho/freshteam unevaluated |
+| 6 | RSS / sitemap / JSON-LD ingestion | 🟡 partial — JSON-LD parsed inside `breezy.ts` only; no `rss.ts`, no `sitemap.ts` |
+| 7 | `DiscoverySource` plugin contract | 🔴 not built |
+
+Also shipped under item 5: **Workday** — `CRAWLABLE_PROVIDERS` 8 → 9, plus a
+registry-integrity test asserting `ADAPTERS === CRAWLABLE_PROVIDERS` (an adapter
+had shipped enabled nowhere for two days).
+
+**Why more raw ATS volume is not progress** — actionable rate per source,
+measured 2026-08-23:
+
+| Source | ACTIVE | Actionable | Rate |
+|---|---|---|---|
+| jooble | 94 | 12 | **12.8%** |
+| freehire | 1,854 | 200 | **10.8%** |
+| workday | 4,966 | 46 | 0.93% |
+| greenhouse | 11,846 | 7 | **0.06%** |
+| ashby | 4,220 | 5 | 0.12% |
+
+Greenhouse carries 6× freehire's volume and yields 3.5% of its actionable jobs.
+Of all judged jobs, `NOT_DEVELOPMENT` is 51.0% and `TARGET_ROLE_TOO_SENIOR` is
+24.2% — about half of everything that *is* a development role is too senior.
+That is this phase's problem statement, measured. The gate is not the lever:
+loosening it is already in *Deliberately rejected*.
+
+**Company universe / city seeding is background infrastructure, not a phase
+item.** The persistent Bengaluru universe stays — companies survive with zero
+jobs so a future opening is caught — but it is not the next feature. Company
+targeting cannot move either dominant loss bucket: a well-chosen company posting
+only senior roles still yields nothing, and the `NOT_DEVELOPMENT` half was
+re-judged on full descriptions and stayed refused.
 
 **Every source must emit provenance:** `source`, `sourceType`, `sourceUrl`,
 `retrievedAt`, `publishedAt`, `lastSeenAt`, `extractorVersion`, `confidence`,
