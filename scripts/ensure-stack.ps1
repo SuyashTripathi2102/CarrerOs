@@ -155,6 +155,21 @@ while ((Get-Date) -lt $deadline) {
 }
 if (-not $pgUp) { Log 'ERROR postgres not accepting connections - aborting'; exit 1 }
 
+# Component failures accumulate here instead of being logged and forgotten.
+# Until 2026-08-23 each ERROR was written to the log and then discarded, and the
+# script closed with an unconditional 'stack OK' and exit 0. A real incident
+# read:
+#     15:11:00 ERROR api did not become healthy
+#     15:11:19 stack OK
+# Anything reading the last line -- a human skimming, or any check keying on the
+# exit code -- saw a healthy stack while the API was down. A monitor whose
+# summary contradicts its own evidence is worse than no monitor, and it would
+# silently invalidate the >=5-day Phase 0 baseline.
+#
+# Postgres and Docker being up must never stand in for the API being up: they
+# are separate signals and are reported separately.
+$problems = New-Object System.Collections.Generic.List[string]
+
 # --- 3. API -----------------------------------------------------------------
 Remove-DuplicateProcs $API_PROC 'api' | Out-Null
 $apiHealthy = Test-Api
@@ -178,7 +193,12 @@ if (-not $apiHealthy) {
 
   $deadline = (Get-Date).AddSeconds($ApiWaitSeconds)
   while ((Get-Date) -lt $deadline -and -not (Test-Api)) { Start-Sleep -Seconds 5 }
-  if (Test-Api) { Log 'api healthy' } else { Log 'ERROR api did not become healthy' }
+  if (Test-Api) {
+    Log 'api healthy'
+  } else {
+    Log 'ERROR api did not become healthy'
+    $problems.Add('api did not become healthy')
+  }
 } else {
   Log 'api healthy (no action)'
 }
@@ -198,9 +218,17 @@ if ($workerProcs.Count -eq 0) {
   Start-Detached 'npm run dev' (Join-Path $RepoRoot 'apps\workers') (Join-Path $logDir 'workers.log')
   Start-Sleep -Seconds 15
   if (@(Get-NodeProcs $WORKER_PROC).Count -gt 0) { Log 'workers up' }
-  else { Log 'ERROR workers did not start' }
+  else {
+    Log 'ERROR workers did not start'
+    $problems.Add('workers did not start')
+  }
 } else {
   Log 'workers running (no action)'
 }
 
+if ($problems.Count -gt 0) {
+  Log "STACK NOT OK - $($problems -join '; ')"
+  exit 1
+}
 Log 'stack OK'
+exit 0

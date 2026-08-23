@@ -450,8 +450,20 @@ export class IngestService {
       // a description. See enum DescriptionSource.
       const descriptionSources = chunk.map((w) => w.job.descriptionSource ?? null);
 
+      // The PRE-upsert body, captured before the INSERT runs. EXCLUDED is only
+      // legal inside ON CONFLICT DO UPDATE SET and its WHERE -- referencing it
+      // from RETURNING raises 42P01 "invalid reference to FROM-clause entry for
+      // table excluded", which broke every company sync on 2026-08-23 until the
+      // logs were read. RETURNING can only see the row as it now stands, so the
+      // old value has to be read separately and compared in code.
+      const previous = await this.prisma.job.findMany({
+        where: { companyId, externalId: { in: chunkExternalIds } },
+        select: { id: true, description: true },
+      });
+      const previousBody = new Map(previous.map((r) => [r.id, r.description ?? '']));
+
       const rows = await this.prisma.$queryRaw<
-        { id: string; inserted: boolean; description_changed: boolean }[]
+        { id: string; inserted: boolean; description: string }[]
       >`
         INSERT INTO jobs (
           id, "companyId", "externalId", title, description, url,
@@ -493,11 +505,10 @@ export class IngestService {
           fingerprint = EXCLUDED.fingerprint,
           status = 'ACTIVE',
           "lastSeenAt" = now()
-        RETURNING id, (xmax = 0) AS inserted,
-                  -- Did the BODY actually change? xmax=0 marks an insert; for an
-                  -- update this compares the incoming text to what was stored.
-                  (xmax <> 0 AND jobs.description IS DISTINCT FROM EXCLUDED.description)
-                    AS description_changed
+        -- xmax = 0 marks a row this statement INSERTED. The description column
+        -- body as it now stands; it is compared against previousBody above to
+        -- decide whether the vector went stale.
+        RETURNING id, (xmax = 0) AS inserted, description
       `;
 
       const restaleIds: string[] = [];
@@ -507,7 +518,12 @@ export class IngestService {
           newJobIds.push(r.id);
         } else {
           updated++;
-          if (r.description_changed) restaleIds.push(r.id);
+          const before = previousBody.get(r.id);
+          // `undefined` means the row was not there when we looked, so there is
+          // no old body to have gone stale. Only a genuine change re-embeds --
+          // every crawl re-upserts every posting, and clearing unconditionally
+          // would re-embed the whole corpus on every tick.
+          if (before !== undefined && before !== (r.description ?? '')) restaleIds.push(r.id);
         }
       }
 
