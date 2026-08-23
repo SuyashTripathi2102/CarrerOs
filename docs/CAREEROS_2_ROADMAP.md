@@ -51,7 +51,7 @@ behaviour. Two real defects surfaced in one afternoon.
 | Description repair (5,270 recovered) + re-judge | ✅ measured 2026-08-23 — **0** of 223 escaped `NOT_DEVELOPMENT` |
 | Embedding staleness (changed body kept a stale vector) | ✅ fixed 2026-08-23 — invariant + regression tests |
 | Workers killed by one malformed HTTP response | ✅ fixed 2026-08-23 — 592-minute silent outage; process guard |
-| **Embedding sweeper / reconciliation** | ⬜ **open** — no producer but ingest; see correction below |
+| Embedding sweeper / reconciliation | ✅ shipped 2026-08-23 — 30m tick, 30m grace window; verified live: found 7 stranded, re-enqueued, all embedded |
 | Daily-cycle baseline (≥5 days) | ⬜ **the remaining gate** |
 
 ### Module audit vs UNKNOWN ≠ LOW (2026-08-13)
@@ -160,10 +160,15 @@ conclusion was wrong by the same reasoning error as above.
 re-enqueues it), `repairDescriptions` now enqueues what it clears, and failures
 are retained instead of discarded.
 
-**Still open:** there is no sweeper. The invariant that must hold is *every job
-requiring an embedding is eventually either embedded or explicitly observable
-as failed — never silently stranded.* Until a reconciliation pass exists, a
-lost id still requires running `repair-embeddings.ts` by hand.
+**Closed 2026-08-23.** A 30-minute sweep now re-enqueues ACTIVE jobs that are
+vector-less past a 30-minute grace window — the grace window being the whole
+point, since only age distinguishes *stranded* from *in flight*. Verified on
+live data the same day: it found 7 jobs whose enqueue was lost during an API
+crash, logged them at WARN, and all 7 embedded. `repair-embeddings.ts` remains
+for bulk recovery but is no longer the only mechanism.
+
+The invariant now holds: *every job requiring an embedding is eventually either
+embedded or explicitly observable as failed — never silently stranded.*
 
 ### ⛔ The scoreboard — `fresh actionable opportunities/day` — **INVALIDATED 2026-08-14**
 
