@@ -59,3 +59,50 @@ describe('why deletion is the mechanism, not an update', () => {
     expect(embedderWouldTouch(afterInvalidation)).toBe(true);
   });
 });
+
+
+/**
+ * WHY THIS FILE WAS NOT ENOUGH (2026-08-23).
+ *
+ * Every test above passes against a MIRROR of the decision, restated in
+ * TypeScript. That pins the rule, and it is worth pinning — but it cannot
+ * execute the SQL the rule actually lives in.
+ *
+ * So when the upsert shipped with
+ *
+ *   RETURNING id, (xmax = 0) AS inserted,
+ *             (xmax <> 0 AND jobs.description IS DISTINCT FROM EXCLUDED.description)
+ *
+ * all 576 tests stayed green while EVERY company sync threw 42P01: the
+ * ON CONFLICT alias is only in scope inside DO UPDATE SET and its WHERE, never
+ * in RETURNING. Crawls ran, found jobs, and lost them for three hours.
+ *
+ * A mirror test must never be mistaken for coverage of the statement it
+ * mirrors. These read the real source and fail on the shape that broke.
+ */
+describe('the upsert SQL itself', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source: string = fs.readFileSync(path.join(__dirname, 'ingest.service.ts'), 'utf8');
+
+  // Prose mentions RETURNING too. Only executable SQL is of interest here.
+  const sql = source
+    .replace(/^[ \t]*\/\/.*$/gm, '')
+    .replace(/^[ \t]*--.*$/gm, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+
+  it('never references EXCLUDED from a RETURNING clause', () => {
+    const blocks = [...sql.matchAll(/\n[ \t]*RETURNING[\s\S]*?`/g)].map((m) => m[0]);
+    expect(blocks.length).toBeGreaterThan(0);
+    for (const block of blocks) {
+      expect(block).not.toMatch(/EXCLUDED/i);
+    }
+  });
+
+  it('still detects a changed body — the invariant was not dropped to fix the crash', () => {
+    // Guards the other direction: deleting the feature would also make the
+    // test above pass.
+    expect(source).toMatch(/previousBody/);
+    expect(source).toMatch(/restaleIds\.push/);
+  });
+});
