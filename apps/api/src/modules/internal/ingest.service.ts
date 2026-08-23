@@ -13,6 +13,17 @@ import { adaptiveTier, TIER_INTERVAL_MS, type Tier } from './crawl-scheduling';
 import { decideReconciliation } from './crawl-reconciliation';
 import { EMBED_JOBS_QUEUE } from './internal.constants';
 
+/**
+ * How old a vector-less ACTIVE job must be before the sweeper calls it
+ * stranded rather than in flight. Embedding normally completes in well under a
+ * minute (p50 0.32 h at the worst measured backlog); 30 minutes is far outside
+ * normal latency, so anything older has genuinely lost its enqueue.
+ */
+const EMBED_GRACE_MS = 30 * 60 * 1000;
+
+/** Bounded so one sweep cannot enqueue the entire corpus after an outage. */
+const EMBED_SWEEP_LIMIT = 2_000;
+
 export interface SyncResult {
   crawlRunId: string;
   found: number;
@@ -137,6 +148,68 @@ export class IngestService {
    *
    * Returns what changed so the repair can be measured rather than assumed.
    */
+  /**
+   * THE SWEEPER — the missing half of the embedding invariant.
+   *
+   * `enqueueEmbeddings` is the only producer of embed work and it runs exactly
+   * once, at ingest. Nothing sweeps behind it, so any id lost between ingest
+   * and embed is lost permanently: the job stays ACTIVE, looks healthy in every
+   * count, and can NEVER be retrieved, because the candidate query INNER JOINs
+   * `job_embeddings`. Measured 2026-08-23: 1,673 such jobs, 79 of them stranded
+   * inside two hours by embed batches that failed and were discarded.
+   *
+   * The invariant this restores:
+   *
+   *   every job requiring an embedding is eventually either embedded or
+   *   explicitly observable as failed — never silently stranded.
+   *
+   * THE GRACE PERIOD IS THE WHOLE DESIGN. A job ingested a minute ago also has
+   * no vector, and it is not stranded — it is in flight. The 2026-08-13
+   * analysis concluded "nothing is stranded" precisely because it could not
+   * tell those two apart: it segmented by ingestion day, and a cohort
+   * measurement reads both as "not embedded yet". Only age separates them, so
+   * this sweeps nothing younger than the grace window and re-enqueues the rest.
+   *
+   * Idempotent: `embedJobsByIds` filters on `embedding: null`, so re-enqueuing
+   * a job that has since been embedded is a no-op.
+   */
+  async reconcileEmbeddings(
+    limit = EMBED_SWEEP_LIMIT,
+  ): Promise<{ stranded: number; enqueued: number }> {
+    const cutoff = new Date(Date.now() - EMBED_GRACE_MS);
+
+    const [{ n }] = await this.prisma.$queryRaw<{ n: bigint }[]>`
+      SELECT count(*)::bigint AS n
+      FROM jobs j
+      LEFT JOIN job_embeddings e ON e."jobId" = j.id
+      WHERE j.status = 'ACTIVE' AND e."jobId" IS NULL AND j."firstSeenAt" < ${cutoff}
+    `;
+    const stranded = Number(n);
+    if (stranded === 0) return { stranded: 0, enqueued: 0 };
+
+    // Newest first: a job stranded today is likelier to still be open than one
+    // stranded weeks ago, and a bounded sweep should recover the useful ones
+    // first. The rest are picked up by the following ticks.
+    const rows = await this.prisma.$queryRaw<{ id: string }[]>`
+      SELECT j.id
+      FROM jobs j
+      LEFT JOIN job_embeddings e ON e."jobId" = j.id
+      WHERE j.status = 'ACTIVE' AND e."jobId" IS NULL AND j."firstSeenAt" < ${cutoff}
+      ORDER BY j."firstSeenAt" DESC
+      LIMIT ${limit}
+    `;
+    await this.enqueueEmbeddings(rows.map((r) => r.id));
+
+    // Logged whenever it fires, because a sweeper that silently finds work
+    // every single tick means the producer is leaking and the sweep is only
+    // masking it. Steady-state is expected to be zero.
+    this.logger.warn(
+      `[embedding-sweep] ${stranded} stranded job(s) past the ${EMBED_GRACE_MS / 60000}m grace ` +
+        `window — re-enqueued ${rows.length}`,
+    );
+    return { stranded, enqueued: rows.length };
+  }
+
   async repairDescriptions(
     source: string,
     updates: { externalId: string; description: string; descriptionSource: string }[],

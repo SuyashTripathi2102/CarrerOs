@@ -110,6 +110,16 @@ export class InternalController {
     return this.ingest.repairDescriptions(parsed.data.source, parsed.data.updates);
   }
 
+  /**
+   * Re-enqueue ACTIVE jobs that lost their embed enqueue. Idempotent and
+   * bounded; see IngestService.reconcileEmbeddings for why a grace period is
+   * what separates "stranded" from "in flight".
+   */
+  @Post('embeddings/reconcile')
+  reconcileEmbeddings() {
+    return this.ingest.reconcileEmbeddings();
+  }
+
   @Post('boards/ingest')
   ingestBoard(@Body() body: unknown) {
     const parsed = BoardBodySchema.safeParse(body);

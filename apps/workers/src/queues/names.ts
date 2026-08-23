@@ -20,6 +20,7 @@ export const QueueNames = {
   PLACES_DISCOVERY: 'places-discovery', // weekly city-based company discovery (Places API)
   CAREER_EXTRACT: 'career-extract', // deterministic extraction of custom career pages
   REPLAY_EXTRACT: 'replay-extract', // re-run the current extractor over stored HTML snapshots
+  EMBEDDING_SWEEP: 'embedding-sweep', // repeatable tick -> re-enqueue stranded embeddings
   RENDER_EXTRACT: 'render-extract', // render JS-app-shell pages, then the SAME extractor
 } as const;
 

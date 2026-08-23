@@ -46,6 +46,11 @@ export class ApiClient {
     return this.request('POST', '/internal/source-trust/recompute');
   }
 
+  /** Re-enqueue jobs whose embed enqueue was lost. Returns 0/0 when healthy. */
+  reconcileEmbeddings(): Promise<{ stranded: number; enqueued: number }> {
+    return this.request('POST', '/internal/embeddings/reconcile');
+  }
+
   deriveCompanySignals(): Promise<{ companies: number }> {
     return this.request('POST', '/internal/intelligence/derive-signals');
   }

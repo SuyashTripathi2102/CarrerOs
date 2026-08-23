@@ -14,6 +14,10 @@ import {
   startEvaluateMatchesWorker,
 } from './processors/evaluate-matches.processor';
 import {
+  ensureEmbeddingSweepSchedule,
+  startEmbeddingSweepWorker,
+} from './processors/embedding-sweep.processor';
+import {
   ensureDailyBriefSchedule,
   startDailyBriefWorker,
 } from './processors/daily-brief.processor';
@@ -49,10 +53,12 @@ async function main() {
     startReplayExtractWorker(api),
     startRenderExtractWorker(api),
     startEvaluateMatchesWorker(api),
+    startEmbeddingSweepWorker(api),
   ];
   await ensureRefreshSchedule();
   await ensureEvaluateMatchesSchedule();
   await ensureDailyBriefSchedule();
+  await ensureEmbeddingSweepSchedule();
   await ensurePlacesDiscoverySchedule();
   await ensureBoardSchedules();
   await ensureCareerExtractSchedule();
