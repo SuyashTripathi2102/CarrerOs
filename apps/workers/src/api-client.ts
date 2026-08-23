@@ -64,6 +64,17 @@ export class ApiClient {
   }
 
   /**
+   * Update description + provenance on jobs that already exist. Cannot insert,
+   * cannot retire — see IngestService.repairDescriptions.
+   */
+  repairDescriptions(
+    source: string,
+    updates: { externalId: string; description: string; descriptionSource: string }[],
+  ): Promise<{ matched: number; changed: number; unchanged: number; notFound: number }> {
+    return this.request('POST', '/internal/jobs/repair-descriptions', { source, updates });
+  }
+
+  /**
    * @param source          where the JOB came from (acquiredFrom)
    * @param discoverySource what introduced the COMPANY (discoveredBy), when it
    *                        differs from the board. Omit when the board is both.

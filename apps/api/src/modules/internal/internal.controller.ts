@@ -28,6 +28,27 @@ const SyncBodySchema = z.object({
   boardComplete: z.boolean().optional().default(true),
 });
 
+/**
+ * Repair descriptions on jobs that ALREADY exist. Update-only by construction.
+ *
+ * A normal re-crawl cannot be used for this: syncCompanyJobs reconciles, so any
+ * board that returned fewer rows than the corpus holds would retire the
+ * difference. Repairing 6,907 empty descriptions must not be able to delete a
+ * single job — the Workday truncation incident is exactly this shape.
+ */
+const RepairBodySchema = z.object({
+  source: z.string().min(1),
+  updates: z
+    .array(
+      z.object({
+        externalId: z.string().min(1),
+        description: z.string(),
+        descriptionSource: z.enum(['LIST', 'DETAIL', 'MISSING']),
+      }),
+    )
+    .max(2000),
+});
+
 const BoardBodySchema = z.object({
   /** Where the JOB came from — the ATS or board actually crawled (acquiredFrom). */
   source: z.string().min(1),
@@ -76,6 +97,17 @@ export class InternalController {
       parsed.data.jobs,
       parsed.data.boardComplete,
     );
+  }
+
+  /**
+   * Update description + provenance on existing rows. Never inserts, never
+   * retires, never touches any other column.
+   */
+  @Post('jobs/repair-descriptions')
+  repairDescriptions(@Body() body: unknown) {
+    const parsed = RepairBodySchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
+    return this.ingest.repairDescriptions(parsed.data.source, parsed.data.updates);
   }
 
   @Post('boards/ingest')

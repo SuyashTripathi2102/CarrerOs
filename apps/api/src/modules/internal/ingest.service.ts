@@ -126,6 +126,72 @@ export class IngestService {
    * No removed-detection here: a job leaving a board says nothing about the
    * company's own career page.
    */
+  /**
+   * Repair descriptions on jobs that already exist. UPDATE ONLY.
+   *
+   * Deliberately not a crawl: no insert, no reconciliation, no status change,
+   * no crawl_run. Matching is on (source, externalId) so a row can only ever be
+   * updated in place. An empty body is stored with descriptionSource MISSING
+   * rather than being skipped — "we looked and there is nothing" is a fact
+   * worth recording, and the gate holds those instead of judging them.
+   *
+   * Returns what changed so the repair can be measured rather than assumed.
+   */
+  async repairDescriptions(
+    source: string,
+    updates: { externalId: string; description: string; descriptionSource: string }[],
+  ): Promise<{ matched: number; changed: number; unchanged: number; notFound: number }> {
+    if (updates.length === 0) return { matched: 0, changed: 0, unchanged: 0, notFound: 0 };
+
+    // SET-BASED on purpose. The first version did one findFirst + one update
+    // PER ROW — 8,030 round trips for a 4,015-posting board — which exhausted
+    // the Prisma connection pool while the evaluation belt was also running,
+    // and the repair 500'd mid-board. Two statements do the same work.
+    const externalIds = updates.map((u) => u.externalId);
+    const existing = await this.prisma.job.findMany({
+      where: { source, externalId: { in: externalIds } },
+      select: { id: true, externalId: true, description: true },
+    });
+    const byExternalId = new Map(existing.map((e) => [e.externalId, e]));
+
+    const toWrite: { id: string; description: string; descriptionSource: string }[] = [];
+    let unchanged = 0;
+    for (const u of updates) {
+      const row = byExternalId.get(u.externalId);
+      if (!row) continue;
+      if ((row.description ?? '') === u.description) {
+        unchanged++;
+        continue;
+      }
+      toWrite.push({ id: row.id, description: u.description, descriptionSource: u.descriptionSource });
+    }
+
+    const matched = existing.length;
+    let changed = 0;
+    if (toWrite.length > 0) {
+      const ids = toWrite.map((w) => w.id);
+      const descs = toWrite.map((w) => w.description);
+      const provs = toWrite.map((w) => w.descriptionSource);
+      // One UPDATE ... FROM unnest, matching the batch-upsert style already
+      // used by batchUpsert. Touches description and provenance only — never
+      // status, never source, never anything reconciliation reads.
+      changed = await this.prisma.$executeRaw`
+        UPDATE jobs AS j
+        SET description = u.description,
+            "descriptionSource" = u.description_source::"DescriptionSource"
+        FROM unnest(${ids}::text[], ${descs}::text[], ${provs}::text[])
+          AS u(id, description, description_source)
+        WHERE j.id = u.id
+      `;
+    }
+
+    this.logger.log(
+      `[${source}] description repair: ${changed} changed, ${unchanged} already correct, ` +
+        `${updates.length - matched} not found`,
+    );
+    return { matched, changed, unchanged, notFound: updates.length - matched };
+  }
+
   async ingestBoardJobs(
     source: string,
     entries: BoardJob[],
