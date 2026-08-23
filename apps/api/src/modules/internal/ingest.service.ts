@@ -175,6 +175,11 @@ export class IngestService {
       // One UPDATE ... FROM unnest, matching the batch-upsert style already
       // used by batchUpsert. Touches description and provenance only — never
       // status, never source, never anything reconciliation reads.
+      // Same invariant as batchUpsert: a changed body means a stale vector.
+      // Clearing it lets the existing embed path rebuild it — nothing else can,
+      // because embedJobsByIds only looks at rows WHERE embedding IS NULL.
+      await this.prisma.jobEmbedding.deleteMany({ where: { jobId: { in: ids } } });
+
       changed = await this.prisma.$executeRaw`
         UPDATE jobs AS j
         SET description = u.description,
@@ -366,7 +371,9 @@ export class IngestService {
       // a description. See enum DescriptionSource.
       const descriptionSources = chunk.map((w) => w.job.descriptionSource ?? null);
 
-      const rows = await this.prisma.$queryRaw<{ id: string; inserted: boolean }[]>`
+      const rows = await this.prisma.$queryRaw<
+        { id: string; inserted: boolean; description_changed: boolean }[]
+      >`
         INSERT INTO jobs (
           id, "companyId", "externalId", title, description, url,
           location, country, "workMode", "salaryMin", "salaryMax", currency,
@@ -407,16 +414,47 @@ export class IngestService {
           fingerprint = EXCLUDED.fingerprint,
           status = 'ACTIVE',
           "lastSeenAt" = now()
-        RETURNING id, (xmax = 0) AS inserted
+        RETURNING id, (xmax = 0) AS inserted,
+                  -- Did the BODY actually change? xmax=0 marks an insert; for an
+                  -- update this compares the incoming text to what was stored.
+                  (xmax <> 0 AND jobs.description IS DISTINCT FROM EXCLUDED.description)
+                    AS description_changed
       `;
 
+      const restaleIds: string[] = [];
       for (const r of rows) {
         if (r.inserted) {
           created++;
           newJobIds.push(r.id);
         } else {
           updated++;
+          if (r.description_changed) restaleIds.push(r.id);
         }
+      }
+
+      /**
+       * THE EMBEDDING INVARIANT.
+       *
+       * A job's vector is built from its title + description. When the
+       * description changes the vector is stale, and nothing refreshes it:
+       * embedJobsByIds filters on `embedding: null` and the insert is
+       * ON CONFLICT DO NOTHING, so a stale vector survives forever.
+       *
+       * That is silent and it corrupts RETRIEVAL, which gates judging. The
+       * 2026-08-23 description repair hit it directly — 5,270 jobs had correct
+       * text and vectors built from an EMPTY body, so the right job could be
+       * invisible to the very query meant to find it.
+       *
+       * Deleting the row is what makes the existing path rebuild it: the job
+       * re-enters `embedding: null` and the next embed tick re-embeds it.
+       * Enqueued alongside genuinely new jobs below.
+       */
+      if (restaleIds.length > 0) {
+        await this.prisma.jobEmbedding.deleteMany({ where: { jobId: { in: restaleIds } } });
+        this.logger.log(
+          `[${source ?? 'ingest'}] ${restaleIds.length} description(s) changed — stale embeddings cleared for re-embedding`,
+        );
+        newJobIds.push(...restaleIds);
       }
     }
 
