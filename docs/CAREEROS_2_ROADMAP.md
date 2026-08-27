@@ -373,7 +373,7 @@ Checked against the code, not reconstructed from conversation.
 | 5 | Darwinbox / Zoho Recruit / freshteam | ⚫ Darwinbox **blocked** (ADR-8 + TLS-fingerprint WAF, investigation closed); Zoho/freshteam unevaluated |
 | 6 | RSS / sitemap / JSON-LD ingestion | 🟡 partial — JSON-LD parsed inside `breezy.ts` only; no `rss.ts`, no `sitemap.ts` |
 | 7 | `DiscoverySource` plugin contract | 🔴 not built |
-| **0** | **Evaluation throughput + surface recall** | 🟡 **NEW 2026-08-28 — do FIRST, see below** |
+| **0** | **Surface recall + age fairness** | 🟡 **NEW 2026-08-28 — do FIRST; measured, see below** |
 | **8** | **Classification-cost optimization** | 🟡 **NEW 2026-08-28 — before scaling supply, see below** |
 
 Also shipped under item 5: **Workday** — `CRAWLABLE_PROVIDERS` 8 → 9, plus a
@@ -406,6 +406,22 @@ re-judged on full descriptions and stayed refused.
 
 ### Sequencing — decided 2026-08-28, before Day 5 closed
 
+**Two tracks, kept separate.** Adding sources and reaching what we already found
+are different problems, and conflating them is how a pipeline ends up looking
+powerful while the user sees less:
+
+```
+DISCOVERY  sources -> ingestion -> classification -> eligibility -> judging
+           (gets us MORE good jobs)
+
+POLICY     freshness priority · age starvation · candidate selection ·
+           surface recall · LLM cost
+           (makes sure the good jobs we ALREADY found reach the user)
+```
+
+Right now the hole is in the second track: `/today` is discarding 56 of 59 APPLY
+decisions before ranking. Adding a source would not move that number by one.
+
 The original list is unchanged; the ORDER is. Two bottlenecks showed up in the
 baseline itself, and adding supply on top of either would make the product look
 more capable while making opportunities harder to reach.
@@ -426,21 +442,78 @@ already downstream of ingestion.
 The goal is not to collect the most jobs. It is to reach the good ones before
 they go stale.
 
-### 0. Evaluation throughput + surface recall — NEW, do first
+### 0. Surface recall + age fairness — NEW, do first
 
-| Symptom | Measured (Days 1-4) |
-|---|---|
-| Intake outruns evaluation | 2,000-2,500 in vs 700-900 judged per day |
-| APPLY decisions that can be seen | 3-4 of ~60, stable across 5 days |
+**Measured 2026-08-28 (read-only, during Day 5). This section replaces an
+earlier claim in this file that "intake outruns evaluation" — that was wrong,
+and the correction is the useful part.**
 
-The second is the `surfaceable_apply` gap already recorded above: `browseByFit`
-fills its pool with `ORDER BY (decidedAt IS NOT NULL) DESC, cosine LIMIT 72`, so
-similarity still decides which APPLYs are *eligible to display*. Both are now
-collected daily in `phase0_daily_baseline`, so any fix has a real before/after.
+#### The wrong diagnosis, and why
 
-Neither is a scoring change dressed up as a bug fix: **do not loosen the gate,
-and do not lower a threshold to make the screen fuller.** See *Deliberately
-rejected*.
+It compared RAW intake (2,000–2,500 jobs/day) against evaluation (700–900/day)
+and concluded the pool was growing. But only ~32% of intake is ever eligible:
+
+```
+ACTIVE         39,909
+embedded       39,909   100%  (the sweeper is holding)
+India/remote   18,542
+fresh <=45d    12,859
+sim >= 0.45    12,859   <- MIN_SIMILARITY filters NOTHING. Do not tune it.
+undecided       1,514   <- the actual backlog
+```
+
+Eligible inflow is **~770/day** against **760–920/day judged**. Judging capacity
+is healthy and the backlog is NOT growing. Comparing a funnel's top to its
+bottom is how you invent a bottleneck that isn't there.
+
+#### The real finding: age starvation
+
+The 1,514 undecided are not a fresh buffer:
+
+| tier | age | undecided | share |
+|---|---|---|---|
+| 0 | 0–7d — judged first | 332 | 21.9% |
+| 1 | 8–14d | 265 | 17.5% |
+| 2 | 15–30d | 538 | 35.5% |
+| 3 | 31–45d — **expires unjudged** | 379 | 25.0% |
+
+Tier-0 inflow alone (~770/day) consumes essentially the whole belt, so tiers 1–3
+are starved and **379 jobs will reach the 45-day cutoff having never been
+judged**. This is the fresh-first ordering working exactly as designed; the side
+effect was simply never measured.
+
+**This is a POLICY question, not a capacity bug**, and it is deliberately left
+open: should CareerOS ever judge a 30-day-old Indian backend role, or is that
+genuinely stale? Decide it AFTER the surface fix below, with numbers rather than
+instinct. Do not "fix" it by raising the cap — capacity is not the constraint.
+
+#### The immediate win: candidate selection is ordered by the wrong thing
+
+`browseByFit` builds its pool with `ORDER BY (decidedAt IS NOT NULL) DESC,
+cosine LIMIT 72`. So similarity decides which decisions are ELIGIBLE TO BE SEEN,
+and similarity is not the decision. Measured against the live corpus:
+
+| pool construction | APPLY | CONSIDER |
+|---|---|---|
+| **A — current: cosine, LIMIT 72** | **3** | 20 |
+| **B — opportunityScore, LIMIT 72** | **47** | 25 |
+| C — cosine, LIMIT 200 | 9 | 40 |
+| D — total available | 59 | 286 |
+
+**One ORDER BY clause takes APPLY from 3 to 47 at the same pool size and the
+same cost.** Enlarging the pool to 200 only reaches 9, so the problem is
+ordering, not size — throwing capacity at it barely helps.
+
+Sharpest statement of the loss: `/today` renders the top 2 APPLY cards. It
+currently picks the best of **3** when it should pick the best of **59** — which
+is why the corpus's best job (opportunity 94.5) cannot appear while an 84.5
+does.
+
+**This changes SELECTION, not JUDGMENT.** No scoring module, threshold,
+eligibility rule or verdict cutoff is touched. Required before it ships:
+BEFORE/AFTER (the table above is the BEFORE), affected jobs, verdict changes
+(expected: none), and a regression test pinning selection-by-decision so it
+cannot silently revert to cosine.
 
 ### 8. Classification-cost optimization — NEW, before scaling supply
 
