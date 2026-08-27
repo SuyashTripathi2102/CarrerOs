@@ -373,6 +373,8 @@ Checked against the code, not reconstructed from conversation.
 | 5 | Darwinbox / Zoho Recruit / freshteam | ⚫ Darwinbox **blocked** (ADR-8 + TLS-fingerprint WAF, investigation closed); Zoho/freshteam unevaluated |
 | 6 | RSS / sitemap / JSON-LD ingestion | 🟡 partial — JSON-LD parsed inside `breezy.ts` only; no `rss.ts`, no `sitemap.ts` |
 | 7 | `DiscoverySource` plugin contract | 🔴 not built |
+| **0** | **Evaluation throughput + surface recall** | 🟡 **NEW 2026-08-28 — do FIRST, see below** |
+| **8** | **Classification-cost optimization** | 🟡 **NEW 2026-08-28 — before scaling supply, see below** |
 
 Also shipped under item 5: **Workday** — `CRAWLABLE_PROVIDERS` 8 → 9, plus a
 registry-integrity test asserting `ADAPTERS === CRAWLABLE_PROVIDERS` (an adapter
@@ -401,6 +403,109 @@ jobs so a future opening is caught — but it is not the next feature. Company
 targeting cannot move either dominant loss bucket: a well-chosen company posting
 only senior roles still yields nothing, and the `NOT_DEVELOPMENT` half was
 re-judged on full descriptions and stayed refused.
+
+### Sequencing — decided 2026-08-28, before Day 5 closed
+
+The original list is unchanged; the ORDER is. Two bottlenecks showed up in the
+baseline itself, and adding supply on top of either would make the product look
+more capable while making opportunities harder to reach.
+
+```
+Day 5 closes -> review the 5 days
+  -> 0. evaluation throughput + surface recall   <- NEW, first
+  -> 8. classification-cost optimization         <- NEW, before scaling
+  -> 1. Adzuna -> 2. Gmail -> 3. LinkedIn -> 4. Naukri/Indeed -> ...
+```
+
+**Why not Adzuna first.** Measured across Days 1-4: intake is **2,000-2,500 new
+jobs/day** against **700-900 evaluated/day**, so the unevaluated pool grows every
+day. And of ~60 APPLY decisions, **3-4 reach `/today`** — about 5%. Another
+source multiplies the numerator of a funnel whose two narrowest points are
+already downstream of ingestion.
+
+The goal is not to collect the most jobs. It is to reach the good ones before
+they go stale.
+
+### 0. Evaluation throughput + surface recall — NEW, do first
+
+| Symptom | Measured (Days 1-4) |
+|---|---|
+| Intake outruns evaluation | 2,000-2,500 in vs 700-900 judged per day |
+| APPLY decisions that can be seen | 3-4 of ~60, stable across 5 days |
+
+The second is the `surfaceable_apply` gap already recorded above: `browseByFit`
+fills its pool with `ORDER BY (decidedAt IS NOT NULL) DESC, cosine LIMIT 72`, so
+similarity still decides which APPLYs are *eligible to display*. Both are now
+collected daily in `phase0_daily_baseline`, so any fix has a real before/after.
+
+Neither is a scoring change dressed up as a bug fix: **do not loosen the gate,
+and do not lower a threshold to make the screen fuller.** See *Deliberately
+rejected*.
+
+### 8. Classification-cost optimization — NEW, before scaling supply
+
+**Not urgent, and recorded so it is not rediscovered.** The `$8/day` budget cap
+is NOT binding (actual: $5.26-$5.86/day), and credit runs to 2026-11-25. This
+becomes the constraint only once Adzuna/Gmail/Naukri multiply intake.
+
+**Correcting an earlier claim in this file's own spirit:** the eligibility gate
+is *deterministic and free* — a refusal costs no LLM call, verified live
+(`recorded 2 gate refusals as decided SKIPs`, zero AI calls). The cost sits one
+step EARLIER, in classification, which must run on every job before the gate can
+use its output:
+
+```
+new job -> LLM CLASSIFICATION (paid) -> eligibility gate (free) -> verdict
+```
+
+Measured 2026-08-27, 805 classifications:
+
+| primaryFunction | jobs | share |
+|---|---|---|
+| SOFTWARE_ENGINEERING | 186 | **23.1%** |
+| everything else (OTHER, Sales, Support, PM, Design, QA, Data...) | 619 | **76.9%** |
+
+So ~77% of LLM spend establishes that a job was never software engineering.
+
+**a. Batch utilization — lowest risk, do first.** `CLASSIFY_BATCH = 5` but the
+measured average is **1.54 jobs per call**, because jobs arrive in dribs and
+batches never fill. The fixed prompt overhead is therefore paid ~3x more often
+than necessary. Buffer arrivals up to a bounded wait, then classify. No quality
+risk, no recall risk.
+
+**b. Deterministic title pre-filter — biggest lever, must be EARNED.** Only for
+titles proven safe to exclude. The danger is not the obvious cases:
+
+```
+almost certainly NOT SWE     Sales Executive · Recruiter · HR Manager ·
+                             Accountant · Customer Success · Graphic Designer
+
+MUST STILL GO TO THE LLM     QA Engineer · DevOps · SRE · Data Engineer ·
+                             ML Engineer · Solutions Engineer ·
+                             Security Engineer · Technical Consultant ·
+                             Platform Engineer
+```
+
+That second row is where a naive blacklist destroys recall, and CareerOS has not
+yet decided how it treats those roles for this profile.
+
+**c. Shadow mode is mandatory.** The filter must run alongside the LLM without
+suppressing anything until measured:
+
+```
+prefilter NO + LLM NO    -> safe agreement
+prefilter NO + LLM YES   -> FALSE NEGATIVE, a silently lost opportunity
+```
+
+The second number must be **zero** on a large held-out sample before the rule is
+allowed to skip a single call. This is the same failure class as the 6,907
+blind-judged jobs and the 1,673 stranded embeddings: cheap to cause, invisible
+once caused.
+
+**d. REJECTED: shrinking `JD_CHARS` (6,000).** Saving tokens by sending less of
+the description recreates the blind-judging bug this phase exists to close. Do
+not save money by making the classifier blind. Save it by not asking questions
+answerable without the LLM.
 
 **Every source must emit provenance:** `source`, `sourceType`, `sourceUrl`,
 `retrievedAt`, `publishedAt`, `lastSeenAt`, `extractorVersion`, `confidence`,
