@@ -1204,12 +1204,31 @@ export class MatchingService {
       LEFT JOIN company_watches cw ON cw."companyId" = c.id AND cw."userId" = ${userId}
       LEFT JOIN company_intelligence ci ON ci."companyId" = c.id
       WHERE (${indiaOnly}::boolean = false OR j.country = 'IN' OR j."workMode" = 'REMOTE')
-      -- Evaluated jobs first, THEN fill by similarity. Without this the pool is
-      -- a pure top-N cosine slice whose cutoff (0.8037 when measured) sat above
-      -- most APPLY jobs, so the decision engine's best picks could not be shown
-      -- at all. An approved job must never be excluded for being 0.02 less
-      -- lexically similar than the 200th nearest neighbour.
-      ORDER BY (m."decidedAt" IS NOT NULL) DESC, je.vector <=> re.vector
+      -- SELECTION IS BY DECISION, NOT BY SIMILARITY.
+      --
+      -- Evaluated jobs first (the 2026-08-15 fix), but the second key used to be
+      -- cosine, and that was still the bug wearing a smaller hat: with ~8,700
+      -- evaluated jobs the pool filled entirely from them ORDERED BY SIMILARITY,
+      -- so cosine decided which decisions were eligible to be SEEN -- and cosine
+      -- is not the decision.
+      --
+      -- Measured 2026-08-28 against the live corpus, same LIMIT, same universe:
+      --
+      --   cosine, LIMIT 72             APPLY  3   CONSIDER 20
+      --   opportunityScore, LIMIT 72   APPLY 47   CONSIDER 25
+      --   cosine, LIMIT 200            APPLY  9   CONSIDER 40   <- size does not fix it
+      --   total available              APPLY 59   CONSIDER 286
+      --
+      -- /today renders the top 2 APPLY cards: it was picking the best of 3 when
+      -- 59 existed, which is why the corpus's best job (opportunity 94.5) could
+      -- not appear while an 84.5 did.
+      --
+      -- Third key stays cosine: it orders the UNDECIDED tail, whose
+      -- opportunityScore is NULL by definition (a score it has not earned), and
+      -- similarity is the only honest signal there.
+      ORDER BY (m."decidedAt" IS NOT NULL) DESC,
+               m."opportunityScore" DESC NULLS LAST,
+               je.vector <=> re.vector
       LIMIT ${pool}
     `;
 
