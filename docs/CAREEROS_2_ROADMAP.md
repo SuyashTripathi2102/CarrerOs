@@ -414,7 +414,7 @@ Checked against the code, not reconstructed from conversation.
 | 5 | Darwinbox / Zoho Recruit / freshteam | ⚫ Darwinbox **blocked** (ADR-8 + TLS-fingerprint WAF, investigation closed); Zoho/freshteam unevaluated |
 | 6 | RSS / sitemap / JSON-LD ingestion | 🟡 partial — JSON-LD parsed inside `breezy.ts` only; no `rss.ts`, no `sitemap.ts` |
 | 7 | `DiscoverySource` plugin contract | 🔴 not built |
-| **0** | **Surface recall + age fairness** | 🟡 **NEW 2026-08-28 — do FIRST; measured, see below** |
+| **0** | **Surface recall + age fairness** | ✅ **CLOSED 2026-08-29** — Q2 shipped (APPLY 3→47); Q1 measured, fresh-first retained |
 | **8** | **Classification-cost optimization** | 🟡 **NEW 2026-08-28 — before scaling supply, see below** |
 
 Also shipped under item 5: **Workday** — `CRAWLABLE_PROVIDERS` 8 → 9, plus a
@@ -527,6 +527,50 @@ effect was simply never measured.
 open: should CareerOS ever judge a 30-day-old Indian backend role, or is that
 genuinely stale? Decide it AFTER the surface fix below, with numbers rather than
 instinct. Do not "fix" it by raising the cap — capacity is not the constraint.
+
+#### ✅ Q1 CLOSED 2026-08-29 — fresh-first RETAINED, on evidence
+
+Measured read-only before any code was considered. Age genuinely predicts worse
+outcomes, among jobs that were actually judged:
+
+| age when judged | judged | APPLY | actionable % |
+|---|---|---|---|
+| 0–7d | 9,109 | **59** | **3.05%** |
+| 8–14d | 2,056 | 9 | 2.63% |
+| 15–30d | 2,466 | 8 | 1.62% |
+| 31–45d | 1,289 | **0** | **1.16%** |
+
+**Zero APPLY from 1,289 jobs judged at 31–45 days.** Every current APPLY came
+from the 0–7d bucket. Not a sampling artifact: those judgements are spread over
+many days (142, 69, 32, 459, …) and every one of them returned 0 APPLY.
+
+Similarity is **identical across tiers (0.737)**, so this is not a retrieval
+effect — old jobs look just as relevant and judge far worse.
+
+Counterfactual policies, all net losses:
+
+| policy | actionable gained | fresh actionable lost | net |
+|---|---|---|---|
+| **A — current fresh-first** | — | — | **baseline** |
+| B — reserve 10% for 31–45d | +0.89/day | −2.35/day | −1.46/day, −0.5 APPLY |
+| C — reserve 20% | +1.79/day | −4.70/day | −2.91/day, −1.0 APPLY |
+| D — aging boost | — | — | strictly worse than A |
+
+Letting the 365 currently-expiring jobs age out costs ~4 CONSIDER and 0 APPLY.
+Even at the statistical upper bound (rule of three on 0/1,289 → ≤0.23%), those
+365 would yield **less than one APPLY**.
+
+**Fresh-first is no longer a convenient default; it is evidence-supported.**
+Reserving capacity would directly reduce *relevant new jobs/day*, which is the
+roadmap's own success metric.
+
+**Recorded caveat, not blocking:** the belt's inspection/throughput accounting is
+not fully reconciled — reconcile logs show ~100 inspected per tick across ~144
+ticks/day, which does not obviously square with ~770 judged/day. Most
+inspections are free gate refusals, but the exact accounting was not traced.
+This does NOT affect the analysis above, which rests on observed yield RATES
+rather than absolute capacity. **Do not attempt to raise throughput until that
+accounting is understood** — it would be tuning something not yet measured.
 
 #### The immediate win: candidate selection is ordered by the wrong thing
 
