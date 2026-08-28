@@ -600,6 +600,40 @@ BEFORE/AFTER (the table above is the BEFORE), affected jobs, verdict changes
 (expected: none), and a regression test pinning selection-by-decision so it
 cannot silently revert to cosine.
 
+### Google Places is NOT a substitute for a curated city map — measured 2026-08-29
+
+Recorded so this is not re-proposed. Places was tried as a licensing-clean
+replacement for startup-map seeding (it returns name + website + location under
+a paid Google API, so no per-site terms review). **It does not work**, for a
+reason no amount of key configuration fixes.
+
+Places ranks **Maps business listings by local-SEO relevance**, not by being a
+real tech employer. Running this file's own query templates against Hyderabad:
+
+```
+"tech startup in Hyderabad"       Rational Technologies · Access Info Sources ·
+                                  NowFloats · T-Hub Phase 2 · Deeploop
+"SaaS company in Hyderabad"       ONE result: "SaaS SoftPro Leaders Pvt. Ltd."
+"software product company in …"   mTouch Labs · Conquerors · Accellor · Softpal
+```
+
+Of ~30 results across four queries, **2** appeared in a 263-company curated list
+of the same city. Places surfaced none of Darwinbox, HighRadius, Skyroot,
+NxtWave, Keka, Zenoti, Zomato or Zuddl — the actual engineering employers —
+while returning firms with "Best Software Company in Hyderabad" in their trading
+name. A company that does not need Maps SEO does not rank on Maps.
+
+**The curation is the value.** This is the Bengaluru lesson one level up: more
+companies is not more relevant companies, and Places would have supplied
+hundreds of small IT-services shops at real classification cost.
+
+`PLACES_API_KEY` is deliberately left EMPTY; `places-city-discovery` skips
+silently without it, so the weekly sweep cannot fire. Do not wire it back in
+expecting a company universe.
+
+(The legacy Places API also returns no `website` field — it needs a second Place
+Details call per result — so the fallback is worse, not just older.)
+
 ### 8. Classification-cost optimization — NEW, before scaling supply
 
 **Not urgent, and recorded so it is not rediscovered.** The `$8/day` budget cap
