@@ -55,7 +55,7 @@ behaviour. Two real defects surfaced in one afternoon.
 | Two competing Opportunity Scores | ✅ resolved — reconciled 2026-08-23 on all three surfaces |
 | Baseline collector | ✅ shipped 2026-08-23 — `scripts/phase0-baseline.sql` + `CareerOS-Phase0-Baseline` task, daily 23:45, idempotent per day |
 | Surfaceable-APPLY gap (cosine caps the pool) | ⬜ open — measured daily, NOT fixed; a matching-path change needs BEFORE/AFTER |
-| Daily-cycle baseline (≥5 days) | ⬜ **the remaining gate** — Day 1 = 2026-08-24. 2026-08-23 is excluded: 592-minute worker outage + 3h ingestion failure |
+| Daily-cycle baseline (≥5 days) | ✅ **CLOSED 2026-08-28** — 5 clean days, 2026-08-24 → 08-28. Frozen below as the BEFORE |
 
 #### Baseline start — recorded 2026-08-23 18:45 IST
 
@@ -79,6 +79,47 @@ must not look like that.
 
 Do not intervene to make a day green. A genuine failure is a result, not a
 problem to be tidied away before it is recorded.
+
+#### ✅ PHASE 0 CLOSED — the five-day baseline, frozen 2026-08-28
+
+The BEFORE state. Every later change to discovery, evaluation or surfacing is
+measured against this table, not against memory.
+
+| day | new India | judged that day | APPLY | reachable | crawls ok | failed | stranded |
+|---|---|---|---|---|---|---|---|
+| 08-24 | 1,441 | — | 59 | 3 | 11,144 | 0 | 0 |
+| 08-25 | 1,712 | 828 | 61 | 3 | 7,514 | 0 | 0 |
+| 08-26 | 1,462 | 909 | 61 | 4 | 11,398 | 0 | 0 |
+| 08-27 | 1,793 | 761 | 59 | 3 | 10,666 | 0 | 0 |
+| 08-28 | 1,298 | 588 | 60 | 3 | 11,468 | 0 | 0 |
+| **avg** | **1,541** | **~770** | **60** | **3.2** | | **0** | **0** |
+
+**52,190 crawls, zero failures, zero stranded embeddings on every single day.**
+
+The four questions, answered:
+
+| | Answer |
+|---|---|
+| **Supply** | ~1,541 new India/remote jobs/day entering |
+| **Evaluation** | ~770/day judged; candidate backlog **flat** (1,514 → 1,504). NOT a bottleneck |
+| **Decision** | ~60 APPLY and ~290 CONSIDER standing |
+| **Surface** | **3.2 of 60 reachable — 5.3%.** This is the hole |
+
+**Known limitation, recorded rather than silently fixed:** `/today` can reach
+about 5% of the APPLY decisions the engine produces, stable across all five
+days. Cause and remedy are measured in Phase 1 item 0. It is NOT fixed inside
+this baseline, so the BEFORE stays honest.
+
+**The days were not quiet, and that is the stronger result.** The window
+survived a reboot (13 min, Day 4), a suspend that stranded 71 embeddings (Day 5,
+recovered automatically by the sweeper), and a 66-minute power loss (Day 5,
+12:00 IST hour missing entirely). Nothing failed, nothing corrupted, nothing
+needed a human. Days 1–3 showed the system runs; Days 4–5 showed it recovers.
+
+**Instrumentation gap, for later:** the collector records failures and stranded
+jobs, not *absence of operation*. Day 5's 66-minute hole is invisible in its
+row — it was found by inspecting hourly crawl counts. Adding hours-with-zero-
+crawls would close that.
 
 ### Module audit vs UNKNOWN ≠ LOW (2026-08-13)
 
