@@ -31,7 +31,34 @@
  *   node scripts/seed-from-startup-map.mjs > scripts/seeds/bangalore-full.tsv
  */
 const UA = 'CareerOS-Research/0.1 (+personal job-search tool; respects robots.txt)';
-const SRC = 'https://bangalorestartupmap.com/';
+/**
+ * PER-SOURCE PERMISSION IS NOT INHERITED. Everything documented above applies
+ * to bangalorestartupmap.com. Each additional site is checked on its own terms
+ * before it is passed to this script:
+ *
+ *   delhistartupmap.com - checked 2026-08-29. Its terms permit browsing and
+ *     search "for personal or professional research", and forbid scraping that
+ *     OVERLOADS the site or republishing THE FULL DATASET without permission.
+ *     A single homepage fetch does not overload it, and the output file is
+ *     gitignored exactly as bangalore-full.tsv is, so nothing is republished.
+ *     NOTE: it covers Delhi NCR, not Delhi proper. Do not label its companies
+ *     "Delhi" - city is re-derived downstream from the postings themselves.
+ *
+ *   hyderabadstartupsmap.lol - checked 2026-08-29. NOT PERMITTED, do not seed.
+ *     Its robots.txt allows /startups/, but robots.txt governs crawler
+ *     politeness, not licensing, and its Terms section 7 is explicit: "You may
+ *     not copy, scrape, or commercially exploit the directory without prior
+ *     written permission." The same reasoning that PERMITTED bangalore (it
+ *     states no prohibition) FORBIDS this one. 263 startup pages were located
+ *     via the sitemap and deliberately never fetched. Permission can be asked
+ *     for at hey@nikhilsai.in; until it is granted in writing, this source is
+ *     UNSUPPORTED - which is a recorded state, not a gap to route around.
+ *
+ * A site whose company list is NOT in the page payload cannot be seeded here
+ * at all. hyderabadstartupsmap.lol keeps its list behind per-startup pages and
+ * its robots.txt disallows /api/, so it needs a sitemap-driven seeder instead.
+ */
+const SRC = process.argv[2] ?? 'https://bangalorestartupmap.com/';
 
 /** Deterministic robots.txt check — never delegated to a model. */
 async function robotsAllows(origin, path) {
@@ -159,7 +186,7 @@ if (parseFailures > anchors * 0.02) {
       `could not be read. The seed is INCOMPLETE — do not treat it as the full universe.`,
   );
 }
-console.log('# Worklist from bangalorestartupmap.com — names/domains/jobs_url only.');
+console.log(`# Worklist from ${new URL(SRC).hostname} — names/domains/jobs_url only.`);
 console.log('# Curation (location, sector, stage, funding, investors, team) NOT taken.');
 console.log('# Every claim downstream is re-derived from the company\'s own site.');
 for (const [name, domain, jobsUrl] of rows) {

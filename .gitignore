@@ -55,3 +55,4 @@ CareerOS-Backups/
 # and IS tracked.
 scripts/seeds/bangalore-full.tsv
 scripts/seeds/bangalore-cohort250.tsv
+scripts/seeds/delhi-full.tsv
