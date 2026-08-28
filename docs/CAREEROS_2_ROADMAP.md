@@ -600,6 +600,57 @@ BEFORE/AFTER (the table above is the BEFORE), affected jobs, verdict changes
 (expected: none), and a regression test pinning selection-by-decision so it
 cannot silently revert to cosine.
 
+### Delhi NCR probe — LIVE experiment, registered 2026-08-29 BEFORE any result
+
+**Pre-registered so the interpretation cannot be chosen after seeing the
+numbers.** 100 companies drawn deterministically from the 463-company
+delhistartupmap extraction (salt `delhi-probe-2026-08-29`, checksum
+`5131e169af17e0f1`), frozen in `_delhi_sample100`. 94 inserted as new, 4 already
+existed by domain, 2 skipped because their NAME matched an existing company
+under a different domain — inserting those would have split one company's jobs
+across two rows, the alias-dedup failure already on record.
+
+Population: **98 bound companies**, `discoverySource='delhistartupmap'`,
+`city='Delhi NCR'` (the source is NCR-scoped; city is re-derived downstream from
+the postings themselves). They are the only never-probed DISCOVERED companies,
+and `probeDue` orders `lastProbedAt NULLS FIRST`, so the existing 10-minute
+fanout drains them without intervention. No LLM cost — probing is HTTP.
+
+**Report the WHOLE funnel, not just the last number:**
+
+| stage | Bengaluru | Delhi NCR |
+|---|---|---|
+| companies | 736 | 98 |
+| career page found | 468 (64%) | ? |
+| ATS identified | 736 | ? |
+| MONITORED | 92 (12.5%) | ? |
+| jobs discovered | — | ? |
+| India/remote · SWE · ≤3 YOE | — | ? |
+| APPLY | — | ? |
+| **actionable/company** | **0.167** | **?** |
+
+Because "2 actionable" means opposite things depending on where it narrows:
+
+```
+98 -> 10 career pages -> 2 monitored -> 2 jobs -> 2 actionable
+   the UNIVERSE is small; more Delhi companies would not help
+
+98 -> 70 career pages -> 40 monitored -> 2,000 jobs -> 2 actionable
+   the universe is fine; DOWNSTREAM TARGETING is the problem
+```
+
+Those lead to different next moves, so the funnel is the deliverable.
+
+**Decision rule, fixed in advance.** This is a GO/NO-GO SCREEN, not an estimate:
+0–2 actionable is strong evidence against expanding to the remaining 363; 20+ is
+strong evidence for; anything between is **inconclusive** and must be reported
+as such rather than argued either way. n=100 cannot resolve 8 vs 12.
+
+**Hold while it runs.** Do not add the other 363, enable Adzuna, build the title
+pre-filter, or touch discovery, scoring or freshness policy until this reports.
+Changing the system mid-experiment is how a controlled result becomes an
+anecdote.
+
 ### Google Places is NOT a substitute for a curated city map — measured 2026-08-29
 
 Recorded so this is not re-proposed. Places was tried as a licensing-clean
