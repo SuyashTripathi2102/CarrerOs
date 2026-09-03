@@ -79,3 +79,67 @@ describe('the surface pool is ordered by the decision', () => {
     expect(source).toMatch(/const pool = Math\.min\(200, limit \* 3\)/);
   });
 });
+
+/**
+ * THE COLLECTOR MUST NOT DRIFT FROM PRODUCTION (2026-09-03).
+ *
+ * `scripts/phase0-baseline.sql` records `surfaceable_apply` daily by
+ * REPLICATING browseByFit's pool ordering in standalone SQL. When Q2 changed
+ * production on 2026-08-28, that copy was not updated — so for five days the
+ * daily metric reported 3 while production actually reached 50. A 16x
+ * under-report, on a dashboard, that made a shipped fix look like it had done
+ * nothing.
+ *
+ * Nothing errored. The number was simply measuring a version of CareerOS that
+ * no longer existed, which is the hardest class of bug to notice.
+ *
+ * The principle: a metric must derive from the same ordering as the behaviour
+ * it claims to measure. Where an exact shared function isn't possible across a
+ * TS service and a standalone .sql file, this test is the seam that holds them
+ * together.
+ */
+describe('phase0-baseline.sql mirrors browseByFit', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+
+  /** Reduce an ORDER BY to its ordered list of ranking keys, ignoring layout. */
+  const keys = (clause: string): string[] => {
+    const out: string[] = [];
+    for (const m of clause.matchAll(/decidedAt|opportunityScore|vector\s*<=>/g)) {
+      const t = m[0].replace(/\s+/g, '');
+      out.push(t === 'vector<=>' ? 'cosine' : t);
+    }
+    return out;
+  };
+
+  const strip = (s: string) =>
+    s.replace(/^[ \t]*--.*$/gm, '').replace(/^[ \t]*\/\/.*$/gm, '');
+
+  const service = strip(
+    fs.readFileSync(path.join(__dirname, 'matching.service.ts'), 'utf8'),
+  );
+  const collector = strip(
+    fs.readFileSync(
+      path.join(__dirname, '../../../../../scripts/phase0-baseline.sql'),
+      'utf8',
+    ),
+  );
+
+  const prodClause = service.match(/ORDER BY(?:(?!ORDER BY)[\s\S])*?LIMIT \$\{pool\}/)?.[0];
+  const collectorClause = collector.match(/ORDER BY(?:(?!ORDER BY)[\s\S])*?\)\s*AS rn/)?.[0];
+
+  it('finds both ordering clauses', () => {
+    expect(prodClause).toBeDefined();
+    expect(collectorClause).toBeDefined();
+  });
+
+  it('ranks by the SAME keys in the SAME order', () => {
+    // If this fails, one of the two was changed alone. Change both, or the
+    // daily metric silently starts describing a system that is not running.
+    expect(keys(collectorClause!)).toEqual(keys(prodClause!));
+  });
+
+  it('and that order is decision-first, cosine last', () => {
+    expect(keys(prodClause!)).toEqual(['decidedAt', 'opportunityScore', 'cosine']);
+  });
+});

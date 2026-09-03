@@ -23,7 +23,8 @@
 --   decided_apply     the decision engine said APPLY
 --   surfaceable_apply of those, how many can actually reach /today
 -- browseByFit builds its pool with `ORDER BY (decidedAt IS NOT NULL) DESC,
--- cosine LIMIT 72`, so cosine similarity decides which APPLYs are ELIGIBLE to
+-- opportunityScore DESC NULLS LAST, cosine LIMIT 72`. BEFORE Q2 the second key
+-- was cosine, so similarity decided which APPLYs were ELIGIBLE to
 -- be displayed — and cosine is not the decision. Measured 2026-08-23: 4 of 60
 -- APPLY jobs were reachable; the 56 outside the pool averaged a HIGHER
 -- opportunity score (83.6 vs 79.4) and included the best job in the corpus at
@@ -73,7 +74,15 @@ WITH re AS (
 pool AS (
   SELECT m.verdict,
          row_number() OVER (
-           ORDER BY (m."decidedAt" IS NOT NULL) DESC, je.vector <=> re.vector
+           -- MUST MIRROR browseByFit EXACTLY (matching.service.ts). This clause
+           -- was written against the PRE-Q2 cosine ordering and was not updated
+           -- when production changed on 2026-08-28, so the collector reported
+           -- surfaceable_apply=3 for five days while production actually reached
+           -- 50 -- a 16x under-report that made a shipped fix look inert.
+           -- Change this ONLY together with browseByFit.
+           ORDER BY (m."decidedAt" IS NOT NULL) DESC,
+                    m."opportunityScore" DESC NULLS LAST,
+                    je.vector <=> re.vector
          ) AS rn
   FROM jobs j
   JOIN job_embeddings je ON je."jobId" = j.id
