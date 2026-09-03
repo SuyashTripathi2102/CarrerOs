@@ -28,7 +28,17 @@ export function countrySql(countries: string[]): Prisma.Sql {
     : Prisma.sql`j.country = ANY(${countries})`;
 }
 
-const INDIA_CITIES = [
+/**
+ * The canonical India target-city list. EXPORTED because it was being copied:
+ * discovery.service.ts carried two hardcoded near-duplicates that had silently
+ * drifted, omitting Delhi, New Delhi and Delhi NCR while listing Gurgaon and
+ * Noida. Delhi companies were therefore deprioritised for career extraction
+ * indefinitely, and nothing reported it.
+ *
+ * Same failure as the phase0 collector drifting from browseByFit: one fact,
+ * two copies, no seam holding them together. Import this; do not re-type it.
+ */
+export const INDIA_CITIES = [
   'Bengaluru', 'Bangalore', 'Mumbai', 'Pune', 'New Delhi', 'Delhi NCR',
   'Delhi', 'Hyderabad', 'Chennai', 'Noida', 'Gurgaon', 'Gurugram', 'Indore',
   'Kolkata', 'Ahmedabad', 'Jaipur', 'Kochi', 'Trivandrum', 'Chandigarh',

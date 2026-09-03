@@ -4,6 +4,7 @@ import type { CompanyCandidate, DiscoveryResult } from '@careeros/shared';
 import { CRAWLABLE_PROVIDERS } from '@careeros/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { detectAts } from '../companies/ats-detector';
+import { INDIA_CITIES } from '../matching/location-filter';
 
 /**
  * Confidence signals → 0-100 score. The score answers: "how sure are we this
@@ -355,7 +356,7 @@ export class DiscoveryService {
           AND c."discoveryStage" <> 'UNRESOLVABLE'
         ORDER BY
           EXISTS (SELECT 1 FROM company_watches w WHERE w."companyId" = c.id) DESC,
-          (c.city IN ('Bangalore','Bengaluru','Pune','Hyderabad','Mumbai','Indore','Gurgaon','Gurugram','Noida','Chennai','Ahmedabad','Kolkata')) DESC,
+          (c.city = ANY(${INDIA_CITIES})) DESC,
           c."lastExtractedAt" ASC NULLS FIRST,
           c.id
         LIMIT ${Math.min(100, Math.max(1, limit))}
@@ -590,7 +591,7 @@ export class DiscoveryService {
           AND c."discoveryStage" <> 'UNRESOLVABLE'
         ORDER BY
           EXISTS (SELECT 1 FROM company_watches w WHERE w."companyId" = c.id) DESC,
-          (c.city IN ('Bangalore','Bengaluru','Pune','Hyderabad','Mumbai','Indore','Gurgaon','Gurugram','Noida','Chennai','Ahmedabad','Kolkata')) DESC,
+          (c.city = ANY(${INDIA_CITIES})) DESC,
           c."lastRenderedAt" ASC NULLS FIRST,
           c.id
         LIMIT ${Math.min(50, Math.max(1, limit))}
