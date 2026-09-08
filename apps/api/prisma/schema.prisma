@@ -146,18 +146,19 @@ model User {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  preference    UserPreference?
-  refreshTokens RefreshToken[]
-  resumes       Resume[]
-  matches       JobMatch[]
-  applications  Application[]
-  notifications Notification[]
-  reviewFeedback JobReviewFeedback[]
+  preference        UserPreference?
+  refreshTokens     RefreshToken[]
+  resumes           Resume[]
+  matches           JobMatch[]
+  applications      Application[]
+  notifications     Notification[]
+  reviewFeedback    JobReviewFeedback[]
   careerPreferences CareerPreference[]
   companyResumes    CompanyResume[]
   referralContacts  ReferralContact[]
   companyWatches    CompanyWatch[]
   opportunityEvents OpportunityEvent[]
+  gmailConnections  GmailConnection[]
 
   @@map("users")
 }
@@ -204,17 +205,17 @@ model UserPreference {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Resume {
-  id        String   @id @default(cuid())
-  userId    String
-  title     String   @default("My Resume")
-  isPrimary Boolean  @default(false) // the one used for matching by default
+  id         String   @id @default(cuid())
+  userId     String
+  title      String   @default("My Resume")
+  isPrimary  Boolean  @default(false) // the one used for matching by default
   // The user's canonical resume as editable HTML — the SOURCE OF TRUTH for
   // tailoring. When set, tailoring derives company resumes from THIS (preserving
   // the user's real formatting, grouped skills, sub-projects, links, achievements)
   // instead of regenerating a lossy copy from the PDF parse. Null → fall back to
   // buildMasterHtml(confirmedProfile).
   masterHtml String?
-  createdAt DateTime @default(now())
+  createdAt  DateTime @default(now())
 
   user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   versions ResumeVersion[]
@@ -224,37 +225,37 @@ model Resume {
 }
 
 model ResumeVersion {
-  id            String   @id @default(cuid())
-  resumeId      String
-  versionNumber Int
-  fileKey       String // object key in S3/MinIO — never store the file in the DB
-  parsedJson    Json? // structured extraction: experience, education, projects, ...
-  atsScore      Int? // 0–100 from checkAts() on the raw text layer
-  atsVerdict    String? // SAFE | RISKY | UNREADABLE — what a real ATS would see
+  id                  String    @id @default(cuid())
+  resumeId            String
+  versionNumber       Int
+  fileKey             String // object key in S3/MinIO — never store the file in the DB
+  parsedJson          Json? // structured extraction: experience, education, projects, ...
+  atsScore            Int? // 0–100 from checkAts() on the raw text layer
+  atsVerdict          String? // SAFE | RISKY | UNREADABLE — what a real ATS would see
   // The user's corrections to the AI parse. Once set, this — not parsedJson —
   // is the profile matching runs against.
-  confirmedProfile Json?
+  confirmedProfile    Json?
   // Skills the user added that are NOT in the resume text. Valid profile data,
   // but CareerOS must never claim the submitted PDF contains them.
-  manuallyAddedSkills String[] @default([])
+  manuallyAddedSkills String[]  @default([])
   // [{ skill, source: RESUME_EXTRACTED | MANUALLY_ADDED }] — the same judgement
   // as manuallyAddedSkills, but stated per-skill and positively rather than as
   // an absence, so every surface can cite where a skill came from.
-  skillProvenance Json?
+  skillProvenance     Json?
   // When the confirmed profile last changed. Reconciliation re-scores matches
   // decided before this instant. A resume VERSION is not a profile: correcting
   // the skills on version 2 must re-score version 2's matches, and keying
   // idempotence on the version id alone made that a silent no-op.
-  profileUpdatedAt DateTime?
+  profileUpdatedAt    DateTime?
   // Matching uses the newest ACTIVATED version, never merely the newest upload.
   // Without this an unreviewed parse starts scoring jobs the instant the file
   // lands, which is exactly what the confirmation step exists to prevent.
-  activatedAt   DateTime?
+  activatedAt         DateTime?
   // Reconciliation runs in the background (minutes of paced LLM calls), so its
   // before/after report is stored rather than returned from the HTTP request.
-  reconciledAt    DateTime?
-  reconcileReport Json?
-  createdAt     DateTime @default(now())
+  reconciledAt        DateTime?
+  reconcileReport     Json?
+  createdAt           DateTime  @default(now())
 
   resume    Resume           @relation(fields: [resumeId], references: [id], onDelete: Cascade)
   skills    ResumeSkill[]
@@ -322,14 +323,14 @@ model JobSkill {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Company {
-  id            String       @id @default(cuid())
+  id            String      @id @default(cuid())
   name          String
-  website       String?      @unique
+  website       String?     @unique
   careerPageUrl String?
-  atsProvider   AtsProvider  @default(UNKNOWN)
+  atsProvider   AtsProvider @default(UNKNOWN)
   atsIdentifier String? // e.g. Greenhouse board token, Lever site slug
-  crawlTier     CrawlTier @default(WARM)
-  nextCrawlAt   DateTime  @default(now()) // due when <= now; bumped per-tier after each sync
+  crawlTier     CrawlTier   @default(WARM)
+  nextCrawlAt   DateTime    @default(now()) // due when <= now; bumped per-tier after each sync
 
   // ── Discovery pipeline (Phase B) ──
   discoveryStage    DiscoveryStage @default(DISCOVERED)
@@ -344,14 +345,14 @@ model Company {
   // behind client-side rendering). Flagged for the render service, which loads
   // the page in a real browser and feeds the SAME extractor. Null lastRenderedAt
   // = never rendered; the render-due query rotates by it.
-  needsRender     Boolean   @default(false)
-  lastRenderedAt  DateTime?
+  needsRender       Boolean        @default(false)
+  lastRenderedAt    DateTime?
 
-  country       String?
-  city          String? // for city-based discovery (Indore/Pune/Bangalore...)
-  teamSize      Int? // from directory metadata (e.g. YC dataset)
-  industry      String?
-  size          CompanySize?
+  country            String?
+  city               String? // for city-based discovery (Indore/Pune/Bangalore...)
+  teamSize           Int? // from directory metadata (e.g. YC dataset)
+  industry           String?
+  size               CompanySize?
   logoUrl            String?
   linkedinUrl        String?
   githubOrg          String?
@@ -361,8 +362,8 @@ model Company {
   // refreshed ~14d, so the ladder stays rich across loads (not just first find).
   contactChannels    Json?
   description        String?
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
 
   jobs         Job[]
   crawlRuns    CrawlRun[]
@@ -374,16 +375,22 @@ model Company {
   // company; null means this row IS canonical. Nothing is rewritten — jobs keep
   // their original companyId and resolve through here — so a merge is
   // reversible and an over-merge is recoverable.
-  aliasOfId String?
-  aliasOf   Company?  @relation("CompanyAlias", fields: [aliasOfId], references: [id], onDelete: SetNull)
-  aliases   Company[] @relation("CompanyAlias")
-  /** Evidence that justified the merge: STRONG only, per ADR-11. */
+  aliasOfId       String?
+  aliasOf         Company?  @relation("CompanyAlias", fields: [aliasOfId], references: [id], onDelete: SetNull)
+  aliases         Company[] @relation("CompanyAlias")
+  /**
+   * Evidence that justified the merge: STRONG only, per ADR-11.
+   */
   aliasConfidence String?
-  /** Apply-URL derived tenant token (ADR-11). NOT atsIdentifier, which is
-   *  name-derived and fragments identically to the names it would disambiguate. */
+  /**
+   * Apply-URL derived tenant token (ADR-11). NOT atsIdentifier, which is
+   * name-derived and fragments identically to the names it would disambiguate.
+   */
   identityToken   String?
-  /** Source-provided company key (e.g. FreeHire company_slug) — identity
-   *  evidence, kept even though it fragments like a name. */
+  /**
+   * Source-provided company key (e.g. FreeHire company_slug) — identity
+   * evidence, kept even though it fragments like a name.
+   */
   sourceSlug      String?
 
   // One company per ATS board — prevents two rows crawling the same source.
@@ -398,49 +405,49 @@ model Company {
 }
 
 model Job {
-  id          String    @id @default(cuid())
-  companyId   String
-  externalId  String // stable id from the source (ATS job id or canonical URL)
-  title       String
-  description String
+  id                String                   @id @default(cuid())
+  companyId         String
+  externalId        String // stable id from the source (ATS job id or canonical URL)
+  title             String
+  description       String
   /// Provenance of `description`. Nullable because rows written before
   /// 2026-08-23 predate it and their origin is genuinely unknown — recording
   /// them as LIST would be inventing a fact. See enum DescriptionSource.
   descriptionSource DescriptionSource?
-  location    String?
-  country     String?
-  workMode    WorkMode?
-  salaryMin   Int?
-  salaryMax   Int?
-  currency    String?
-  seniority   String? // free-form until Phase 5 normalizes it
-  url         String
-  postedAt    DateTime?
-  firstSeenAt DateTime  @default(now())
-  lastSeenAt  DateTime  @default(now()) // crawler bumps this every run it still sees the job
-  status      JobStatus @default(ACTIVE)
+  location          String?
+  country           String?
+  workMode          WorkMode?
+  salaryMin         Int?
+  salaryMax         Int?
+  currency          String?
+  seniority         String? // free-form until Phase 5 normalizes it
+  url               String
+  postedAt          DateTime?
+  firstSeenAt       DateTime                 @default(now())
+  lastSeenAt        DateTime                 @default(now()) // crawler bumps this every run it still sees the job
+  status            JobStatus                @default(ACTIVE)
   // Ingest source of record ("remoteok" | "adzuna" | "career-page-deterministic-v1" | ...).
   // Powers source-trust scoring and per-source pipeline metrics.
-  source      String?
+  source            String?
   // Cross-source identity: sha256(companyId + normalized title + location + workMode).
   // The same opening from Adzuna/Jooble/career-page collapses onto one fingerprint,
   // so we don't show three rows for one job. Computed at ingest. See job-fingerprint.ts.
-  fingerprint String?
-  raw         Json? // original source payload, for reprocessing without recrawling
+  fingerprint       String?
+  raw               Json? // original source payload, for reprocessing without recrawling
   // GENERATED ALWAYS AS to_tsvector(title+description) STORED — created in a
   // hand-edited migration; @default(dbgenerated()) tells Prisma a db-side
   // expression owns this column so its diff engine leaves it alone.
-  search      Unsupported("tsvector")? @default(dbgenerated())
+  search            Unsupported("tsvector")? @default(dbgenerated())
 
-  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  skills       JobSkill[]
-  embedding    JobEmbedding?
-  matches      JobMatch[]
-  applications Application[]
-  classifications JobClassification[]
-  reviewFeedback  JobReviewFeedback[]
-  companyResumes  CompanyResume[]
-  referralContacts ReferralContact[]
+  company           Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  skills            JobSkill[]
+  embedding         JobEmbedding?
+  matches           JobMatch[]
+  applications      Application[]
+  classifications   JobClassification[]
+  reviewFeedback    JobReviewFeedback[]
+  companyResumes    CompanyResume[]
+  referralContacts  ReferralContact[]
   opportunityEvents OpportunityEvent[]
 
   // Dedupe guarantee: a recrawl updates the existing row instead of inserting.
@@ -472,14 +479,14 @@ model JobEmbedding {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model JobMatch {
-  id              String    @id @default(cuid())
+  id              String   @id @default(cuid())
   userId          String
   jobId           String
   resumeVersionId String // which resume version produced these scores
   overallScore    Float // 0–100
   technicalScore  Float
   experienceScore Float
-  missingSkills   String[]  @default([])
+  missingSkills   String[] @default([])
   reasoning       String? // LLM explanation shown in the dashboard
 
   // ── Opportunity Score (Phase C) ──
@@ -492,11 +499,13 @@ model JobMatch {
   // page all read this column. No consumer may re-derive APPLY/CONSIDER from
   // opportunityScore: that is how a marketing role reached "Apply today" while
   // the notification path would have blocked it.
-  verdict         String? // APPLY | CONSIDER | SKIP | NEEDS_REVIEW
-  verdictReason   String?
-  verdictCode     String? // TARGET_ROLE_ELIGIBLE | DEVELOPMENT_WRONG_SPECIALIZATION | ...
-  /** Legacy blended number; prefer the three below. */
-  roleRelevance   Int?
+  verdict               String? // APPLY | CONSIDER | SKIP | NEEDS_REVIEW
+  verdictReason         String?
+  verdictCode           String? // TARGET_ROLE_ELIGIBLE | DEVELOPMENT_WRONG_SPECIALIZATION | ...
+  /**
+   * Legacy blended number; prefer the three below.
+   */
+  roleRelevance         Int?
   // Four questions, four answers. Blending them is what recommended a
   // digital-marketing role at 65% resume fit, and printed "100% relevant"
   // beside a React Native job.
@@ -507,10 +516,12 @@ model JobMatch {
   developmentConfidence Int?
   targetRoleFit         Int?
   specializationFit     Int?
-  /** What the user should DO: APPLY_NOW | WORTH_APPLYING | REVIEW_FIRST | LOW_PRIORITY | SKIP */
+  /**
+   * What the user should DO: APPLY_NOW | WORTH_APPLYING | REVIEW_FIRST | LOW_PRIORITY | SKIP
+   */
   actionRecommendation  String?
-  decisionVersion Int?
-  decidedAt       DateTime?
+  decisionVersion       Int?
+  decidedAt             DateTime?
 
   notifiedAt DateTime? // notification memory: set when the user was told
   createdAt  DateTime  @default(now())
@@ -530,18 +541,18 @@ model JobMatch {
 }
 
 model Application {
-  id        String            @id @default(cuid())
-  userId    String
-  jobId     String
-  status    ApplicationStatus @default(SAVED)
-  notes     String?
-  appliedAt DateTime?
+  id              String            @id @default(cuid())
+  userId          String
+  jobId           String
+  status          ApplicationStatus @default(SAVED)
+  notes           String?
+  appliedAt       DateTime?
   // Outcome-analytics foundations ("which resume version gets interviews",
   // "which source converts") — recorded from the first application onward.
   resumeVersionId String?
   source          String? // "careeros-match" | "referral" | "manual" | board name
-  createdAt DateTime          @default(now())
-  updatedAt DateTime          @updatedAt
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
 
   user   User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   job    Job                @relation(fields: [jobId], references: [id], onDelete: Cascade)
@@ -560,7 +571,7 @@ model Application {
 // with clicks and applications?" — data that cannot be reconstructed after the
 // fact, so it has to start recording now.
 model OpportunityEvent {
-  id               String   @id @default(cuid())
+  id               String  @id @default(cuid())
   userId           String
   jobId            String
   type             String // SHOWN | CLICKED | DISMISSED | APPLIED
@@ -642,7 +653,6 @@ model Notification {
  * What a job IS — objective, cached, and versioned. Never user-specific: this
  * table says "Android engineering, coding PRIMARY, minimum 2 years", never
  * "reject for Suyash". Personal fit is derived per user at read time.
- *
  * Rows are kept per classifierVersion so a prompt change can be audited and
  * selectively recomputed rather than silently overwriting history.
  */
@@ -655,18 +665,20 @@ model JobClassification {
   roleFamily            String // FULL_STACK | NATIVE_ANDROID | ...
   specializations       String[] @default([])
   codingIntensity       String // PRIMARY | SUBSTANTIAL | OCCASIONAL | INCIDENTAL | NONE
-  /** 0–100: how certain that BUILDING SOFTWARE is the core of this job. */
+  /**
+   * 0–100: how certain that BUILDING SOFTWARE is the core of this job.
+   */
   developmentConfidence Int
   seniority             String // INTERN | JUNIOR | MID | SENIOR | LEAD | STAFF | PRINCIPAL | UNKNOWN
   minimumYears          Int?
   maximumYears          Int?
 
-  requiredSkills        String[] @default([])
-  preferredSkills       String[] @default([])
-  responsibilities      String[] @default([])
-  developmentEvidence   String[] @default([])
+  requiredSkills         String[] @default([])
+  preferredSkills        String[] @default([])
+  responsibilities       String[] @default([])
+  developmentEvidence    String[] @default([])
   nonDevelopmentEvidence String[] @default([])
-  classificationReason  String
+  classificationReason   String
 
   classifiedAt DateTime @default(now())
 
@@ -680,7 +692,6 @@ model JobClassification {
 
 /**
  * The user's verdict on a job CareerOS could not classify confidently.
- *
  * Deliberately NOT a column on JobClassification. That table answers "what is
  * this job?" — objective, cached, shared across users, invalidated by a
  * classifier version bump. This answers "is this MY kind of work?", which is
@@ -744,36 +755,36 @@ model CompanyResume {
  * referral CRM: SUGGESTED → DRAFTED → CONTACTED → REPLIED (or ARCHIVED).
  */
 model ReferralContact {
-  id          String    @id @default(cuid())
-  userId      String
-  jobId       String? // the job this shortlist was built for; SetNull if it's removed
-  companyId   String? // best-effort link; no FK so a company merge can't orphan it
-  companyName String
-  source      String    @default("GITHUB")
-  name        String
-  handle      String // github login — unique per company for a user
-  profileUrl  String
-  avatarUrl   String?
-  bio         String?
-  location    String?
-  publicEmail String? // only an address the person published themselves
-  blogUrl     String?
-  twitter     String?
-  role        String // ENGINEER | RECRUITER | HIRING_MANAGER
-  signals     Json? // { sharedTech, viaRepos, contributions, publicMember }
-  priority    Int       @default(0) // 0–100 rank
-  reason      String // human-readable "why this person"
-  draft       String? // generated outreach — reviewed and sent by the user
-  status      String    @default("SUGGESTED")
-  contactedAt DateTime?
-  repliedAt   DateTime?
+  id             String    @id @default(cuid())
+  userId         String
+  jobId          String? // the job this shortlist was built for; SetNull if it's removed
+  companyId      String? // best-effort link; no FK so a company merge can't orphan it
+  companyName    String
+  source         String    @default("GITHUB")
+  name           String
+  handle         String // github login — unique per company for a user
+  profileUrl     String
+  avatarUrl      String?
+  bio            String?
+  location       String?
+  publicEmail    String? // only an address the person published themselves
+  blogUrl        String?
+  twitter        String?
+  role           String // ENGINEER | RECRUITER | HIRING_MANAGER
+  signals        Json? // { sharedTech, viaRepos, contributions, publicMember }
+  priority       Int       @default(0) // 0–100 rank
+  reason         String // human-readable "why this person"
+  draft          String? // generated outreach — reviewed and sent by the user
+  status         String    @default("SUGGESTED")
+  contactedAt    DateTime?
+  repliedAt      DateTime?
   // Follow-up cadence (the Outreach Engine): how many nudges the user has logged
   // and when the last one went out, so CareerOS can surface "due for a follow-up"
   // without ever sending anything itself.
   followUpCount  Int       @default(0)
   lastFollowUpAt DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   job  Job? @relation(fields: [jobId], references: [id], onDelete: SetNull)
@@ -836,7 +847,7 @@ model CompanyIntelligence {
   // SQL aggregates from our own data
   salaryMinMedian Int? // median of posted salaryMin (where disclosed)
   salaryMaxMedian Int?
-  activeJobs      Int      @default(0)
+  activeJobs      Int         @default(0)
   hiringVelocity  Json? // { months: [{month, newJobs}], changePct }
   hiringTrend     HiringTrend @default(INSUFFICIENT_DATA)
 
@@ -975,4 +986,64 @@ model AiUsage {
   @@index([createdAt])
   @@index([kind, createdAt])
   @@map("ai_usage")
+}
+
+/// Gmail job-alert connector (Phase 1). A user-authorised, read-only grant.
+///
+/// Deliberately NOT columns on User: that table holds passwordHash, our own
+/// secret. A third-party provider's refresh token has different rotation and
+/// revocation rules and must be revocable without touching the account.
+model GmailConnection {
+  id           String @id @default(cuid())
+  userId       String
+  emailAddress String
+
+  /// Encrypted at rest. NEVER logged, never returned by any API response.
+  /// Access tokens are not stored at all - they are refreshed on demand and
+  /// discarded, so a database leak cannot yield live mailbox access.
+  refreshTokenEnc String
+  scope           String
+
+  /// Gmail incremental sync cursor. Advanced ONLY after a batch is durably
+  /// ingested: advancing first would drop alerts with no error, which is the
+  /// failure shape this codebase keeps finding. A crash instead re-reads
+  /// messages, which the idempotent dedup absorbs.
+  historyId  String?
+  lastSyncAt DateTime?
+
+  /// A revoked or expired grant must STOP polling loudly. It must never
+  /// degrade into a silently empty inbox that looks like a quiet week.
+  status GmailConnectionStatus @default(ACTIVE)
+
+  connectedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, emailAddress])
+  @@index([status])
+  @@map("gmail_connections")
+}
+
+enum GmailConnectionStatus {
+  ACTIVE
+  REVOKED
+  NEEDS_RECONSENT
+}
+
+/// One row per Gmail message ever parsed - dedup layer 1 of 3.
+///
+/// Layer 2 is BoardJob.job.externalId (same posting across daily digests) and
+/// layer 3 is the existing company+fingerprint dedup (same posting arriving
+/// from LinkedIn AND Greenhouse). No new dedup logic is written anywhere.
+model GmailMessageSeen {
+  messageId    String   @id
+  connectionId String
+  source       String /// which AlertParser matched, e.g. 'linkedin-alerts'
+  jobsParsed   Int      @default(0)
+  seenAt       DateTime @default(now())
+
+  @@index([connectionId, seenAt])
+  @@map("gmail_messages_seen")
 }

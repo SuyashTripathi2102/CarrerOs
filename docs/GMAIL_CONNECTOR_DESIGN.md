@@ -242,21 +242,18 @@ decision.
 - Multi-user OAuth, token sharing, or a consent UI beyond one user
 - Write access to the mailbox in any form
 
-## 9. Open decisions — need approval before implementation
+## 9. Decisions — APPROVED 2026-09-09
 
-1. **OAuth app mode.** Testing mode with one test user (recommended), or pursue
-   Google verification now?
-2. **The description problem.** Alert emails have no job body, so entries arrive
-   `descriptionSource: MISSING` and the evidence gate correctly refuses to judge
-   them. Options: (a) surface as unscored *leads*; (b) enrich only when the URL
-   resolves to an ATS we already crawl (Greenhouse, Lever, Ashby — legitimate,
-   since we crawl those anyway); (c) accept they stay unjudged. **(b) is my
-   recommendation** — it stays inside ADR-8 and reuses existing adapters.
-3. **Encryption key management** for `refreshTokenEnc` — env var, or a proper
-   secret store?
-4. **Poll cadence.** LinkedIn alerts are daily or weekly digests; hourly polling
-   would be pointless. Suggest 6h.
+| # | decision | approved |
+|---|---|---|
+| 1 | OAuth app mode | **Testing mode, one test user.** Verification deferred; CareerOS has one user. |
+| 2 | Description problem | **Option (b): enrich ONLY when the alert URL resolves to an ATS we already crawl** (Greenhouse, Lever, Ashby). Otherwise the entry stays `descriptionSource: MISSING` and surfaces as an unjudged lead. No LinkedIn page fetching — ADR-8 holds. No fabricated descriptions. No second scoring path. |
+| 3 | Token encryption | **Env-based key for v1**, provided it is a real secret, never committed and never logged. Revisit if CareerOS becomes multi-user. |
+| 4 | Poll cadence | **Every 6h.** Alerts are daily/weekly digests; hourly polling would add nothing. |
 
+**Scope approved: Steps 1–4 only.** Step 5 (wiring `linkedin-alerts` into
+`BOARDS`) and Step 6 (the controlled run) require a separate review. Steps 1–4
+touch nothing in production — no queue, no schedule, no ingestion path.
 ## 10. Implementation sequence, if approved
 
 ```
