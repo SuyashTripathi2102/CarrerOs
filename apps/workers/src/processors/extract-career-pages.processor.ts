@@ -238,7 +238,30 @@ export function startCareerExtractWorker(api: ApiClient): Worker {
         ...ingested,
       };
     },
-    { connection: createRedisConnection(), concurrency: 1 },
+    {
+      connection: createRedisConnection(),
+      concurrency: 1,
+      /**
+       * MEASURED, not guessed. This job fetches 30 external career pages per
+       * run: avg 46s, max 185s over 47 recorded runs. BullMQ's DEFAULT
+       * lockDuration is 30s, so the AVERAGE run already outlived its lock and
+       * every run depended on uninterrupted 15s renewals.
+       *
+       * On 2026-09-04 06:45 UTC a renewal missed. Redis returned the job to
+       * WAITING while the worker went on believing it owned it -- split brain.
+       * The concurrency-1 slot was never released, the waiting job was never
+       * re-claimed, the repeatable could not advance, and career-extract
+       * produced 2 runs in 5 days instead of ~20. It logged 18,189
+       * lock-renewal failures for that one job id and reported no error
+       * anywhere else.
+       *
+       * 10 minutes covers the observed max ~3x over, and is still far below
+       * the 6h tick, so a genuinely dead worker is still reclaimed long before
+       * the next run is due. Raise this if the batch size or per-page timeout
+       * grows -- the invariant is lockDuration > worst-case job duration.
+       */
+      lockDuration: 600_000,
+    },
   );
 }
 
