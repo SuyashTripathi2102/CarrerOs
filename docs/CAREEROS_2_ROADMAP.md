@@ -600,6 +600,19 @@ BEFORE/AFTER (the table above is the BEFORE), affected jobs, verdict changes
 (expected: none), and a regression test pinning selection-by-decision so it
 cannot silently revert to cosine.
 
+### Render capability gap — 2026-09-08
+
+41 companies currently flagged `needsRender`; 40 eligible; **0 processable**.
+`RENDER_SERVICE_URL` / token are configured, but no renderer service is
+listening, and `render-extract` has never recorded a single run since 2026-08-12.
+
+This is a **capability gap, not a Delhi result**, and no renderer implementation
+is authorized. Revisit only after measuring the opportunity yield and
+operational cost of rendering these companies — what fraction produce jobs, how
+many become APPLY, at what compute cost. Recorded because undocumented system
+state is itself a reliability problem: 40 companies were waiting silently with
+nothing anywhere reporting that the capability needed to process them is absent.
+
 ### Delhi NCR probe — LIVE experiment, registered 2026-08-29 BEFORE any result
 
 **Pre-registered so the interpretation cannot be chosen after seeing the
