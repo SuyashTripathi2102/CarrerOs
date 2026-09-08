@@ -56,3 +56,66 @@ describe('isSchedulerWedged', () => {
     expect(describeWedge('evaluate-matches', HEALTHY)).toBe('');
   });
 });
+
+/**
+ * scanQueue: the queue-agnostic scan. No per-queue thresholds, no lock-duration
+ * assumptions — it reads counts, workers and schedulers and applies the same
+ * rule to every queue.
+ */
+import { scanQueue } from './queue-health';
+
+const probe = (counts: Record<string, number>, workers: number, next: number | null) => ({
+  getJobCounts: async () => counts,
+  getWorkers: async () => Array.from({ length: workers }, (_, i) => i),
+  getJobSchedulers: async () => (next === null ? [] : [{ key: 'k', next }]),
+});
+
+const NOW = Date.parse('2026-09-08T10:28:00.000Z');
+
+describe('scanQueue', () => {
+  it('detects the real career-extract wedge and names the queue', async () => {
+    const r = await scanQueue(
+      'career-extract',
+      probe({ waiting: 1, active: 0 }, 1, Date.parse('2026-09-04T12:45:00.000Z')),
+      NOW,
+    );
+    expect(r.wedged).toBe(true);
+    expect(r.message).toContain('career-extract');
+  });
+
+  it('does NOT flag replay-extract, which is legitimately idle', async () => {
+    // Real values: next fire in the future, no workers busy, nothing queued.
+    // An idle queue with no work must never be reported as broken, or the
+    // check becomes noise and gets ignored.
+    const r = await scanQueue(
+      'replay-extract',
+      probe({ waiting: 0, active: 0 }, 1, Date.parse('2026-09-09T03:45:00.000Z')),
+      NOW,
+    );
+    expect(r.wedged).toBe(false);
+    expect(r.message).toBe('');
+  });
+
+  it('does NOT flag render-extract, idle with its next fire ahead', async () => {
+    const r = await scanQueue(
+      'render-extract',
+      probe({ waiting: 0, active: 0 }, 1, Date.parse('2026-09-08T18:45:00.000Z')),
+      NOW,
+    );
+    expect(r.wedged).toBe(false);
+  });
+
+  it('ignores a queue with no repeatable registered', async () => {
+    const r = await scanQueue('crawl-company', probe({ waiting: 5, active: 1 }, 1, null), NOW);
+    expect(r.wedged).toBe(false);
+  });
+
+  it('survives a queue that cannot report workers', async () => {
+    const p = probe({ waiting: 1, active: 0 }, 1, Date.parse('2026-09-04T12:45:00.000Z'));
+    p.getWorkers = async () => { throw new Error('redis hiccup'); };
+    // workers falls back to 0, which is the dead-process fault, not a wedge —
+    // an inspection failure must not be reported as a wedge.
+    const r = await scanQueue('career-extract', p, NOW);
+    expect(r.wedged).toBe(false);
+  });
+});

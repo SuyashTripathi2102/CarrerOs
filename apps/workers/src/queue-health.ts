@@ -65,3 +65,44 @@ export function describeWedge(name: string, i: QueueHealthInput): string {
     `a job is unclaimed while a worker is attached`
   );
 }
+
+/**
+ * Scan every repeatable queue and return the wedged ones.
+ *
+ * READ-ONLY BY DESIGN. It calls getJobCounts / getWorkers / getJobSchedulers
+ * and nothing else: it never restarts, clears, retries, promotes or removes a
+ * job. A health check that repairs things hides the very failures it exists to
+ * surface, and an automatic retry on a wedged queue would have masked the
+ * career-extract stall for another five days.
+ *
+ * Deliberately run from a plain interval rather than as a BullMQ job: a
+ * scheduled job that watches for wedged schedules can itself wedge.
+ */
+export interface QueueProbe {
+  getJobCounts(): Promise<Record<string, number>>;
+  getWorkers(): Promise<unknown[]>;
+  getJobSchedulers(): Promise<Array<{ key?: string; next?: number }>>;
+}
+
+export async function scanQueue(
+  name: string,
+  q: QueueProbe,
+  now = Date.now(),
+): Promise<{ name: string; wedged: boolean; message: string }> {
+  const [counts, workers, scheds] = await Promise.all([
+    q.getJobCounts(),
+    q.getWorkers().catch(() => []),
+    q.getJobSchedulers().catch(() => []),
+  ]);
+  // Earliest scheduled fire across this queue's repeatables. A queue with no
+  // repeatable is not in scope -- nothing is overdue if nothing is scheduled.
+  const nexts = scheds.map((s) => s.next).filter((n): n is number => typeof n === 'number');
+  const input = {
+    nextRunAt: nexts.length ? Math.min(...nexts) : null,
+    workersAttached: workers.length,
+    waiting: counts.waiting ?? 0,
+    active: counts.active ?? 0,
+    now,
+  };
+  return { name, wedged: isSchedulerWedged(input), message: describeWedge(name, input) };
+}

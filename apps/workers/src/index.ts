@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { installProcessGuard } from './process-guard';
+import { startQueueHealthCheck } from './queue-health.runner';
 import { ApiClient } from './api-client';
 import { startCrawlCompanyWorker } from './processors/crawl-company.processor';
 import { ensureBoardSchedules, startCrawlBoardWorker } from './processors/crawl-board.processor';
@@ -38,6 +39,11 @@ async function main() {
   // One malformed response from a third-party board must not be able to take
   // the crawls and the evaluation belt down with it.
   installProcessGuard();
+
+  // Reporting only: surfaces a repeatable whose next fire is overdue while a
+  // worker is attached and work sits unclaimed. career-extract sat in exactly
+  // that state for five days with failed:0 and no error anywhere.
+  startQueueHealthCheck();
   const api = new ApiClient();
 
   const workers = [
