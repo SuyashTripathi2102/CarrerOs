@@ -56,3 +56,6 @@ CareerOS-Backups/
 scripts/seeds/bangalore-full.tsv
 scripts/seeds/bangalore-cohort250.tsv
 scripts/seeds/delhi-full.tsv
+scripts/seeds/hyderabad-raw.txt
+scripts/seeds/hyderabad-names.txt
+scripts/seeds/delhi-sample100.tsv
