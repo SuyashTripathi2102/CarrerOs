@@ -698,6 +698,49 @@ expecting a company universe.
 (The legacy Places API also returns no `website` field — it needs a second Place
 Details call per result — so the fallback is worse, not just older.)
 
+### ❌ 8b title pre-filter — CLOSED, DO NOT SHIP (measured 2026-09-09)
+
+Shadow experiment over 23,413 historical classifications. Read-only replay, no
+LLM calls. **The feature is killed; the measurement is the deliverable.**
+
+**It is safe.** A conservative rule — any engineering signal in the title forces
+UNSURE, and only unambiguous non-engineering titles with no engineering signal
+are skipped — produced:
+
+| | |
+|---|---|
+| rule NOT-SWE + LLM NOT-SWE | 2,056 |
+| **rule NOT-SWE + LLM SWE** | **1** |
+| skipped jobs later judged | 1,882 |
+| of those, became APPLY | **0** |
+| of those, became CONSIDER | 1 |
+
+The single miss is `Graphic Designer`, which the LLM had classified
+SOFTWARE_ENGINEERING — an LLM error, not a rule failure.
+
+**But it does not do the job it was for.** Only **8.8%** of classification calls
+are avoidable, worth roughly **$0.46/day** against $5.26. Adzuna needs ~$6/day of
+headroom, so this delivers under a tenth of what it was meant to unlock, while
+adding a maintained regex list, a new skip path and a permanent recall-sensitive
+branch.
+
+**Why 76.9% non-SWE ≠ 76.9% avoidable.** Only **12.7%** of non-SWE jobs have a
+title a deterministic rule can safely judge. The rest are `Consultant`,
+`Associate`, `Specialist`, `Analyst`, `Manager` and the 5,343 in `OTHER` — a
+recall-first system cannot discard those on a title. That is where the bulk of
+the 77% lives, and it is unreachable without the LLM.
+
+**The shadow run earned its keep regardless.** v1 produced 13 false negatives,
+**11 of them "Salesforce"** — the `sales` pattern lacked a word boundary. A
+regex bug that would have shipped and silently discarded Salesforce engineering
+roles. Found by replay, before production. Do not reopen this to tune the regex;
+the question is answered.
+
+**Consequence for Adzuna.** Classification cost is NOT the lever. Enabling
+Adzuna is now a value question, not a cost-optimisation one: measure its
+incremental APPLY/surfaceable yield against ~$6/day before raising
+`AI_DAILY_BUDGET_USD`. Having credit is not a reason to spend it.
+
 ### 8. Classification-cost optimization — NEW, before scaling supply
 
 **Not urgent, and recorded so it is not rediscovered.** The `$8/day` budget cap
