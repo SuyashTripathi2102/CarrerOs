@@ -929,3 +929,103 @@ correct and must not be invalidated), so the invariant belongs on resolved-URL
 semantics, not on `pathname === '/'`. Measure the 22 before encoding the rule.
 
 Never fabricate a career URL from a conventional path.
+
+
+## Evidence Refresh — experiment CLOSED, capability PARKED (2026-09-09)
+
+**Status: hydration is parked, not killed. Do not schedule it.**
+
+### What was run
+
+82 career-page jobs held at INSUFFICIENT_EVIDENCE, each with its own detail URL
+that nothing ever fetched. Their stored "description" was synthesised by the
+extractor itself — `${title} · ${location} — via ${company} careers page.`,
+about 94 characters of the title handed back as evidence.
+
+```
+82 cohort
+├──  1  canary, hydrated and verified end-to-end first
+├── 75  hydrated in the controlled run
+└──  6  refused — 4 fetch failures, 1 page of 145 chars,
+                  1 of 3,210 chars carrying no posting phrases
+```
+
+76 received real evidence, averaging 4,816 characters. Every one of the 76
+classifications carries provenance.
+
+### Result
+
+| verdict | n |
+|---|---|
+| SKIP · NOT_DEVELOPMENT | 45 |
+| SKIP · DEVELOPMENT_WRONG_SPECIALIZATION | 13 |
+| SKIP · TARGET_ROLE_TOO_SENIOR | 9 |
+| SKIP · INSUFFICIENT_EVIDENCE (the 6 refusals) | 6 |
+| SKIP · SCORE_BELOW_BAR | 3 |
+| SKIP · LOW_CODING_RESPONSIBILITY | 2 |
+| SKIP · CORE_STACK_MISMATCH | 2 |
+| **CONSIDER · TARGET_ROLE_ELIGIBLE** | **1** |
+| NEEDS_REVIEW · AMBIGUOUS | 1 |
+
+**0 APPLY. 1 CONSIDER. ~$1.44 of classification.**
+
+Technically successful, commercially unproven. The mechanism demonstrably turns
+unreadable jobs into trustworthy decisions; it has not yet been shown to produce
+enough opportunities to justify running continuously.
+
+### The one that surfaced, and why it matters
+
+**Tracxn — Fullstack AI Engineer, Bengaluru**, opportunity 61.0. Required stack
+`{HTML, JavaScript, Node.js, Express.js, MongoDB, React, Next.js, OpenAI}`, MID
+seniority, minimum 2 years, PRIMARY coding, 70% resume match, preferred city.
+
+This is close to an exact profile match, and it was invisible before — not for
+want of discovery (the card was already extracted) but for want of a body.
+
+Its score is held down by **company verification, not role fit**: companyQuality
+35/100 and a FAILED verification module, because Tracxn's company record was
+built from a career page and never properly verified. Role fit contributed
+resumeFit 70, experienceFit 90, cityPreference 100. That is a separate lead
+worth pursuing on its own terms — a real company scoring 35/100 confidence
+suppresses every job it posts.
+
+The NEEDS_REVIEW (Sarvam AI, Strategic Deployment Engineer) is correctly
+conservative: SOLUTIONS_ENGINEERING, adjacent family, SUBSTANTIAL coding,
+deferred to a human rather than guessed.
+
+### Do NOT extrapolate this cohort
+
+1 useful result in 76 is **not** a 1.3% hydration yield. The cohort is six
+companies, dominated by Sarvam AI (Python/Rust/K8s AI infrastructure) and
+Tracxn. It is not representative of the 241 corpus-wide INSUFFICIENT_EVIDENCE
+jobs, which sit across lever, breezy, workday and freehire. Nor should the 45
+NOT_DEVELOPMENT results be counted as product yield — they are evaluation
+hygiene, valuable operationally, but no opportunity reached the user.
+
+### The metric for next time
+
+Not descriptions recovered per dollar, and not jobs hydrated per dollar:
+
+```
+incremental APPLY + CONSIDER
+────────────────────────────────
+incremental classification + fetch cost
+```
+
+The Tracxn result matters because it establishes the numerator can be non-zero.
+Whether it survives across sources is the open question.
+
+### Next investigation, before any scheduler
+
+Sample the 241 corpus-wide INSUFFICIENT_EVIDENCE jobs **stratified by source**
+(lever, breezy, workday, freehire), ~20-30 each with engineering titles
+deliberately represented, and estimate recoverable-evidence %, relevant-role %
+and CONSIDER/APPLY yield per source. Do not hydrate all 241.
+
+### Explicitly not done
+
+Scheduling hydrationDue · hydrating the 411 · retrying the 6 refusals ·
+loosening the refusal rules · renderer · classifier changes · Opportunity Score
+changes · Adzuna · Gmail · career-card extraction expansion.
+
+The experiment is closed. It should not be tweaked further to chase an APPLY.
