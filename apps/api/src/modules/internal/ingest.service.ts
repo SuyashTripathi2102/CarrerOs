@@ -25,6 +25,15 @@ const EMBED_GRACE_MS = 30 * 60 * 1000;
 /** Bounded so one sweep cannot enqueue the entire corpus after an outage. */
 const EMBED_SWEEP_LIMIT = 2_000;
 
+/**
+ * How long before a job whose detail page yielded nothing is tried again.
+ *
+ * Seven days, not hours: the pages that fail are JS shells, login walls and
+ * postings that genuinely carry no body, and none of those change by tomorrow.
+ * A short retry would re-fetch the same third-party pages daily for no gain.
+ */
+const HYDRATION_RETRY_MS = 7 * 24 * 60 * 60 * 1000;
+
 export interface SyncResult {
   crawlRunId: string;
   found: number;
@@ -225,30 +234,44 @@ export class IngestService {
    * description clears the threshold (see the evidence-invalidation clause in
    * matching.service).
    *
-   * NOT YET SCHEDULED, and it must not be until attempts are recorded. A job
-   * whose detail page never yields a body stays in this result forever and
-   * would consume the batch on every tick — the queue-starvation shape from
-   * 2026-08-12, which is precisely what "persist every decision" exists to
-   * prevent. A scheduled version needs a lastHydrationAttemptAt (or equivalent)
-   * so a failure is remembered rather than retried indefinitely.
+   * CLAIMED AT SELECTION, exactly as renderDue claims with lastRenderedAt. A
+   * job whose detail page never yields a usable body would otherwise stay in
+   * this result forever, consume the batch on every tick and re-fetch the same
+   * third-party page indefinitely — the 2026-08-12 queue-starvation shape, and
+   * rude besides. Success needs no special handling: a job whose description
+   * now clears MIN_DESCRIPTION_CHARS drops out of the WHERE clause on its own.
+   *
+   * Claiming before the work means a crash loses one cycle rather than
+   * repeating it forever. That trade is deliberate and matches the render tier.
    */
   async hydrationDue(limit = 50): Promise<
     { id: string; externalId: string; source: string; url: string; description: string }[]
   > {
     const capped = Math.min(200, Math.max(1, limit));
+    const retryAfter = new Date(Date.now() - HYDRATION_RETRY_MS);
     return this.prisma.$queryRaw`
-      SELECT j.id, j."externalId", j.source, j.url, COALESCE(j.description, '') AS description
-      FROM jobs j
-      WHERE j.status = 'ACTIVE'
-        AND j.url ~ '^https?://'
-        AND length(COALESCE(j.description, '')) < ${MIN_DESCRIPTION_CHARS}
-      ORDER BY
-        EXISTS (
-          SELECT 1 FROM job_matches m
-          WHERE m."jobId" = j.id AND m."verdictCode" = 'INSUFFICIENT_EVIDENCE'
-        ) DESC,
-        j."firstSeenAt" DESC
-      LIMIT ${capped}
+      WITH due AS (
+        SELECT j.id
+        FROM jobs j
+        WHERE j.status = 'ACTIVE'
+          AND j.url ~ '^https?://'
+          AND length(COALESCE(j.description, '')) < ${MIN_DESCRIPTION_CHARS}
+          AND (j."lastHydrationAttemptAt" IS NULL OR j."lastHydrationAttemptAt" < ${retryAfter})
+        ORDER BY
+          -- Jobs a body would actually unstick come first: they already have a
+          -- decision waiting on evidence, and it re-opens by itself once the
+          -- description clears the threshold.
+          EXISTS (
+            SELECT 1 FROM job_matches m
+            WHERE m."jobId" = j.id AND m."verdictCode" = 'INSUFFICIENT_EVIDENCE'
+          ) DESC,
+          j."lastHydrationAttemptAt" ASC NULLS FIRST,
+          j."firstSeenAt" DESC
+        LIMIT ${capped}
+      )
+      UPDATE jobs SET "lastHydrationAttemptAt" = now()
+      WHERE id IN (SELECT id FROM due)
+      RETURNING id, "externalId", source, url, COALESCE(description, '') AS description
     `;
   }
 

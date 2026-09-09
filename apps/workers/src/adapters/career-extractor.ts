@@ -231,7 +231,22 @@ export function extractCareerPage(
     job: {
       externalId: externalIdFor(j.url, j.title),
       title: j.title,
-      description: `${j.title}${j.location ? ` · ${j.location}` : ''} — via ${companyName} careers page.`,
+      /**
+       * A listing card carries no job body, so this adapter has none to give.
+       *
+       * It used to synthesise one — `${title} · ${location} — via ${company}
+       * careers page.` — roughly 94 characters of the title handed back as
+       * evidence. That is the failure the DescriptionSource enum exists to
+       * prevent: it looked like a description in every count and every column,
+       * and only the 200-character gate stopped it being judged as one. A
+       * slightly chattier stub would have been judged blind on its own title.
+       *
+       * Empty + MISSING is the honest state: sought, genuinely unavailable,
+       * hold and never judge. Detail hydration fills it in later, and the
+       * evidence-invalidation clause then re-opens the decision.
+       */
+      description: '',
+      descriptionSource: 'MISSING',
       url: j.url!,
       location: j.location,
       country: j.location && CITY.test(j.location) && !/remote|hybrid/i.test(j.location) ? 'IN' : null,

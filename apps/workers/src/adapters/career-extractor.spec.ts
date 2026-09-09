@@ -98,3 +98,65 @@ describe('looksJsRendered (render-tier gate)', () => {
     expect(looksJsRendered(page(body))).toBe(false);
   });
 });
+
+/**
+ * A listing card carries no job body, and this adapter must not pretend it has
+ * one.
+ *
+ * It used to emit `${title} · ${location} — via ${company} careers page.` as the
+ * description — about 94 characters of the title handed back as evidence.
+ * Measured 2026-09-09: 82 career-page jobs were held at INSUFFICIENT_EVIDENCE
+ * carrying exactly that, `descriptionSource` NULL, none of them ever judged.
+ *
+ * No test asserted on the description field, which is why it survived. These do.
+ */
+describe('description provenance — never fabricate a body', () => {
+  const html = page(
+    a('/careers/backend-engineer', 'Backend Engineer') +
+      a('/careers/react-developer', 'React Developer'),
+  );
+
+  it('emits an EMPTY description, not a synthesised one', () => {
+    const { boardJobs } = extractCareerPage(html, 'https://acme.com/careers', 'Acme', 70);
+    expect(boardJobs.length).toBeGreaterThan(0);
+    for (const b of boardJobs) expect(b.job.description).toBe('');
+  });
+
+  it('never writes the title, the location or the company into the description', () => {
+    const { boardJobs } = extractCareerPage(html, 'https://acme.com/careers', 'Acme', 70);
+    for (const b of boardJobs) {
+      expect(b.job.description).not.toContain(b.job.title);
+      expect(b.job.description).not.toContain('Acme');
+      expect(b.job.description).not.toMatch(/careers page/i);
+    }
+  });
+
+  it('marks the body MISSING — sought and genuinely unavailable', () => {
+    // MISSING is load-bearing: the gate holds these instead of judging them
+    // blind, which is the protection built after 6,907 jobs were refused
+    // NOT_DEVELOPMENT for descriptions nobody had.
+    const { boardJobs } = extractCareerPage(html, 'https://acme.com/careers', 'Acme', 70);
+    for (const b of boardJobs) expect(b.job.descriptionSource).toBe('MISSING');
+  });
+
+  it('never claims LIST or DETAIL — neither was read', () => {
+    const { boardJobs } = extractCareerPage(html, 'https://acme.com/careers', 'Acme', 70);
+    for (const b of boardJobs) {
+      expect(b.job.descriptionSource).not.toBe('LIST');
+      expect(b.job.descriptionSource).not.toBe('DETAIL');
+    }
+  });
+
+  it('stays empty even when the card carries rich context', () => {
+    // Location, employment type and department raise the confidence score, and
+    // it would be easy to mistake that context for a description. It is not.
+    const rich = page(
+      `<li>${a('/careers/backend', 'Backend Engineer')} Bengaluru Full-Time Engineering 3+ years</li>`,
+    );
+    const { boardJobs } = extractCareerPage(rich, 'https://acme.com/careers', 'Acme', 70);
+    for (const b of boardJobs) {
+      expect(b.job.description).toBe('');
+      expect(b.job.descriptionSource).toBe('MISSING');
+    }
+  });
+});
