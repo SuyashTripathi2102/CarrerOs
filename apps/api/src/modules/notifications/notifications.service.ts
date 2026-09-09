@@ -6,6 +6,7 @@ import { jobMatchesCountries, locationTags } from '../matching/location-filter';
 import { companyTier, isEvergreen } from '../opportunity/company-tier';
 import { readScoreModules, type ScoreModule } from '../opportunity/opportunity.service';
 import { InlineButton, TelegramChannel } from './channels';
+import { encodeAppliedToken } from './telegram-callback';
 
 // Telegram caps a message at 4096 characters; the rest of the card needs room.
 const REASONING_MAX_CHARS = 2500;
@@ -22,7 +23,7 @@ export class NotificationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly telegram: TelegramChannel,
-    config: ConfigService,
+    private readonly config: ConfigService,
   ) {
     this.minScore = Number(config.get('NOTIFY_MIN_SCORE', 70));
     this.maxAgeDays = Number(config.get('NOTIFY_MAX_AGE_DAYS')) || 30;
@@ -329,7 +330,12 @@ export class NotificationsService {
     buttons?: InlineButton[][],
   ): Promise<void> {
     // Always recorded in-app; pushed to any configured channel.
-    await this.prisma.notification.create({
+    //
+    // Created BEFORE the send, because its id is what the "Applied" button
+    // carries back. callback_data is capped at 64 bytes, so it cannot hold the
+    // job — it holds this row, which resolves server-side to both the user and
+    // the job. See telegram-callback.ts.
+    const notification = await this.prisma.notification.create({
       data: {
         userId,
         type: NotificationType.NEW_MATCHES,
@@ -337,15 +343,60 @@ export class NotificationsService {
       },
     });
 
+    const withApplied = this.appendAppliedButton(buttons, notification.id, payload);
+
     if (this.telegram.isConfigured()) {
       try {
-        await this.telegram.send(text, { buttons });
+        await this.telegram.send(text, { buttons: withApplied });
       } catch (err) {
         this.logger.error(`telegram delivery failed: ${err instanceof Error ? err.message : err}`);
       }
     } else {
       this.logger.log(`[notification] (telegram not configured)\n${text.replace(/<[^>]+>/g, '')}`);
     }
+  }
+
+  /**
+   * Adds "✓ Applied" to a job notification — the only inbound signal CareerOS
+   * has.
+   *
+   * Audited 2026-09-09: 104 of 107 APPLY matches were notified and `applications`
+   * had never held a row, because the message was a one-way broadcast ending in
+   * a raw employer URL. `applied_total = 0` measured the absence of a mechanism,
+   * not the user's behaviour.
+   *
+   * Returns the buttons unchanged when there is no job to attribute or no
+   * callback secret configured — a message without the button is the previous
+   * behaviour, which is a fine fallback. Never throws: a formatting problem
+   * here must not cost the user the notification itself.
+   */
+  private appendAppliedButton(
+    buttons: InlineButton[][] | undefined,
+    notificationId: string,
+    payload: Record<string, unknown>,
+  ): InlineButton[][] | undefined {
+    const jobId = typeof payload.jobId === 'string' ? payload.jobId : null;
+    const secret = this.callbackSecret();
+    if (!jobId || !secret) return buttons;
+    try {
+      return [
+        ...(buttons ?? []),
+        [{ text: '✓ Applied', callback_data: encodeAppliedToken(notificationId, secret) }],
+      ];
+    } catch (err) {
+      this.logger.warn(`applied button skipped: ${err instanceof Error ? err.message : err}`);
+      return buttons;
+    }
+  }
+
+  /**
+   * Derived from the bot token rather than configured separately: the signature
+   * only has to be unforgeable by outsiders, and requiring a new env var would
+   * mean the button silently never appears on an otherwise working install.
+   */
+  private callbackSecret(): string | null {
+    const token = this.config.get<string>('TELEGRAM_BOT_TOKEN');
+    return token ? `careeros-callback:${token}` : null;
   }
 }
 

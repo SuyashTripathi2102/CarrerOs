@@ -8,14 +8,20 @@ export interface NotificationChannel {
   send(text: string, opts?: SendOptions): Promise<void>;
 }
 
-export interface InlineButton {
-  text: string;
-  url: string;
-}
+/**
+ * A URL button leaves Telegram; a callback button comes back to us.
+ *
+ * The callback variant is what closes the outcome loop: until it existed, every
+ * notification was a one-way broadcast and CareerOS could not learn whether the
+ * user acted. `callback_data` is capped at 64 bytes by Telegram — see
+ * telegram-callback.ts for what we put in it and why it is not the job id.
+ */
+export type InlineButton =
+  | { text: string; url: string }
+  | { text: string; callback_data: string };
 
 export interface SendOptions {
-  /** Rows of URL buttons (Telegram inline keyboard). Callback buttons need
-   *  bot update polling — Phase D-4; URL buttons work with fire-and-forget. */
+  /** Rows of buttons (Telegram inline keyboard). */
   buttons?: InlineButton[][];
 }
 
@@ -58,6 +64,27 @@ export class TelegramChannel implements NotificationChannel {
     if (!res.ok) {
       const body = await res.text().catch(() => '');
       throw new Error(`Telegram sendMessage -> ${res.status}: ${body.slice(0, 200)}`);
+    }
+  }
+
+  /**
+   * Close the loading spinner on a tapped inline button.
+   *
+   * Telegram requires this within seconds; without it the button spins and the
+   * user reasonably concludes nothing happened. Best-effort by design — the
+   * application is already recorded by the time this runs, and failing to
+   * acknowledge must never undo that.
+   */
+  async answerCallback(callbackQueryId: string, text: string): Promise<void> {
+    if (!this.isConfigured() || !callbackQueryId) return;
+    try {
+      await fetch(`https://api.telegram.org/bot${this.token}/answerCallbackQuery`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ callback_query_id: callbackQueryId, text: text.slice(0, 200) }),
+      });
+    } catch (err) {
+      this.logger.warn(`answerCallbackQuery failed: ${err instanceof Error ? err.message : err}`);
     }
   }
 }
