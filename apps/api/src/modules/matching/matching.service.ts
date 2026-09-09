@@ -17,6 +17,7 @@ import {
   specializationBreakdown,
 } from './role-classification';
 import type { JobClassification } from './role-classification';
+import { evidenceOf, isClassificationStale } from './classification-evidence';
 import { atsKeywordAudit } from './ats-keywords';
 import { opportunityScore, type HiringTrend } from './opportunity-score';
 import { SourceTrustService } from '../source-trust/source-trust.service';
@@ -672,32 +673,69 @@ export class MatchingService {
     const byJob = new Map<string, (typeof known)[number]>();
     for (const k of known) if (!byJob.has(k.jobId)) byJob.set(k.jobId, k);
 
+    /**
+     * A classification may only be used while it matches the job's current
+     * material evidence.
+     *
+     * Measured 2026-09-09: jobs re-opened by the evidence-invalidation clause
+     * were judged against classifications whose own stored reasoning said "the
+     * job description is completely empty" — for postings that by then carried
+     * 8,097 characters. The resulting NOT_DEVELOPMENT is precisely the
+     * confident-claim-about-an-unread-posting that INSUFFICIENT_EVIDENCE exists
+     * to prevent, and it is terminal, because only INSUFFICIENT_EVIDENCE
+     * re-opens.
+     */
+    const byId = new Map(candidates.map((c) => [c.id, c]));
+    let staleClassifications = 0;
+    for (const [jobId, row] of byJob) {
+      const job = byId.get(jobId);
+      if (!job) continue;
+      if (isClassificationStale(row, { title: job.title, description: job.description })) {
+        byJob.delete(jobId);
+        staleClassifications++;
+      }
+    }
+    if (staleClassifications > 0) {
+      // Loud: this means evidence arrived after a job was already classified,
+      // and every one of these was previously judged on the older evidence.
+      this.logger.warn(
+        `${staleClassifications} cached classification(s) discarded — computed on evidence ` +
+          `the job no longer has; reclassifying before any verdict`,
+      );
+    }
+
     const unclassified = candidates.filter((c) => !byJob.has(c.id));
     if (unclassified.length) {
-      this.logger.log(`classifying ${unclassified.length} new jobs before scoring`);
+      this.logger.log(`classifying ${unclassified.length} job(s) before scoring`);
       const { classified } = await this.classifier.classify(unclassified, async (batch) => {
         for (const c of batch) {
+          const job = byId.get(c.jobId);
+          const fields = {
+            primaryFunction: c.primaryFunction,
+            roleFamily: c.roleFamily,
+            specializations: c.specialization,
+            codingIntensity: c.codingIntensity,
+            developmentConfidence: c.developmentConfidence,
+            seniority: c.seniority,
+            minimumYears: c.minimumYears,
+            maximumYears: c.maximumYears,
+            requiredSkills: c.requiredSkills,
+            preferredSkills: c.preferredSkills,
+            responsibilities: c.responsibilities,
+            developmentEvidence: c.developmentEvidence,
+            nonDevelopmentEvidence: c.nonDevelopmentEvidence,
+            classificationReason: c.classificationReason,
+            // Provenance: what this classification was computed FROM. Without
+            // it, staleness can only be guessed at from the reasoning prose.
+            ...evidenceOf({ title: job?.title ?? '', description: job?.description ?? '' }),
+          };
           const row = await this.prisma.jobClassification.upsert({
             where: { jobId_classifierVersion: { jobId: c.jobId, classifierVersion: CLASSIFIER_VERSION } },
-            create: {
-              jobId: c.jobId,
-              classifierVersion: CLASSIFIER_VERSION,
-              primaryFunction: c.primaryFunction,
-              roleFamily: c.roleFamily,
-              specializations: c.specialization,
-              codingIntensity: c.codingIntensity,
-              developmentConfidence: c.developmentConfidence,
-              seniority: c.seniority,
-              minimumYears: c.minimumYears,
-              maximumYears: c.maximumYears,
-              requiredSkills: c.requiredSkills,
-              preferredSkills: c.preferredSkills,
-              responsibilities: c.responsibilities,
-              developmentEvidence: c.developmentEvidence,
-              nonDevelopmentEvidence: c.nonDevelopmentEvidence,
-              classificationReason: c.classificationReason,
-            },
-            update: {},
+            create: { jobId: c.jobId, classifierVersion: CLASSIFIER_VERSION, ...fields },
+            // Was `{}`. A reclassification could therefore never persist: the
+            // row survived, the fresh answer was discarded, and the next run
+            // read the stale one again.
+            update: fields,
           });
           byJob.set(c.jobId, row);
         }

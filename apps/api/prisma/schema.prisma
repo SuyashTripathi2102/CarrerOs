@@ -687,6 +687,17 @@ model JobClassification {
   nonDevelopmentEvidence String[] @default([])
   classificationReason   String
 
+  /// Fingerprint of the evidence this classification was computed FROM: the
+  /// title plus the truncated description the model actually read. A
+  /// classification may only be used while it matches the job's current
+  /// material evidence -- otherwise the verdict derived from it is a confident
+  /// claim about a posting nobody read. Null on rows written before provenance
+  /// was recorded; those are treated as usable and cleaned up deliberately.
+  evidenceFingerprint String?
+  /// Description length at classification time. Distinguishes a cosmetic edit
+  /// from the crossing that matters: below MIN_DESCRIPTION_CHARS to at or above.
+  evidenceLength      Int?
+
   classifiedAt DateTime @default(now())
 
   job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
