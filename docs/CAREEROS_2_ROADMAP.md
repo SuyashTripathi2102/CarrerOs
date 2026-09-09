@@ -899,3 +899,4 @@ scraping volume.
 | LinkedIn scraping | ToS; brittle; ADR-8 red line |
 | Crawl4AI now | renderer boundary already exists; benchmark before adopting |
 | Loosening the seniority gate | destroys the product's reason to exist |
+| Relative-URL "fix" in the career extractor | RETRACTED 2026-09-09: misdiagnosed. `new URL(c.href, baseUrl)` already resolves relative hrefs, so no defect existed. The entries `valid()` rejected were description bullets ("Minimum 4-5 years in front-end development using React") and product pages ("Designer Notebooks & Planners") -- it was working correctly. Loosening it would have ingested shop listings as jobs, the RemoteOK failure again. Recorded so the same false lead is not re-opened. |
