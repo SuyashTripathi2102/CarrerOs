@@ -233,6 +233,64 @@ raw alert count is a vanity metric. Gmail API cost is effectively zero at this
 volume, so unlike Adzuna this is not a spend decision — but it is still a value
 decision.
 
+## 7a. Suspicious-zero guards — DETECTION ONLY
+
+*Added 2026-09-09 during Step 3/4 review. This is a reliability requirement
+found in review, not implemented behaviour — see "current state" below.*
+
+**The invariant.** A sync that completes successfully must not silently produce
+zero downstream jobs while an upstream stage held data. Each transition in the
+§7 funnel that can collapse to zero must be able to say so.
+
+| transition | zero is suspicious when | what it means |
+|---|---|---|
+| messages → alerts matched | the fetch was **sender-scoped** and returned messages | `matchesLinkedInAlert` is broken, or LinkedIn changed its sender |
+| alerts matched → jobs parsed | any alert matched | the email template changed |
+| jobs parsed → valid BoardJobs | any job parsed | normalization or schema validation is rejecting every card |
+
+The third is the one this connector is most likely to hit. `BoardJobSchema`
+requires a company, the parser derives it from position rather than from any
+labelled field, and a template that moves the company into an `<img alt>` yields
+null for every card. The result is not "fewer jobs" — it is **zero**, arriving
+as a clean, successful, entirely unremarkable run.
+
+**Guard = detection. It never repairs, substitutes or fabricates.** A guard that
+filled in a missing company would convert a visible template break into
+permanent silent corruption. This is the same contract as the queue wedge
+detector: it reports, and a human decides. Nothing in this section may write to
+a job, a verdict or a cursor.
+
+### The first rule is mode-dependent — and that is not a detail
+
+"messages > 0 and alerts = 0 is suspicious" is correct **only for a
+sender-scoped fetch**. `seedQuery` scopes SEED to
+`(from:jobalerts-noreply@linkedin.com) newer_than:30d`, so scanning messages
+there and matching no alerts means the sender check is broken.
+
+INCREMENTAL mode uses Gmail's history API, which returns **all** mailbox changes
+with no sender filter. Applied there, the rule fires on every ordinary day of
+non-LinkedIn email. A guard that cries wolf daily is worse than no guard: it
+trains the operator to ignore the one time it is real. That is how the
+`UNKNOWN != LOW` class of bug survives — an alarm nobody reads.
+
+So the rule is scoped to sender-filtered fetches. The honest incremental-mode
+signal is different and is **not** specified here: a long run of zero alerts
+against a known alert cadence. It needs the cadence first, which needs a
+connected mailbox, which does not exist yet. Do not invent a threshold for it.
+
+### Current state — 1 of 3 implemented
+
+| guard | state |
+|---|---|
+| messages → alerts | **not implemented**, and blocked on the mode distinction above |
+| alerts → parsed | implemented: `isSuspiciousOutcome`, `describeOutcome` |
+| parsed → BoardJobs | **not implemented** — `SyncOutcome` carries no validity count, so this needs a new field, not just a new rule |
+
+One existing test contradicts this section and must be split before the guards
+land: `gmail-sync.spec.ts` asserts `{messagesScanned: 40, alertsMatched: 0}` is
+*not* suspicious. That is right for INCREMENTAL and wrong for SEED. It becomes
+two tests, one per mode.
+
 ## 8. Deliberately NOT built
 
 - Naukri and Indeed parsers (interface only)
