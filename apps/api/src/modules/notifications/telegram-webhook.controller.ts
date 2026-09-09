@@ -1,4 +1,4 @@
-import { Body, Controller, Headers, Logger, Post } from '@nestjs/common';
+import { Body, Controller, Headers, HttpCode, Logger, Post } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApplicationStatus } from '@prisma/client';
 import { Public } from '../../common/decorators/public.decorator';
@@ -38,6 +38,10 @@ export class TelegramWebhookController {
 
   @Public()
   @Post('webhook')
+  // Nest defaults POST to 201. Telegram's API documents 200 as the expected
+  // acknowledgement, and while it accepts any 2xx there is no reason to differ
+  // from the contract on the one endpoint it calls.
+  @HttpCode(200)
   async webhook(
     @Body() update: unknown,
     @Headers('x-telegram-bot-api-secret-token') secret?: string,
@@ -68,7 +72,7 @@ export class TelegramWebhookController {
 
   /**
    * Resolve the notification, then record the application through the EXISTING
-   * path — ApplicationsService.create already writes the application, its
+   * path — ApplicationsService.createFromJob already writes the application, its
    * status event, the resume version that applied, and the APPLIED analytics
    * event. Duplicating any of that here would create a second source of truth
    * for the outcome data this loop exists to collect.
