@@ -49,18 +49,58 @@ async function fetchRenderedHtml(url: string): Promise<string | null> {
   }
 }
 
-/** IPv4-forced HTML GET (broken v6 egress; arbitrary career hosts) — null on any failure. */
-function fetchHtmlV4(url: string, timeoutMs = 10_000): Promise<string | null> {
+/**
+ * IPv4-forced HTML GET (broken v6 egress; arbitrary career hosts) — null on any
+ * failure. Exported for its regression test.
+ *
+ * EVERY exit path goes through settle(). `req.destroy()` with no argument aborts
+ * the socket WITHOUT emitting 'error', so the previous version's timeout path
+ * and body-cap path left this promise pending forever. In a worker that is not a
+ * crash and not an error: the job simply never finishes, holds its concurrency
+ * slot until the BullMQ lock expires, and reports nothing — the same wedge shape
+ * this project has already been bitten by. Raising lockDuration does not help a
+ * promise that never settles; it only delays the symptom.
+ */
+export function fetchHtmlV4(
+  url: string,
+  timeoutMs = 10_000,
+  hardDeadlineMs = timeoutMs + 5_000,
+): Promise<string | null> {
   return new Promise((resolve) => {
+    let settled = false;
+    let body = '';
+    let req: ReturnType<typeof httpGet> | undefined;
+    // req.setTimeout is a SOCKET-INACTIVITY timeout: it only arms once a socket
+    // has been assigned, so it covers nothing during DNS resolution or connect.
+    // A host that stalls before the socket exists is therefore invisible to it —
+    // measured on auxano.zohorecruit.in, which failed to settle within 15s while
+    // holding a 10s socket timeout. This deadline covers the whole operation.
+    // Deliberately NOT unref'd: while a fetch is outstanding this timer is what
+    // keeps the event loop alive, so the process can no longer drain and exit 0
+    // in the middle of a run.
+    const settle = (v: string | null | Promise<string | null>) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(deadline);
+      resolve(v);
+    };
+    const deadline = setTimeout(() => {
+      try {
+        req?.destroy();
+      } catch {
+        /* already gone */
+      }
+      settle(null);
+    }, hardDeadlineMs);
     let u: URL;
     try {
       u = new URL(url);
     } catch {
-      resolve(null);
+      settle(null);
       return;
     }
     const getter = u.protocol === 'http:' ? httpGet : httpsGet;
-    const req = getter(
+    req = getter(
       url,
       {
         family: 4,
@@ -71,31 +111,43 @@ function fetchHtmlV4(url: string, timeoutMs = 10_000): Promise<string | null> {
         // Follow one redirect manually (keeps it simple + bounded).
         if (status >= 300 && status < 400 && res.headers.location) {
           res.resume();
-          resolve(fetchHtmlV4(new URL(res.headers.location, url).toString(), timeoutMs));
+          settle(fetchHtmlV4(new URL(res.headers.location, url).toString(), timeoutMs));
           return;
         }
         if (status >= 400) {
           res.resume();
-          resolve(null);
+          settle(null);
           return;
         }
         const ct = res.headers['content-type'] ?? '';
         if (!/text\/html|application\/xhtml/i.test(String(ct))) {
           res.resume();
-          resolve(null);
+          settle(null);
           return;
         }
-        let body = '';
         res.setEncoding('utf8');
         res.on('data', (c) => {
           body += c;
-          if (body.length > 1_500_000) req.destroy(); // cap
+          // Oversized page: give up rather than hold megabytes of a marketing
+          // site in memory. Settling is what this cap always meant to do —
+          // destroy() alone left the caller waiting on a socket already gone.
+          if (body.length > 1_500_000) {
+            req?.destroy();
+            settle(null);
+          }
         });
-        res.on('end', () => resolve(body));
+        res.on('end', () => settle(body));
+        res.on('error', () => settle(null));
       },
     );
-    req.setTimeout(timeoutMs, () => req.destroy());
-    req.on('error', () => resolve(null));
+    req.setTimeout(timeoutMs, () => {
+      req.destroy();
+      settle(null); // destroy() emits no 'error'; without this the promise hangs
+    });
+    req.on('error', () => settle(null));
+    // Backstop for any remaining path that ends the socket with neither
+    // 'error' nor 'end' — a server that resets mid-body, for instance.
+    req.on('close', () => settle(body.length > 0 ? body : null));
   });
 }
 
