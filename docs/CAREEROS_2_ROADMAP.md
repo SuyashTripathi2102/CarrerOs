@@ -900,3 +900,32 @@ scraping volume.
 | Crawl4AI now | renderer boundary already exists; benchmark before adopting |
 | Loosening the seniority gate | destroys the product's reason to exist |
 | Relative-URL "fix" in the career extractor | RETRACTED 2026-09-09: misdiagnosed. `new URL(c.href, baseUrl)` already resolves relative hrefs, so no defect existed. The entries `valid()` rejected were description bullets ("Minimum 4-5 years in front-end development using React") and product pages ("Designer Notebooks & Planners") -- it was working correctly. Loosening it would have ingested shop listings as jobs, the RemoteOK failure again. Recorded so the same false lead is not re-opened. |
+
+
+### Confirmed defect: prober false-positive on a redirected career candidate
+
+**A resolved URL equal to the company's website root is not evidence of a career
+page.** `prober.ts` probes conventional paths and accepts one via
+`resolveUrl(..., headOnly = true)`, treating a successful resolution as proof.
+`resolveUrl` follows redirects and returns the FINAL url, so for a company whose
+`/careers` 301s to the homepage the sequence is:
+
+```
+/careers -> 301/307 -> homepage -> HEAD succeeds
+         -> careerPageUrl = website -> CAREER_PAGE_FOUND -> extracted forever
+```
+
+A HEAD 200 says a URL resolves. It says nothing about what is on the page.
+
+Corpus-wide signature `careerPageUrl = website`: **22 companies** (12
+`city-bengaluru`, 6 `delhistartupmap`, 4 `yc`). The six Delhi cases were verified
+independently: 280-546 hrefs per homepage, none career-related, and `/careers`
+returns 301/307 to the root on all six while a nonsense control path 404s. Those
+sites deliberately redirect `/careers` home -- the owner saying "no jobs here".
+
+NOT YET FIXED, deliberately. The likely guard is `resolved !== website`, but
+career content can legitimately live at a root host (`careers.shiprocket.in/` is
+correct and must not be invalidated), so the invariant belongs on resolved-URL
+semantics, not on `pathname === '/'`. Measure the 22 before encoding the rule.
+
+Never fabricate a career URL from a conventional path.
