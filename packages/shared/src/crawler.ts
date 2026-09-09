@@ -1,5 +1,17 @@
 import { z } from 'zod';
+
 import { WorkModeSchema } from './enums';
+
+/**
+ * Below this many characters a posting carries too little evidence to judge.
+ *
+ * Lives in shared because BOTH sides depend on it and they must not drift: the
+ * API's eligibility gate refuses at this threshold, and the worker's detail
+ * hydration decides whether a fetched page is worth writing by the same number.
+ * Two copies would mean the hydrator could 'fix' a job the gate still refuses,
+ * or skip one it would now accept -- silently, and only visible as a count.
+ */
+export const MIN_DESCRIPTION_CHARS = 200;
 
 /**
  * The contract every crawler adapter (Node ATS fetchers, Python scraper)

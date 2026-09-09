@@ -11,6 +11,7 @@ import { CLASSIFIER_VERSION, JobClassifierService } from './job-classifier.servi
 import { PIPELINE_DECISION_VERSION } from './pipeline-version';
 import {
   DEFAULT_ROLE_PROFILE,
+  MIN_DESCRIPTION_CHARS,
   eligibility,
   offPathDiscipline,
   specializationBreakdown,
@@ -457,6 +458,31 @@ export class MatchingService {
             -- BOTH writers must stamp this same constant — see
             -- pipeline-version.ts for what happened when they did not.
             AND (m."decisionVersion" IS NULL OR m."decisionVersion" >= ${PIPELINE_DECISION_VERSION})
+            -- EVIDENCE INVALIDATION (2026-09-09).
+            --
+            -- Until this clause, a decision was re-opened by a new profile or a
+            -- new pipeline version and by nothing else — the JOB's own content
+            -- was not part of the predicate at all. So when a body arrived late,
+            -- ingest correctly rebuilt the embedding (batchUpsert/
+            -- repairDescriptions clear it on a changed body) and the job
+            -- re-entered retrieval carrying a good vector, only to be filtered
+            -- out here by a verdict made when there was nothing to read.
+            --
+            -- Measured: 26 rows held at INSUFFICIENT_EVIDENCE whose descriptions
+            -- had since grown to 1,496-3,851 characters. All 26 had an embedding
+            -- rebuilt AFTER the decision. One fact, two consumers, one updated.
+            --
+            -- INSUFFICIENT_EVIDENCE is itself the record that the body was below
+            -- MIN_DESCRIPTION_CHARS at decision time, so no extra column is
+            -- needed to know the evidence changed: if it now clears the
+            -- threshold, the decision was made on evidence that no longer
+            -- exists. Scoped to that one code deliberately — a decision reached
+            -- by READING a posting stays binding, and re-opening on any string
+            -- edit would re-judge the corpus on cosmetic churn.
+            AND NOT (
+              m."verdictCode" = 'INSUFFICIENT_EVIDENCE'
+              AND length(COALESCE(j.description, '')) >= ${MIN_DESCRIPTION_CHARS}
+            )
         )
       -- FRESHNESS TIERS BEFORE SIMILARITY (2026-08-15). Ordering purely by
       -- similarity meant a 40-day-old listing at 0.85 was evaluated ahead of a

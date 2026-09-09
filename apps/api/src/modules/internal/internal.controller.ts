@@ -100,6 +100,17 @@ export class InternalController {
   }
 
   /**
+   * ACTIVE jobs with a body too thin to judge and their own absolute URL — the
+   * evidence exists and was never fetched. Read-only; the caller decides what,
+   * if anything, is worth writing back through repair-descriptions.
+   */
+  @Get('jobs/hydration-due')
+  hydrationDue(@Query('limit') limit?: string) {
+    const n = Number(limit ?? 50);
+    return this.ingest.hydrationDue(Number.isFinite(n) ? n : 50);
+  }
+
+  /**
    * Update description + provenance on existing rows. Never inserts, never
    * retires, never touches any other column.
    */

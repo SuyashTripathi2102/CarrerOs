@@ -69,6 +69,16 @@ export class ApiClient {
   }
 
   /**
+   * ACTIVE jobs whose body is too thin to judge but which carry their own
+   * absolute URL — the evidence exists and was never fetched.
+   */
+  hydrationDue(
+    limit: number,
+  ): Promise<{ id: string; externalId: string; source: string; url: string; description: string }[]> {
+    return this.request('GET', `/internal/jobs/hydration-due?limit=${limit}`);
+  }
+
+  /**
    * Update description + provenance on jobs that already exist. Cannot insert,
    * cannot retire — see IngestService.repairDescriptions.
    */

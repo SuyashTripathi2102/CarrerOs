@@ -3,6 +3,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { CrawlStatus, CrawlTier, DiscoveryStage, JobStatus, Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { MIN_DESCRIPTION_CHARS } from '@careeros/shared';
 import type { BoardJob, NormalizedJob } from '@careeros/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CompaniesService } from '../companies/companies.service';
@@ -208,6 +209,47 @@ export class IngestService {
         `window — re-enqueued ${rows.length}`,
     );
     return { stranded, enqueued: rows.length };
+  }
+
+  /**
+   * ACTIVE jobs whose stored body is too thin to judge but which carry their
+   * own absolute URL — i.e. the evidence exists, we simply never fetched it.
+   *
+   * Measured 2026-09-09: 82 career-page jobs sat at INSUFFICIENT_EVIDENCE with
+   * a per-job detail URL each. Fetching those URLs over ordinary HTTP recovered
+   * a real description for 77, including 28 of 29 software roles. Nothing in
+   * the system was asking for them.
+   *
+   * Jobs already refused for lack of evidence come first: they are the ones a
+   * body would actually unstick, and the decision re-opens on its own once the
+   * description clears the threshold (see the evidence-invalidation clause in
+   * matching.service).
+   *
+   * NOT YET SCHEDULED, and it must not be until attempts are recorded. A job
+   * whose detail page never yields a body stays in this result forever and
+   * would consume the batch on every tick — the queue-starvation shape from
+   * 2026-08-12, which is precisely what "persist every decision" exists to
+   * prevent. A scheduled version needs a lastHydrationAttemptAt (or equivalent)
+   * so a failure is remembered rather than retried indefinitely.
+   */
+  async hydrationDue(limit = 50): Promise<
+    { id: string; externalId: string; source: string; url: string; description: string }[]
+  > {
+    const capped = Math.min(200, Math.max(1, limit));
+    return this.prisma.$queryRaw`
+      SELECT j.id, j."externalId", j.source, j.url, COALESCE(j.description, '') AS description
+      FROM jobs j
+      WHERE j.status = 'ACTIVE'
+        AND j.url ~ '^https?://'
+        AND length(COALESCE(j.description, '')) < ${MIN_DESCRIPTION_CHARS}
+      ORDER BY
+        EXISTS (
+          SELECT 1 FROM job_matches m
+          WHERE m."jobId" = j.id AND m."verdictCode" = 'INSUFFICIENT_EVIDENCE'
+        ) DESC,
+        j."firstSeenAt" DESC
+      LIMIT ${capped}
+    `;
   }
 
   async repairDescriptions(

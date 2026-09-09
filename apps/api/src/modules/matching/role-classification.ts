@@ -1,3 +1,5 @@
+import { MIN_DESCRIPTION_CHARS } from '@careeros/shared';
+
 /**
  * Job-level role classification, and the user-level fit derived from it.
  *
@@ -587,7 +589,11 @@ export type EligibilityCode =
  * from the measured distribution: of 920 sub-200-char NOT_DEVELOPMENT refusals,
  * 880 were exactly zero — the population is "empty", not "terse".
  */
-export const MIN_DESCRIPTION_CHARS = 200;
+// Re-exported, not redeclared. The worker's detail hydration uses the SAME
+// number to decide whether a fetched page is worth writing; two copies could
+// drift into a hydrator that "fixes" jobs this gate still refuses, visible only
+// as a count that never moves. One fact, one home.
+export { MIN_DESCRIPTION_CHARS };
 
 export interface Eligibility {
   /** Passes every hard gate — may proceed to personalized resume scoring. */
