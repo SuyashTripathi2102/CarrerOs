@@ -1029,3 +1029,72 @@ loosening the refusal rules · renderer · classifier changes · Opportunity Sco
 changes · Adzuna · Gmail · career-card extraction expansion.
 
 The experiment is closed. It should not be tweaked further to chase an APPLY.
+
+
+## Incident 2026-09-10: an 8-hour processing gap that was not a CareerOS defect
+
+**Cause: the laptop lid was closed overnight.** Windows suspended the WSL2 VM,
+so every container lost CPU. CareerOS did not crash; the machine running it
+stopped executing.
+
+```
+~22:00 UTC  lid closed -> WSL2 suspended
+              crawls 0 · ingest 0 · AI calls 0 · evaluation 0
+~06:00 UTC  resumed -> workers reconnect, BullMQ reschedules, pipeline continues
+```
+
+### The evidence that settled it
+
+Not the belt's own metrics, which looked alarming in isolation: 9.3 hours with
+no decisions while 304 India candidates sat eligible, 280 of which had been
+eligible before the gap began. That framing led to ruling out the budget guard,
+a scheduler wedge, worker death and a missing resume embedding — none of which
+were the cause.
+
+What settled it was **cross-subsystem correlation**:
+
+| hour (UTC) | ingested | AI calls | crawl runs |
+|---|---|---|---|
+| 21:00 | 338 | 69 | > 0 |
+| 22:00 – 05:00 | **0** | **0** | **0** |
+| 06:00 | 70 | 31 | > 0 |
+
+Everything stopped together and resumed together. A subsystem defect cannot do
+that.
+
+The scheduler path was separately proven healthy by catching a tick in flight —
+repeat key enqueued, `:lock` held, `active = 1`, AI calls accruing, decisions
+written — rather than inferred from the next-run timestamp.
+
+### The debugging lesson, which is the durable part
+
+**Establish blast radius before diagnosing a subsystem.** One query against
+`jobs.firstSeenAt` would have separated "evaluation stopped" from "everything
+stopped" in seconds, and would have skipped an hour of ruling out queue
+mechanics. The same mistake in a different costume as reading a candidate count
+without the country filter: measuring the thing suspected instead of the thing
+that discriminates.
+
+A recurrence should start with ingest, crawl, worker and evaluation activity
+plus host uptime — and only then look at an individual queue.
+
+### What is NOT wrong, and what is
+
+The pipeline is sound. A clean suspend and resume left no damage: 0 stranded
+embeddings, no failed jobs, no duplicate work, and the belt caught up unattended.
+
+The limitation is the deployment environment. A laptop is currently the
+production host, so "find jobs continuously, including overnight" is not
+something the current setup can promise.
+
+### Deliberately not fixed now
+
+Changing the lid-close power setting, or moving the always-on services to a VM,
+would both work — and both introduce a variable in the middle of the Telegram
+APPLIED measurement period. Neither is worth contaminating that for.
+
+Recorded instead as a future reliability/instrumentation task: **the daily
+baseline calls a day "clean" on stranded-embedding and crawl-failure counts,
+which a clean suspension passes.** A multi-hour window with zero activity across
+every subsystem should be detectable as a gap rather than read as health — the
+same "empty looks like healthy" shape this project keeps meeting.
