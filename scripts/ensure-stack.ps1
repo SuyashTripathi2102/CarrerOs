@@ -33,7 +33,7 @@
   powershell -ExecutionPolicy Bypass -File scripts/ensure-stack.ps1 -Restart
 #>
 param(
-  [string]$RepoRoot = 'D:\CarrerOs',
+  [string]$RepoRoot = (Split-Path $PSScriptRoot -Parent),
   [switch]$Restart,
   [int]$DockerWaitSeconds = 180,
   [int]$ApiWaitSeconds = 180

@@ -15,9 +15,10 @@
   this script is what stands between it and a dead disk.
 
   Two destinations, deliberately:
-    LOCAL  D:\CareerOS-Backups - a different PHYSICAL drive from the Docker
-           volume (Docker Desktop keeps its WSL2 vhdx under C:), so one disk
-           failure does not take both.
+    LOCAL  D:\CareerOS-Backups when that folder exists, otherwise
+           %USERPROFILE%\CareerOS-Backups. Guards against a damaged Docker
+           volume, NOT a dead disk: on the original laptop C: and D: were two
+           partitions of one NVMe drive.
     OFF    OneDrive - leaves the machine entirely. Survives theft, fire and a
            dead laptop, which the local copy does not.
 
@@ -38,7 +39,7 @@
   powershell -ExecutionPolicy Bypass -File scripts/backup.ps1 -OffMachinePath 'E:\Backups'
 #>
 param(
-  [string]$LocalPath = 'D:\CareerOS-Backups',
+  [string]$LocalPath = $(if (Test-Path 'D:\CareerOS-Backups') { 'D:\CareerOS-Backups' } else { Join-Path $env:USERPROFILE 'CareerOS-Backups' }),
   [string]$OffMachinePath = '',
   [int]$KeepDaily = 7,
   [int]$KeepWeekly = 4,
@@ -202,8 +203,12 @@ function Invoke-Rotation([string]$dir) {
   foreach ($f in $all) {
     if ($f.LastWriteTime -gt (Get-Date).AddDays(-$KeepDaily)) { [void]$keep.Add($f.FullName) }
   }
-  $weeks = $all | Group-Object { (Get-Date $_.LastWriteTime).ToString('yyyy-ww') } |
-    Select-Object -First $KeepWeekly
+  # -UFormat, not .ToString('yyyy-ww'): .NET has no week specifier, so 'ww' came
+  # out literally, every dump landed in one "2026-ww" group, and the weeklies
+  # never existed. After any gap longer than $KeepDaily the next run would have
+  # deleted all but one dump, here and on OneDrive.
+  $weeks = $all | Group-Object { Get-Date $_.LastWriteTime -UFormat '%Y-%V' } |
+    Sort-Object Name -Descending | Select-Object -First $KeepWeekly
   foreach ($w in $weeks) {
     $newest = @($w.Group | Sort-Object LastWriteTime -Descending)[0]
     [void]$keep.Add($newest.FullName)
