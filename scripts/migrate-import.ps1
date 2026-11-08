@@ -241,9 +241,15 @@ function Copy-Missing([string]$source, [string]$target) {
   foreach ($file in Get-ChildItem -LiteralPath $base -Recurse -File -Force) {
     $dest = Join-Path $target $file.FullName.Substring($base.Length + 1)
     if (Test-Path -LiteralPath $dest) { continue }
-    New-Item -ItemType Directory -Force -Path (Split-Path $dest -Parent) | Out-Null
-    Copy-Item -LiteralPath $file.FullName -Destination $dest
-    $copied++
+    # Claude history is a convenience: one over-long path must not fail an
+    # import whose code and data have already been verified.
+    try {
+      New-Item -ItemType Directory -Force -Path (Split-Path $dest -Parent) | Out-Null
+      Copy-Item -LiteralPath $file.FullName -Destination $dest
+      $copied++
+    } catch {
+      Write-Warning "Skipped $($file.Name): $($_.Exception.Message)"
+    }
   }
   return $copied
 }
