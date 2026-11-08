@@ -17,7 +17,11 @@
   failure and exits non-zero rather than reporting success -- the watchdog's
   false-green on 2026-08-23 is the reason that is spelled out here.
 #>
-param([string]$RepoRoot = (Split-Path $PSScriptRoot -Parent))
+param([string]$RepoRoot = '')
+
+# Resolved here, not as the parameter default: Windows PowerShell 5.1 leaves
+# $PSScriptRoot empty while binding parameters under -File.
+if (-not $RepoRoot) { $RepoRoot = Split-Path $PSScriptRoot -Parent }
 
 $ErrorActionPreference = 'Stop'
 $logDir = Join-Path $env:TEMP 'careeros'

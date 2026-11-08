@@ -27,12 +27,16 @@
 #>
 param(
   [Parameter(Mandatory = $true)][string]$RepoRoot,
-  [string]$Bundle = $PSScriptRoot,
+  [string]$Bundle = '',
   [string]$ComposeProject = 'careeros',
   [string]$UserHome = $env:USERPROFILE,
   [switch]$Force,
   [switch]$Rehearsal
 )
+
+# Resolved here, not as the parameter default: Windows PowerShell 5.1 leaves
+# $PSScriptRoot empty while binding parameters under -File.
+if (-not $Bundle) { $Bundle = $PSScriptRoot }
 
 $ErrorActionPreference = 'Stop'
 $NpmPin = 'npm@11.12.1'

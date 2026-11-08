@@ -21,11 +21,15 @@
 #>
 param(
   [Parameter(Mandatory = $true)][string]$Destination,
-  [string]$RepoRoot = (Split-Path $PSScriptRoot -Parent),
+  [string]$RepoRoot = '',
   [string]$BackupPath = $(if (Test-Path 'D:\CareerOS-Backups') { 'D:\CareerOS-Backups' } else { Join-Path $env:USERPROFILE 'CareerOS-Backups' }),
   [int]$MaxDumpAgeHours = 24,
   [string]$ComposeProject = 'careeros'
 )
+
+# Resolved here, not as the parameter default: Windows PowerShell 5.1 leaves
+# $PSScriptRoot empty while binding parameters under -File.
+if (-not $RepoRoot) { $RepoRoot = Split-Path $PSScriptRoot -Parent }
 
 $ErrorActionPreference = 'Stop'
 $pg = "$ComposeProject-postgres-1"
