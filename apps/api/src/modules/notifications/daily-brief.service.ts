@@ -1,10 +1,33 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  parseRetirementDropGuard,
+  RETIREMENT_DROP_GUARD,
+} from '../internal/retirement-guard';
 import { activeVersionSql, notActedOnSql } from '../matching/active-resume.sql';
 import { locationTags } from '../matching/location-filter';
 import { opportunityScore, type HiringTrend } from '../matching/opportunity-score';
 import { TelegramChannel } from './channels';
+
+/**
+ * A retirement gets a line in the brief when it retired at least this many
+ * jobs AND more jobs than the crawl kept (R1-D5). Large boards retire this many
+ * on routine churn while keeping far more; only the mass-retirement shape is
+ * worth a person's attention.
+ */
+export const LARGE_RETIREMENT_MIN = 50;
+const LARGE_RETIREMENT_LINES = 5;
+
+export interface LargeRetirement {
+  company: string;
+  source: string;
+  /** What this crawl saw: its recorded, distinct jobsFound. */
+  found: number;
+  removed: number;
+  /** What the previous valid crawl saw; null when there was none. */
+  referenceFound: number | null;
+}
 
 /**
  * ⭐ Daily Brief (ROADMAP v0.3): the morning answer to "what should I do
@@ -22,9 +45,13 @@ export class DailyBriefService {
   ) {
     // The dashboard shares the CORS origin — one env, one truth.
     this.dashboardUrl = config.get<string>('CORS_ORIGIN') || null;
+    this.largeRetirementsOn = parseRetirementDropGuard(
+      config.get<string>(RETIREMENT_DROP_GUARD),
+    ).on;
   }
 
   private readonly dashboardUrl: string | null;
+  private readonly largeRetirementsOn: boolean;
 
   /**
    * Midday CONSIDER digest (notification policy, 2026-07-09): APPLY jobs push
@@ -285,7 +312,77 @@ export class DailyBriefService {
       );
     }
 
+    const retirements = await this.largeRetirementLines();
+    if (retirements.length > 0) lines.push(``, ...retirements);
+
     return lines.join('\n');
+  }
+
+  /**
+   * Company crawls that finished in the last 24 hours, whose retirement ran
+   * (`reconciled`) and retired at least LARGE_RETIREMENT_MIN jobs and more
+   * jobs than they kept, largest first, so a person can check them. With the
+   * guard on, that shape is normally a confirmed drop: retiring more than it
+   * kept means seeing under half of what was there.
+   *
+   * Each carries what the previous valid crawl saw, read with the same
+   * predicate the drop guard decides with: finished before this crawl started
+   * (R1-D6), so an overlapping crawl that finished later is never shown as the
+   * reference the decision did not use. For a retirement the guard deferred
+   * once, that previous crawl is the deferred one, so the two counts are close
+   * and the drop shows as "retired".
+   */
+  async largeRetirements(): Promise<{ rows: LargeRetirement[]; more: number }> {
+    const rows = await this.prisma.$queryRaw<
+      (LargeRetirement & { total: number })[]
+    >`
+      SELECT c.name AS company, r.source, r."jobsFound" AS found, r."jobsRemoved" AS removed,
+             ref.found AS "referenceFound", (count(*) OVER ())::int AS total
+      FROM crawl_runs r
+      JOIN companies c ON c.id = r."companyId"
+      LEFT JOIN LATERAL (
+        SELECT p."jobsFound" AS found
+        FROM crawl_runs p
+        WHERE p."companyId" = r."companyId" AND p.source = r.source
+          AND p.status = 'SUCCEEDED' AND p.complete IS TRUE AND p."jobsFound" > 0
+          AND p."startedAt" < r."startedAt"
+          AND p."finishedAt" < r."startedAt"
+        ORDER BY p."startedAt" DESC
+        LIMIT 1
+      ) ref ON true
+      WHERE r."companyId" IS NOT NULL
+        AND r.reconciled IS TRUE
+        AND r."jobsRemoved" >= ${LARGE_RETIREMENT_MIN}
+        AND r."jobsRemoved" > r."jobsFound"
+        AND r."finishedAt" > now() - interval '24 hours'
+      ORDER BY r."jobsRemoved" DESC, c.name, r.id
+      LIMIT ${LARGE_RETIREMENT_LINES}
+    `;
+    const total = rows[0]?.total ?? 0;
+    return {
+      rows: rows.map((r) => ({
+        company: r.company,
+        source: r.source,
+        found: r.found,
+        removed: r.removed,
+        referenceFound: r.referenceFound,
+      })),
+      more: Math.max(0, total - rows.length),
+    };
+  }
+
+  /** Off with the drop guard's switch; a failure costs this section, never the brief. */
+  private async largeRetirementLines(): Promise<string[]> {
+    if (!this.largeRetirementsOn) return [];
+    try {
+      const { rows, more } = await this.largeRetirements();
+      return formatLargeRetirements(rows, more);
+    } catch (err) {
+      this.logger.warn(
+        `large-retirements section left out: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return [];
+    }
   }
 
   /**
@@ -382,4 +479,28 @@ export class DailyBriefService {
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function count(n: number): string {
+  return n.toLocaleString('en-IN');
+}
+
+/** The brief's section for largeRetirements(); no lines, and so no section, when there are none. */
+export function formatLargeRetirements(
+  rows: LargeRetirement[],
+  more: number,
+): string[] {
+  if (rows.length === 0) return [];
+  return [
+    `🧹 <b>Large retirements (last 24 h)</b>`,
+    ...rows.map(
+      (r) =>
+        `• ${escapeHtml(r.company)} (${escapeHtml(r.source)}): ${count(r.removed)} retired · ` +
+        `this crawl saw ${count(r.found)} · ` +
+        (r.referenceFound == null
+          ? 'no earlier valid crawl'
+          : `the previous valid crawl saw ${count(r.referenceFound)}`),
+    ),
+    ...(more > 0 ? [`and ${more} more`] : []),
+  ];
 }
