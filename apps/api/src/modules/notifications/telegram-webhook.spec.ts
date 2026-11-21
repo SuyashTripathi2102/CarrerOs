@@ -1,5 +1,19 @@
+import { NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { TelegramWebhookController } from './telegram-webhook.controller';
+import { TelegramAppliedService } from './telegram-applied.service';
 import { encodeAppliedToken } from './telegram-callback';
+
+/** What Prisma throws when the unique (userId, jobId) rejects the second of two taps. */
+const duplicateApplication = () =>
+  new Prisma.PrismaClientKnownRequestError(
+    'Unique constraint failed on the fields: (`userId`,`jobId`)',
+    {
+      code: 'P2002',
+      clientVersion: Prisma.prismaVersion.client,
+      meta: { modelName: 'Application', target: ['userId', 'jobId'] },
+    },
+  );
 
 /**
  * The controller's job is to write an application EXACTLY once, and to write
@@ -21,7 +35,8 @@ const JOB = 'job-abc';
 function build(opts: {
   notification?: { userId: string; payload: unknown } | null;
   existingApplication?: { id: string; status: string } | null;
-  createThrows?: boolean;
+  createError?: Error;
+  inbound?: string;
 }) {
   const calls = { created: [] as unknown[], answered: [] as string[] };
   const prisma = {
@@ -30,7 +45,7 @@ function build(opts: {
   };
   const applications = {
     createFromJob: async (userId: string, jobId: string, o: unknown) => {
-      if (opts.createThrows) throw new Error('Unique constraint failed');
+      if (opts.createError) throw opts.createError;
       calls.created.push({ userId, jobId, o });
       return { id: 'app-1' };
     },
@@ -46,14 +61,15 @@ function build(opts: {
         TELEGRAM_BOT_TOKEN: BOT_TOKEN,
         TELEGRAM_WEBHOOK_SECRET: WEBHOOK_SECRET,
         TELEGRAM_CHAT_ID: CHAT_ID,
+        TELEGRAM_INBOUND: opts.inbound,
       })[k],
   };
-  const controller = new TelegramWebhookController(
+  const applied = new TelegramAppliedService(
     prisma as never,
     applications as never,
     telegram as never,
-    config as never,
   );
+  const controller = new TelegramWebhookController(applied, config as never);
   return { controller, calls };
 }
 
@@ -123,9 +139,38 @@ describe('idempotency — Telegram retries and users double-tap', () => {
   it('treats a lost race as success, not an error', async () => {
     // Two taps in flight: the unique (userId, jobId) rejects the second insert.
     // That is the guarantee holding — the user must not see a failure.
-    const { controller, calls } = build({ notification: NOTIFICATION, createThrows: true });
-    await expect(controller.webhook(validUpdate(), WEBHOOK_SECRET)).resolves.toEqual({ ok: true });
-    expect(calls.answered[0]).toMatch(/Already recorded/i);
+    const { controller, calls } = build({
+      notification: NOTIFICATION,
+      createError: duplicateApplication(),
+    });
+    await expect(
+      controller.webhook(validUpdate(), WEBHOOK_SECRET),
+    ).resolves.toEqual({ ok: true });
+    expect(calls.answered).toEqual(['Already recorded as applied.']);
+  });
+
+  it('says the job is gone when it no longer exists, and records nothing', async () => {
+    const { controller, calls } = build({
+      notification: NOTIFICATION,
+      createError: new NotFoundException('Job not found'),
+    });
+    await expect(
+      controller.webhook(validUpdate(), WEBHOOK_SECRET),
+    ).resolves.toEqual({ ok: true });
+    expect(calls.created).toHaveLength(0);
+    expect(calls.answered).toEqual(['That job is no longer in CareerOS.']);
+  });
+
+  it('asks for another tap when the database fails, instead of claiming success', async () => {
+    const { controller, calls } = build({
+      notification: NOTIFICATION,
+      createError: new Error("Can't reach database server at localhost:5434"),
+    });
+    await expect(
+      controller.webhook(validUpdate(), WEBHOOK_SECRET),
+    ).resolves.toEqual({ ok: true });
+    expect(calls.created).toHaveLength(0);
+    expect(calls.answered).toEqual(['Could not record it; please tap again.']);
   });
 });
 
@@ -173,6 +218,20 @@ describe('no mutation on anything unauthorized or unrecognised', () => {
     await controller.webhook(validUpdate(), WEBHOOK_SECRET);
     expect(calls.created).toHaveLength(0);
     expect(calls.answered[0]).toMatch(/could not identify/i);
+  });
+});
+
+describe('one inbound transport at a time', () => {
+  it('acts on nothing while TELEGRAM_INBOUND=polling, even a valid signed callback', async () => {
+    const { controller, calls } = build({
+      notification: NOTIFICATION,
+      inbound: 'polling',
+    });
+    await expect(
+      controller.webhook(validUpdate(), WEBHOOK_SECRET),
+    ).resolves.toEqual({ ok: true });
+    expect(calls.created).toHaveLength(0);
+    expect(calls.answered).toHaveLength(0);
   });
 });
 

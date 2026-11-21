@@ -5,6 +5,8 @@ import {
   extractCallback,
   isAuthorizedUpdate,
   planAppliedCallback,
+  planPolledCallback,
+  telegramInboundMode,
 } from './telegram-callback';
 
 /**
@@ -100,6 +102,40 @@ describe('extractCallback', () => {
 
   it('ignores a callback query with no data', () => {
     expect(extractCallback({ callback_query: { id: '1', from: { id: CHAT_ID } } })).toBeNull();
+  });
+});
+
+describe('planPolledCallback — no header, same sender and signature checks', () => {
+  const polled = { chatId: CHAT_ID, callbackSecret: SECRET };
+
+  it('records a signed callback from the configured chat', () => {
+    const token = encodeAppliedToken(NOTIF, SECRET);
+    expect(planPolledCallback(update(token), polled)).toEqual({
+      action: 'RECORD',
+      notificationId: NOTIF,
+    });
+  });
+
+  it('IGNOREs a valid token from another chat', () => {
+    const token = encodeAppliedToken(NOTIF, SECRET);
+    expect(planPolledCallback(update(token, '55555'), polled).action).toBe(
+      'IGNORE',
+    );
+  });
+
+  it('IGNOREs an unsigned identifier and anything without a configured chat', () => {
+    expect(planPolledCallback(update(NOTIF), polled).action).toBe('IGNORE');
+    const token = encodeAppliedToken(NOTIF, SECRET);
+    expect(
+      planPolledCallback(update(token), { callbackSecret: SECRET }).action,
+    ).toBe('IGNORE');
+  });
+
+  it('only "polling" switches the transport; everything else keeps the webhook', () => {
+    expect(telegramInboundMode('polling')).toBe('polling');
+    expect(telegramInboundMode(' Polling ')).toBe('polling');
+    for (const v of [undefined, '', 'webhook', 'poll', 'true'])
+      expect(telegramInboundMode(v)).toBe('webhook');
   });
 });
 

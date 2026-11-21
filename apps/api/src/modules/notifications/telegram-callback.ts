@@ -140,3 +140,55 @@ export function planAppliedCallback(
 
   return { action: 'RECORD', notificationId };
 }
+
+/**
+ * The same decision for an update CareerOS fetched itself with getUpdates.
+ *
+ * There is no secret header to check: polling pulls from api.telegram.org over
+ * HTTPS with the bot token, so the transport is authenticated by construction.
+ * Everything else still applies — the sender must be the configured chat and
+ * the callback data must carry our signature.
+ */
+export function planPolledCallback(
+  update: unknown,
+  configured: { chatId?: string; callbackSecret?: string },
+): AppliedOutcome {
+  const cb = extractCallback(update);
+  if (!cb) return { action: 'IGNORE', reason: 'not a callback_query' };
+
+  if (!configured.chatId)
+    return { action: 'IGNORE', reason: 'chat id not configured' };
+  if (String(cb.from?.id ?? '') !== String(configured.chatId)) {
+    return { action: 'IGNORE', reason: 'sender is not the configured chat' };
+  }
+
+  const notificationId = decodeAppliedToken(
+    cb.data,
+    configured.callbackSecret ?? '',
+  );
+  if (!notificationId)
+    return {
+      action: 'IGNORE',
+      reason: 'unrecognised or unsigned callback data',
+    };
+
+  return { action: 'RECORD', notificationId };
+}
+
+/**
+ * Which transport delivers taps. Exactly one at a time: Telegram refuses
+ * getUpdates while a webhook is set, so running both would have one silently
+ * fail. Anything but "polling" keeps the original webhook behaviour.
+ */
+export function telegramInboundMode(
+  raw: string | undefined,
+): 'polling' | 'webhook' {
+  return raw?.trim().toLowerCase() === 'polling' ? 'polling' : 'webhook';
+}
+
+/** Signs and verifies the Applied button; derived from the bot token, so no extra setup. */
+export function callbackSecretFor(
+  botToken: string | undefined,
+): string | undefined {
+  return botToken ? `careeros-callback:${botToken}` : undefined;
+}
