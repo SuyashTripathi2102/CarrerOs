@@ -85,7 +85,10 @@ services:
       S3_SECRET_KEY: ${S3_SECRET_KEY}
       S3_BUCKET: careeros
       PORT: 3001
+      HOST: 0.0.0.0
+      ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-false}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      DASHBOARD_URL: ${DASHBOARD_URL:-}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set in .env.prod}
       JWT_ACCESS_EXPIRES_IN: 15m
       REFRESH_TOKEN_TTL_DAYS: 7

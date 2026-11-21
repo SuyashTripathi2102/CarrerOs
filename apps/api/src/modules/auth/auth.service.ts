@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -32,16 +33,32 @@ export class AuthService {
     private readonly config: ConfigService,
   ) {}
 
+  /**
+   * Sign-up is open only to create the first account, unless ALLOW_REGISTRATION=true.
+   *
+   * The decision is made under a lock, in the same transaction as the insert
+   * (UsersRepository.createUnderSignupLock), so two sign-ups that arrive together can never both
+   * create "the first account". The quick look at the count before it only spares a closed sign-up
+   * the password hash; on its own it proves nothing. The gate is always checked before the email,
+   * so a closed sign-up reveals nothing about which accounts exist.
+   */
   async register(email: string, password: string, name?: string): Promise<AuthResult> {
-    const existing = await this.users.findByEmail(email.toLowerCase());
-    if (existing) throw new ConflictException('An account with this email already exists');
+    const openToAll = this.openToAll();
+    if (!openToAll && (await this.users.count()) > 0)
+      throw new ForbiddenException('Registration is closed');
 
-    const user = await this.users.create({
-      email: email.toLowerCase(),
-      passwordHash: await bcrypt.hash(password, BCRYPT_ROUNDS),
-      name: name ?? null,
-    });
-    return this.buildAuthResult(user);
+    // Hashed before the lock is taken, so the lock is held only for the check and the insert.
+    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    const outcome = await this.users.createUnderSignupLock(
+      { email: email.toLowerCase(), passwordHash, name: name ?? null },
+      openToAll,
+    );
+    if ('refused' in outcome) {
+      if (outcome.refused === 'closed')
+        throw new ForbiddenException('Registration is closed');
+      throw new ConflictException('An account with this email already exists');
+    }
+    return this.buildAuthResult(outcome.created);
   }
 
   async login(email: string, password: string): Promise<AuthResult> {
@@ -101,6 +118,14 @@ export class AuthService {
     const stored = await this.refreshTokens.findByHash(this.hashToken(rawToken));
     if (stored && !stored.revokedAt) await this.refreshTokens.revoke(stored.id);
     // Unknown token → still 204: logout must be idempotent.
+  }
+
+  /** ALLOW_REGISTRATION=true, in any case and with spaces around it: sign-up stays open to everyone. */
+  private openToAll(): boolean {
+    return (
+      this.config.get<string>('ALLOW_REGISTRATION')?.trim().toLowerCase() ===
+      'true'
+    );
   }
 
   private async buildAuthResult(user: User): Promise<AuthResult> {
