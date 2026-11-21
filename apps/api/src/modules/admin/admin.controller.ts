@@ -1,8 +1,9 @@
 import { Controller, Get } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { CrawlStatus, JobStatus } from '@prisma/client';
+import { CrawlStatus, JobStatus, Role } from '@prisma/client';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../../prisma/prisma.service';
+import { Roles } from '../../common/decorators/roles.decorator';
 
 const QUEUES = [
   'refresh-all',
@@ -22,6 +23,8 @@ const QUEUES = [
  * answers "is the machine alive and what did it do today" — invaluable the
  * first time something breaks silently on the VPS.
  */
+// Operator only (W8): the account's current role is checked against the database by RolesGuard.
+@Roles(Role.ADMIN)
 @Controller('admin/health')
 export class AdminController {
   private readonly redisUrl: string;

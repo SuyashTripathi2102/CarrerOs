@@ -16,6 +16,8 @@ import { Public } from '../../common/decorators/public.decorator';
 import { InternalTokenGuard } from '../internal/internal-token.guard';
 import { DERIVE_INTEL_QUEUE } from './intelligence.processor';
 import { IntelligenceService } from './intelligence.service';
+import { Role } from '@prisma/client';
+import { Roles } from '../../common/decorators/roles.decorator';
 
 @Controller()
 export class IntelligenceController {
@@ -36,6 +38,8 @@ export class IntelligenceController {
   }
 
   /** Kick off LLM derivation for companies with stale/missing profiles. */
+  // Starts derivation for every company, on the AI budget: operator only (W8).
+  @Roles(Role.ADMIN)
   @Post('intelligence/derive')
   @HttpCode(HttpStatus.ACCEPTED)
   async derive() {

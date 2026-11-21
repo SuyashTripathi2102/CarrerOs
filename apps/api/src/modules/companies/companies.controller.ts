@@ -10,11 +10,15 @@ import {
 } from '@nestjs/common';
 import { CompaniesService } from './companies.service';
 import { CreateCompanyDto } from './dto/create-company.dto';
+import { Role } from '@prisma/client';
+import { Roles } from '../../common/decorators/roles.decorator';
 
 @Controller('companies')
 export class CompaniesController {
   constructor(private readonly companiesService: CompaniesService) {}
 
+  // Adding to the shared catalogue is an operator action (W8); reading it stays open to every account.
+  @Roles(Role.ADMIN)
   @Post()
   create(@Body() dto: CreateCompanyDto) {
     return this.companiesService.create(dto);

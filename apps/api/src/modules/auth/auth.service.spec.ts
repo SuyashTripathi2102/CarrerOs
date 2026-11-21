@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Logger } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import type { JwtService } from '@nestjs/jwt';
 import type { User } from '@prisma/client';
@@ -14,6 +14,7 @@ type Locked = { created: User } | { refused: 'closed' | 'email-taken' };
  */
 function setup(opts: {
   users: number;
+  admins?: number;
   env?: Record<string, string>;
   locked?: Locked;
 }) {
@@ -26,6 +27,7 @@ function setup(opts: {
   } as unknown as User;
   const users = {
     count: jest.fn().mockResolvedValue(opts.users),
+    countAdmins: jest.fn().mockResolvedValue(opts.admins ?? 0),
     createUnderSignupLock: jest
       .fn()
       .mockResolvedValue(opts.locked ?? { created }),
@@ -120,4 +122,45 @@ describe('AuthService.register — sign-up gate', () => {
       expect(users.createUnderSignupLock).not.toHaveBeenCalled();
     },
   );
+});
+
+describe('AuthService at startup — the ADMIN count (W8)', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('logs how many ADMIN accounts there are', async () => {
+    const log = jest
+      .spyOn(Logger.prototype, 'log')
+      .mockImplementation(() => undefined);
+    const { service } = setup({ users: 1, admins: 1 });
+
+    await service.onApplicationBootstrap();
+
+    expect(log).toHaveBeenCalledWith('authorization: 1 ADMIN of 1 account(s)');
+  });
+
+  it('warns when there are accounts but no ADMIN: the operator routes refuse everyone', async () => {
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    const { service } = setup({ users: 1, admins: 0 });
+
+    await service.onApplicationBootstrap();
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('no ADMIN among 1 account(s)'),
+    );
+  });
+
+  it('does not stop the start when the count fails', async () => {
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    const { service, users } = setup({ users: 1 });
+    users.countAdmins.mockRejectedValue(new Error('database down'));
+
+    await expect(service.onApplicationBootstrap()).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('could not count ADMIN accounts'),
+    );
+  });
 });

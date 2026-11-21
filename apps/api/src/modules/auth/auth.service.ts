@@ -2,6 +2,8 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
+  OnApplicationBootstrap,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -25,13 +27,43 @@ export interface AuthResult extends TokenPair {
 const BCRYPT_ROUNDS = 12;
 
 @Injectable()
-export class AuthService {
+export class AuthService implements OnApplicationBootstrap {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly users: UsersRepository,
     private readonly refreshTokens: RefreshTokensRepository,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
   ) {}
+
+  /**
+   * Says at every start whether the install has an administrator. The operator routes (crawls,
+   * discovery, health, AI usage) admit only ADMIN accounts (W8); with accounts but no ADMIN they
+   * refuse everyone until one is promoted, which the W8 migration does on deployment. A failed
+   * count never stops the start.
+   */
+  async onApplicationBootstrap(): Promise<void> {
+    try {
+      const [admins, accounts] = await Promise.all([
+        this.users.countAdmins(),
+        this.users.count(),
+      ]);
+      if (accounts > 0 && admins === 0) {
+        this.logger.warn(
+          `no ADMIN among ${accounts} account(s): the operator routes refuse everyone until one is promoted`,
+        );
+      } else {
+        this.logger.log(
+          `authorization: ${admins} ADMIN of ${accounts} account(s)`,
+        );
+      }
+    } catch (err) {
+      this.logger.warn(
+        `could not count ADMIN accounts: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 
   /**
    * Sign-up is open only to create the first account, unless ALLOW_REGISTRATION=true.
