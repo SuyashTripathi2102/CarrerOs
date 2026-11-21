@@ -20,7 +20,19 @@ interface KekaJob {
   skillNames?: string[];
 }
 
-const ORG_ID_RE = /\/ats\/documents\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\//i;
+/**
+ * Keka marks "no publish date" with .NET's DateTime.MinValue
+ * (`0001-01-01T00:00:00`). That is unknown, not a date: read as local time it
+ * becomes year 0 and failed FloBiz's whole crawl (2026-11-21, gap N-01). An
+ * unparseable value is unknown too — `new Date(x).toISOString()` would throw.
+ */
+export function kekaPostedAt(publishedOn: string | undefined): string | null {
+  if (!publishedOn || publishedOn.startsWith('0001-01-01')) return null;
+  const t = new Date(publishedOn);
+  return Number.isNaN(t.getTime()) ? null : t.toISOString();
+}
+
+const ORG_ID_RE =/\/ats\/documents\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\//i;
 
 export const kekaAdapter: AtsAdapter = {
   source: 'keka',
@@ -51,7 +63,7 @@ export const kekaAdapter: AtsAdapter = {
         location,
         country: loc?.countryCode ?? null,
         workMode: workModeFromText(`${j.title} ${location ?? ''}`),
-        postedAt: j.publishedOn ? new Date(j.publishedOn).toISOString() : null,
+        postedAt: kekaPostedAt(j.publishedOn),
       };
     });
   },
