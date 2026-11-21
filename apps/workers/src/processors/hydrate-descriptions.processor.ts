@@ -47,7 +47,10 @@ export function describeHydration(o: HydrationOutcome): string {
     : base;
 }
 
-export async function hydrateDescriptions(api: ApiClient, limit = 50): Promise<HydrationOutcome> {
+export async function hydrateDescriptions(
+  api: ApiClient,
+  limit = 50,
+): Promise<HydrationOutcome> {
   const due = await api.hydrationDue(limit);
   const outcome: HydrationOutcome = {
     attempted: due.length,
@@ -59,7 +62,10 @@ export async function hydrateDescriptions(api: ApiClient, limit = 50): Promise<H
   };
 
   // Grouped by source because repairDescriptions matches on (source, externalId).
-  const writes = new Map<string, { externalId: string; description: string; descriptionSource: string }[]>();
+  const writes = new Map<
+    string,
+    { externalId: string; description: string; descriptionSource: string }[]
+  >();
 
   for (const job of due) {
     const html = await fetchHtmlV4(job.url, FETCH_TIMEOUT_MS);

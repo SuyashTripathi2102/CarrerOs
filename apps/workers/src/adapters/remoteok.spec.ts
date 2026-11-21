@@ -41,7 +41,9 @@ describe('isPlausibleRemoteOkPosting', () => {
     ];
 
     it.each(garbage)('rejects %p', (position, location) => {
-      expect(isPlausibleRemoteOkPosting(item({ position, location }))).toBe(false);
+      expect(isPlausibleRemoteOkPosting(item({ position, location }))).toBe(
+        false,
+      );
     });
 
     // Same feed, same failure mode — these motivated the structural rules.
@@ -57,7 +59,9 @@ describe('isPlausibleRemoteOkPosting', () => {
     ];
 
     it.each(alsoGarbage)('rejects %p', (position, location) => {
-      expect(isPlausibleRemoteOkPosting(item({ position, location }))).toBe(false);
+      expect(isPlausibleRemoteOkPosting(item({ position, location }))).toBe(
+        false,
+      );
     });
   });
 
@@ -74,11 +78,15 @@ describe('isPlausibleRemoteOkPosting', () => {
     ];
 
     it.each(legit)('accepts %p', (position, location) => {
-      expect(isPlausibleRemoteOkPosting(item({ position, location }))).toBe(true);
+      expect(isPlausibleRemoteOkPosting(item({ position, location }))).toBe(
+        true,
+      );
     });
 
     it('accepts a short all-caps acronym title (QA, SRE are real roles)', () => {
-      expect(isPlausibleRemoteOkPosting(item({ position: 'SRE', location: '' }))).toBe(true);
+      expect(
+        isPlausibleRemoteOkPosting(item({ position: 'SRE', location: '' })),
+      ).toBe(true);
     });
   });
 
@@ -88,30 +96,40 @@ describe('isPlausibleRemoteOkPosting', () => {
     });
 
     it('rejects a row with no company (no ghost companies in the flywheel)', () => {
-      expect(isPlausibleRemoteOkPosting(item({ company: undefined }))).toBe(false);
+      expect(isPlausibleRemoteOkPosting(item({ company: undefined }))).toBe(
+        false,
+      );
     });
 
     it('rejects a row with no position', () => {
-      expect(isPlausibleRemoteOkPosting(item({ position: undefined }))).toBe(false);
+      expect(isPlausibleRemoteOkPosting(item({ position: undefined }))).toBe(
+        false,
+      );
     });
   });
 
   describe('structural rules, not a vocabulary list', () => {
     it('rejects an unseen heading in the same shape as the observed ones', () => {
       expect(
-        isPlausibleRemoteOkPosting(item({ position: 'WHY WORK WITH US', location: 'Leeds, ' })),
+        isPlausibleRemoteOkPosting(
+          item({ position: 'WHY WORK WITH US', location: 'Leeds, ' }),
+        ),
       ).toBe(false);
     });
 
     it('rejects a question, which no job title is', () => {
       expect(
-        isPlausibleRemoteOkPosting(item({ position: 'Looking for your next role?', location: '' })),
+        isPlausibleRemoteOkPosting(
+          item({ position: 'Looking for your next role?', location: '' }),
+        ),
       ).toBe(false);
     });
 
     it('rejects a locality even when the title looks like a real job', () => {
       expect(
-        isPlausibleRemoteOkPosting(item({ position: 'Backend Developer', location: 'Bedford, ' })),
+        isPlausibleRemoteOkPosting(
+          item({ position: 'Backend Developer', location: 'Bedford, ' }),
+        ),
       ).toBe(false);
     });
   });

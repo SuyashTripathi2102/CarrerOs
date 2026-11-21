@@ -30,7 +30,10 @@ export const ashbyAdapter: AtsAdapter = {
         externalId: j.id,
         title: j.title,
         description: capDescription(
-          [j.descriptionPlain ?? '', j.compensation?.compensationTierSummary ?? '']
+          [
+            j.descriptionPlain ?? '',
+            j.compensation?.compensationTierSummary ?? '',
+          ]
             .filter(Boolean)
             .join('\n\n'),
         ),

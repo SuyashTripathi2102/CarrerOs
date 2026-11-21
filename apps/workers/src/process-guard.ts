@@ -55,22 +55,33 @@ export function isTransportFault(err: unknown): boolean {
   // message. The only reliable marker is the frame they come from, so scope
   // the match tightly to undici: a failed assertion in our own code must still
   // kill the process.
-  if (e.code === 'ERR_ASSERTION' && typeof e.stack === 'string' && e.stack.includes('undici')) {
+  if (
+    e.code === 'ERR_ASSERTION' &&
+    typeof e.stack === 'string' &&
+    e.stack.includes('undici')
+  ) {
     return true;
   }
 
   // fetch() wraps the real cause ("TypeError: fetch failed").
-  return e.cause !== undefined && e.cause !== err ? isTransportFault(e.cause) : false;
+  return e.cause !== undefined && e.cause !== err
+    ? isTransportFault(e.cause)
+    : false;
 }
 
 type Sink = Pick<Console, 'error'>;
 
-export function installProcessGuard(log: Sink = console, exit = process.exit): void {
+export function installProcessGuard(
+  log: Sink = console,
+  exit: typeof process.exit = (code) => process.exit(code),
+): void {
   const handle = (kind: string) => (err: unknown) => {
     if (isTransportFault(err)) {
       // Loud on purpose. Swallowing silently is how a degraded crawler looks
       // exactly like a healthy one.
-      log.error(`[process-guard] ${kind}: transport fault survived — ${describe(err)}`);
+      log.error(
+        `[process-guard] ${kind}: transport fault survived — ${describe(err)}`,
+      );
       return;
     }
     log.error(`[process-guard] ${kind}: not a transport fault, exiting`, err);

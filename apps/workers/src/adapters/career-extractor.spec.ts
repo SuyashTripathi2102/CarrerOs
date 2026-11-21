@@ -15,9 +15,15 @@ describe('extractCareerPage', () => {
     const r = extractCareerPage(html, 'https://acme.com/careers', 'Acme');
     expect(r.boardJobs.length).toBe(3);
     expect(r.boardJobs.map((b) => b.job.title)).toEqual(
-      expect.arrayContaining(['React Developer', 'Node.js Developer', 'Backend Engineer']),
+      expect.arrayContaining([
+        'React Developer',
+        'Node.js Developer',
+        'Backend Engineer',
+      ]),
     );
-    expect(r.jobs[0].evidence).toEqual(expect.arrayContaining(['title', 'job-url']));
+    expect(r.jobs[0].evidence).toEqual(
+      expect.arrayContaining(['title', 'job-url']),
+    );
     expect(r.confidence).toBeGreaterThanOrEqual(60);
   });
 
@@ -41,7 +47,11 @@ describe('extractCareerPage', () => {
         a('/job-search/', 'Find Your Dream Job'),
       ].join(''),
     );
-    const r = extractCareerPage(html, 'https://collabera.com/join-us', 'Collabera');
+    const r = extractCareerPage(
+      html,
+      'https://collabera.com/join-us',
+      'Collabera',
+    );
     expect(r.boardJobs).toHaveLength(0);
   });
 
@@ -51,14 +61,18 @@ describe('extractCareerPage', () => {
     );
     const r = extractCareerPage(html, 'https://acme.com/careers', 'Acme');
     const job = r.jobs[0];
-    expect(job.evidence).toEqual(expect.arrayContaining(['location', 'experience', 'employment-type']));
+    expect(job.evidence).toEqual(
+      expect.arrayContaining(['location', 'experience', 'employment-type']),
+    );
     expect(job.location).toMatch(/bengaluru/i);
     expect(job.score).toBeGreaterThanOrEqual(70);
     expect(r.boardJobs[0].job.country).toBe('IN');
   });
 
   it('does not treat a bare role mention in prose as a job (needs a supporting signal)', () => {
-    const html = page('<p>We are a leading software developer and consulting company.</p>');
+    const html = page(
+      '<p>We are a leading software developer and consulting company.</p>',
+    );
     const r = extractCareerPage(html, 'https://acme.com', 'Acme');
     expect(r.boardJobs).toHaveLength(0);
   });
@@ -117,13 +131,23 @@ describe('description provenance — never fabricate a body', () => {
   );
 
   it('emits an EMPTY description, not a synthesised one', () => {
-    const { boardJobs } = extractCareerPage(html, 'https://acme.com/careers', 'Acme', 70);
+    const { boardJobs } = extractCareerPage(
+      html,
+      'https://acme.com/careers',
+      'Acme',
+      70,
+    );
     expect(boardJobs.length).toBeGreaterThan(0);
     for (const b of boardJobs) expect(b.job.description).toBe('');
   });
 
   it('never writes the title, the location or the company into the description', () => {
-    const { boardJobs } = extractCareerPage(html, 'https://acme.com/careers', 'Acme', 70);
+    const { boardJobs } = extractCareerPage(
+      html,
+      'https://acme.com/careers',
+      'Acme',
+      70,
+    );
     for (const b of boardJobs) {
       expect(b.job.description).not.toContain(b.job.title);
       expect(b.job.description).not.toContain('Acme');
@@ -135,12 +159,22 @@ describe('description provenance — never fabricate a body', () => {
     // MISSING is load-bearing: the gate holds these instead of judging them
     // blind, which is the protection built after 6,907 jobs were refused
     // NOT_DEVELOPMENT for descriptions nobody had.
-    const { boardJobs } = extractCareerPage(html, 'https://acme.com/careers', 'Acme', 70);
+    const { boardJobs } = extractCareerPage(
+      html,
+      'https://acme.com/careers',
+      'Acme',
+      70,
+    );
     for (const b of boardJobs) expect(b.job.descriptionSource).toBe('MISSING');
   });
 
   it('never claims LIST or DETAIL — neither was read', () => {
-    const { boardJobs } = extractCareerPage(html, 'https://acme.com/careers', 'Acme', 70);
+    const { boardJobs } = extractCareerPage(
+      html,
+      'https://acme.com/careers',
+      'Acme',
+      70,
+    );
     for (const b of boardJobs) {
       expect(b.job.descriptionSource).not.toBe('LIST');
       expect(b.job.descriptionSource).not.toBe('DETAIL');
@@ -153,7 +187,12 @@ describe('description provenance — never fabricate a body', () => {
     const rich = page(
       `<li>${a('/careers/backend', 'Backend Engineer')} Bengaluru Full-Time Engineering 3+ years</li>`,
     );
-    const { boardJobs } = extractCareerPage(rich, 'https://acme.com/careers', 'Acme', 70);
+    const { boardJobs } = extractCareerPage(
+      rich,
+      'https://acme.com/careers',
+      'Acme',
+      70,
+    );
     for (const b of boardJobs) {
       expect(b.job.description).toBe('');
       expect(b.job.descriptionSource).toBe('MISSING');

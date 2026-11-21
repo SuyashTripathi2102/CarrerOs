@@ -20,7 +20,9 @@ export function startPlacesDiscoveryWorker(api: ApiClient): Worker {
 
 /** Weekly — cities don't grow new software companies daily; quota stays tiny. */
 export async function ensurePlacesDiscoverySchedule(): Promise<void> {
-  const queue = new Queue(QueueNames.PLACES_DISCOVERY, { connection: createRedisConnection() });
+  const queue = new Queue(QueueNames.PLACES_DISCOVERY, {
+    connection: createRedisConnection(),
+  });
   await queue.upsertJobScheduler(
     'places-city-weekly',
     { pattern: '0 3 * * 1' }, // Mondays 03:00 UTC = 08:30 IST

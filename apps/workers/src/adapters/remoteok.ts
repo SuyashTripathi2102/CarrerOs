@@ -59,7 +59,12 @@ function titleLacksJobShape(rawTitle: string): boolean {
   // SHOUTED HEADINGS ("HOW APPLY", "CURRENT JOBS OPENING"). A single
   // all-caps token is fine — acronyms like "SRE", "QA" are legitimate.
   const letters = title.replace(/[^a-z]/gi, '');
-  if (words.length > 1 && letters.length > 0 && letters === letters.toUpperCase()) return true;
+  if (
+    words.length > 1 &&
+    letters.length > 0 &&
+    letters === letters.toUpperCase()
+  )
+    return true;
 
   return false;
 }
@@ -90,28 +95,27 @@ export function isPlausibleRemoteOkPosting(item: RemoteOkItem): boolean {
 export async function fetchRemoteOkJobs(): Promise<BoardJob[]> {
   const items = await fetchJson<RemoteOkItem[]>('https://remoteok.com/api');
 
-  return items
-    .filter(isPlausibleRemoteOkPosting)
-    .map((i) => ({
-      company: {
-        // RemoteOK names arrive HTML-encoded ("RG&amp;T Solutions") — decode
-        // or the discovery prober guesses tokens from garbage.
-        name: decodeEntities(i.company!),
-        atsHintUrl: safeUrl(i.apply_url) ?? null,
-      },
-      job: {
-        externalId: `remoteok-${i.id}`,
-        title: decodeEntities(i.position!),
-        description: capDescription(htmlToText(i.description ?? '')),
-        url: safeUrl(i.url) ?? `https://remoteok.com/remote-jobs/${i.slug ?? i.id}`,
-        location: i.location || 'Remote',
-        workMode: 'REMOTE' as const,
-        salaryMin: i.salary_min || null,
-        salaryMax: i.salary_max || null,
-        currency: i.salary_min ? 'USD' : null,
-        postedAt: i.date ? new Date(i.date).toISOString() : null,
-      },
-    }));
+  return items.filter(isPlausibleRemoteOkPosting).map((i) => ({
+    company: {
+      // RemoteOK names arrive HTML-encoded ("RG&amp;T Solutions") — decode
+      // or the discovery prober guesses tokens from garbage.
+      name: decodeEntities(i.company!),
+      atsHintUrl: safeUrl(i.apply_url) ?? null,
+    },
+    job: {
+      externalId: `remoteok-${i.id}`,
+      title: decodeEntities(i.position!),
+      description: capDescription(htmlToText(i.description ?? '')),
+      url:
+        safeUrl(i.url) ?? `https://remoteok.com/remote-jobs/${i.slug ?? i.id}`,
+      location: i.location || 'Remote',
+      workMode: 'REMOTE' as const,
+      salaryMin: i.salary_min || null,
+      salaryMax: i.salary_max || null,
+      currency: i.salary_min ? 'USD' : null,
+      postedAt: i.date ? new Date(i.date).toISOString() : null,
+    },
+  }));
 }
 
 function safeUrl(u: string | undefined): string | undefined {

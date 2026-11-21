@@ -15,7 +15,12 @@ async function main(): Promise<void> {
   try {
     console.log(`now = ${new Date().toISOString()}`);
     const counts = await queue.getJobCounts(
-      'wait', 'active', 'delayed', 'completed', 'failed', 'paused',
+      'wait',
+      'active',
+      'delayed',
+      'completed',
+      'failed',
+      'paused',
     );
     console.log('counts:', JSON.stringify(counts));
     console.log(`paused: ${await queue.isPaused()}`);
@@ -34,7 +39,9 @@ async function main(): Promise<void> {
     const failed = await queue.getJobs(['failed'], 0, 10);
     for (const j of failed) {
       const board = (j.data as { board?: string })?.board ?? '?';
-      console.log(`  FAILED   board=${board} reason=${String(j.failedReason).slice(0, 160)}`);
+      console.log(
+        `  FAILED   board=${board} reason=${String(j.failedReason).slice(0, 160)}`,
+      );
     }
 
     const completed = await queue.getJobs(['completed'], 0, 10);

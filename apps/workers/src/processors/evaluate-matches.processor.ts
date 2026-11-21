@@ -116,5 +116,7 @@ export async function ensureEvaluateMatchesSchedule(): Promise<void> {
     },
   );
   await queue.close();
-  console.log(`[scheduler] evaluate-matches: 10m (cap=${DEFAULT_CAP}/user/tick)`);
+  console.log(
+    `[scheduler] evaluate-matches: 10m (cap=${DEFAULT_CAP}/user/tick)`,
+  );
 }

@@ -12,9 +12,9 @@ import { extractCareerLinksForTest } from './prober';
 describe('extractCareerLinks', () => {
   it('finds a board embedded in an iframe', () => {
     const html = `<div><iframe src="https://jupiter.keka.com/careers/" /></div>`;
-    expect(extractCareerLinksForTest(html, 'https://jupiter.money/careers')).toEqual([
-      'https://jupiter.keka.com/careers/',
-    ]);
+    expect(
+      extractCareerLinksForTest(html, 'https://jupiter.money/careers'),
+    ).toEqual(['https://jupiter.keka.com/careers/']);
   });
 
   it('still finds ordinary anchor links', () => {
@@ -36,9 +36,9 @@ describe('extractCareerLinks', () => {
 
   it('resolves relative frame sources against the page', () => {
     const html = `<iframe src="/jobs/board"></iframe>`;
-    expect(extractCareerLinksForTest(html, 'https://acme.com/careers')).toEqual([
-      'https://acme.com/jobs/board',
-    ]);
+    expect(extractCareerLinksForTest(html, 'https://acme.com/careers')).toEqual(
+      ['https://acme.com/jobs/board'],
+    );
   });
 
   it('ignores frames that are not careers-related', () => {
@@ -47,7 +47,9 @@ describe('extractCareerLinks', () => {
     const html = `
       <iframe src="https://www.youtube.com/embed/xyz"></iframe>
       <iframe src="https://www.google.com/maps/embed?pb=1"></iframe>`;
-    expect(extractCareerLinksForTest(html, 'https://acme.com/careers')).toEqual([]);
+    expect(extractCareerLinksForTest(html, 'https://acme.com/careers')).toEqual(
+      [],
+    );
   });
 
   it('returns http(s) only, never data:/javascript:/mailto:', () => {

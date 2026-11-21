@@ -22,7 +22,9 @@ async function main(): Promise<void> {
     }
     for (const s of schedulers) {
       const when = s.next ? new Date(s.next).toISOString() : '?';
-      console.log(`  ${String(s.key).padEnd(22)} ${String(s.pattern ?? s.every).padEnd(14)} next=${when}`);
+      console.log(
+        `  ${String(s.key).padEnd(22)} ${String(s.pattern ?? s.every).padEnd(14)} next=${when}`,
+      );
     }
   } finally {
     await queue.close();

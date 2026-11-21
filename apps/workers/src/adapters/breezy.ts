@@ -1,6 +1,11 @@
 import type { NormalizedJob } from '@careeros/shared';
 import { htmlToText } from './html';
-import { AtsAdapter, capDescription, fetchJson, workModeFromText } from './types';
+import {
+  AtsAdapter,
+  capDescription,
+  fetchJson,
+  workModeFromText,
+} from './types';
 
 /**
  * Breezy's `/json` listing carries NO description field at all — not an empty
@@ -36,7 +41,11 @@ export function descriptionFromJobPostingLd(html: string): string | null {
       ? (parsed as Record<string, unknown>[])
       : [root, ...((root['@graph'] as Record<string, unknown>[]) ?? [])];
     for (const n of nodes) {
-      if (n && n['@type'] === 'JobPosting' && typeof n.description === 'string') {
+      if (
+        n &&
+        n['@type'] === 'JobPosting' &&
+        typeof n.description === 'string'
+      ) {
         const text = htmlToText(n.description).trim();
         if (text) return text;
       }
@@ -62,7 +71,11 @@ async function fetchText(url: string): Promise<string | null> {
 }
 
 /** Bounded fan-out. Keeps a large board from bursting the host. */
-async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (t: T) => Promise<R>,
+): Promise<R[]> {
   const out: R[] = [];
   let i = 0;
   await Promise.all(
@@ -101,23 +114,28 @@ export const breezyAdapter: AtsAdapter = {
 
     const rows = (positions ?? []).map((p) => ({
       p,
-      url: p.url ?? `https://${companySlug}.breezy.hr/p/${p.friendly_id ?? p.id}`,
+      url:
+        p.url ?? `https://${companySlug}.breezy.hr/p/${p.friendly_id ?? p.id}`,
     }));
 
     // Hydrate ONLY what the listing did not provide. Today that is every row,
     // but the condition stays so a future Breezy change that starts including
     // the body costs no requests at all.
-    const bodies = await mapLimit(rows, DETAIL_CONCURRENCY, async ({ p, url }) => {
-      const fromList = htmlToText(p.description ?? '').trim();
-      if (fromList) return { text: fromList, source: 'LIST' as const };
-      const html = await fetchText(url);
-      const text = html ? descriptionFromJobPostingLd(html) : null;
-      // MISSING means SOUGHT AND UNAVAILABLE — the detail page was fetched and
-      // carried no JobPosting. The gate holds these instead of judging them.
-      return text
-        ? { text, source: 'DETAIL' as const }
-        : { text: '', source: 'MISSING' as const };
-    });
+    const bodies = await mapLimit(
+      rows,
+      DETAIL_CONCURRENCY,
+      async ({ p, url }) => {
+        const fromList = htmlToText(p.description ?? '').trim();
+        if (fromList) return { text: fromList, source: 'LIST' as const };
+        const html = await fetchText(url);
+        const text = html ? descriptionFromJobPostingLd(html) : null;
+        // MISSING means SOUGHT AND UNAVAILABLE — the detail page was fetched and
+        // carried no JobPosting. The gate holds these instead of judging them.
+        return text
+          ? { text, source: 'DETAIL' as const }
+          : { text: '', source: 'MISSING' as const };
+      },
+    );
 
     return rows.map(({ p, url }, i) => ({
       externalId: p.id,

@@ -51,7 +51,8 @@ function classifyBoardFailure(
   board: string,
   err: unknown,
 ): { kind: FetchFailureKind; reason: string } {
-  if (err instanceof SourceUnreachableError) return { kind: err.kind, reason: err.message };
+  if (err instanceof SourceUnreachableError)
+    return { kind: err.kind, reason: err.message };
   const { kind, code } = describeFetchError(err);
   return { kind, reason: `${board}: request failed (${code})` };
 }
@@ -85,7 +86,9 @@ export async function crawlBoard(
     entries = await fetcher();
   } catch (err) {
     if (err instanceof SourceNotConfiguredError) {
-      console.log(`[crawl-board] ${board}: skipped — ${err.message}; nothing ingested or recorded`);
+      console.log(
+        `[crawl-board] ${board}: skipped — ${err.message}; nothing ingested or recorded`,
+      );
       return { skipped: 'not-configured', board };
     }
     const { kind, reason } = classifyBoardFailure(board, err);
@@ -99,7 +102,9 @@ export async function crawlBoard(
         outcome = `the FAILED run could NOT be saved (${describeFetchError(recordErr).code}); not retried`;
       }
     }
-    console.log(`[crawl-board] ${board}: FAILED (attempt ${attempt.made + 1}/${attempt.max}) — ${reason} — ${outcome}`);
+    console.log(
+      `[crawl-board] ${board}: FAILED (attempt ${attempt.made + 1}/${attempt.max}) — ${reason} — ${outcome}`,
+    );
     if (kind === 'permanent') throw new UnrecoverableError(reason);
     throw new Error(reason);
   }
@@ -112,7 +117,10 @@ export async function crawlBoard(
 }
 
 /** The crawl-board queue's processor: each run with the attempt numbers BullMQ gives it. */
-export function boardJobProcessor(api: BoardApi, fetchers: Record<BoardSource, BoardFetcher> = BOARDS) {
+export function boardJobProcessor(
+  api: BoardApi,
+  fetchers: Record<BoardSource, BoardFetcher> = BOARDS,
+) {
   return (job: Job<CrawlBoardJobData>) =>
     crawlBoard(job.data.board, api, fetchers[job.data.board], {
       made: job.attemptsMade,
@@ -120,11 +128,17 @@ export function boardJobProcessor(api: BoardApi, fetchers: Record<BoardSource, B
     });
 }
 
-export function startCrawlBoardWorker(api: ApiClient): Worker<CrawlBoardJobData> {
-  return new Worker<CrawlBoardJobData>(QueueNames.CRAWL_BOARD, boardJobProcessor(api), {
-    connection: createRedisConnection(),
-    concurrency: 1,
-  });
+export function startCrawlBoardWorker(
+  api: ApiClient,
+): Worker<CrawlBoardJobData> {
+  return new Worker<CrawlBoardJobData>(
+    QueueNames.CRAWL_BOARD,
+    boardJobProcessor(api),
+    {
+      connection: createRedisConnection(),
+      concurrency: 1,
+    },
+  );
 }
 
 /**
@@ -132,23 +146,37 @@ export function startCrawlBoardWorker(api: ApiClient): Worker<CrawlBoardJobData>
  * weekly so late-added comments and edits are picked up; ingest is idempotent.
  */
 export async function ensureBoardSchedules(): Promise<void> {
-  const queue = new Queue(QueueNames.CRAWL_BOARD, { connection: createRedisConnection() });
+  const queue = new Queue(QueueNames.CRAWL_BOARD, {
+    connection: createRedisConnection(),
+  });
   await queue.upsertJobScheduler(
     'hn-hiring-weekly',
     { pattern: '0 5 * * 2' }, // Tuesdays 05:00 UTC
-    { name: 'scheduled', data: { board: 'hn-hiring' }, opts: { ...BOARD_RETRY, removeOnComplete: true, removeOnFail: true } },
+    {
+      name: 'scheduled',
+      data: { board: 'hn-hiring' },
+      opts: { ...BOARD_RETRY, removeOnComplete: true, removeOnFail: true },
+    },
   );
   // Adzuna India dev jobs — daily (India roles post every day; ingest is idempotent).
   await queue.upsertJobScheduler(
     'adzuna-daily',
     { pattern: '0 2 * * *' }, // 02:00 IST (server-local, not UTC)
-    { name: 'scheduled', data: { board: 'adzuna' }, opts: { ...BOARD_RETRY, removeOnComplete: true, removeOnFail: true } },
+    {
+      name: 'scheduled',
+      data: { board: 'adzuna' },
+      opts: { ...BOARD_RETRY, removeOnComplete: true, removeOnFail: true },
+    },
   );
   // Jooble India dev jobs — daily, offset from Adzuna (500 req/day budget).
   await queue.upsertJobScheduler(
     'jooble-daily',
     { pattern: '30 2 * * *' }, // 02:30 IST (server-local, not UTC)
-    { name: 'scheduled', data: { board: 'jooble' }, opts: { ...BOARD_RETRY, removeOnComplete: true, removeOnFail: true } },
+    {
+      name: 'scheduled',
+      data: { board: 'jooble' },
+      opts: { ...BOARD_RETRY, removeOnComplete: true, removeOnFail: true },
+    },
   );
   /**
    * FreeHire — daily, offset behind Adzuna and Jooble.
@@ -169,7 +197,11 @@ export async function ensureBoardSchedules(): Promise<void> {
   await queue.upsertJobScheduler(
     'freehire-daily',
     { pattern: '0 3 * * *' }, // 03:00 IST — see the timezone note below
-    { name: 'scheduled', data: { board: 'freehire' }, opts: { ...BOARD_RETRY, removeOnComplete: true, removeOnFail: true } },
+    {
+      name: 'scheduled',
+      data: { board: 'freehire' },
+      opts: { ...BOARD_RETRY, removeOnComplete: true, removeOnFail: true },
+    },
   );
   await queue.close();
   // TIMEZONE: BullMQ evaluates these patterns in SERVER-LOCAL time, not UTC.

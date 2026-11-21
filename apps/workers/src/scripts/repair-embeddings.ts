@@ -50,7 +50,9 @@ async function main(): Promise<void> {
   if (ids.length === 0) return;
 
   if (!enqueue) {
-    console.log(`DRY RUN — would enqueue in ${Math.ceil(ids.length / BATCH)} batch(es).`);
+    console.log(
+      `DRY RUN — would enqueue in ${Math.ceil(ids.length / BATCH)} batch(es).`,
+    );
     console.log(`first 3: ${ids.slice(0, 3).join(', ')}`);
     return;
   }
@@ -77,7 +79,7 @@ async function main(): Promise<void> {
     );
   } finally {
     await queue.close();
-    connection.quit();
+    await connection.quit();
   }
 }
 

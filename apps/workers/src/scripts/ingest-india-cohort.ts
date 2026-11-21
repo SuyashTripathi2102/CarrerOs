@@ -60,7 +60,8 @@ const INDIA_RE =
 const MAX_AGE_DAYS = 45;
 
 function isFreshIndia(j: NormalizedJob): boolean {
-  const india = j.country === 'IN' || INDIA_RE.test(`${j.location ?? ''} ${j.title ?? ''}`);
+  const india =
+    j.country === 'IN' || INDIA_RE.test(`${j.location ?? ''} ${j.title ?? ''}`);
   if (!india) return false;
   // No date means NOT fresh. Absence of a date is not evidence of recency —
   // the Workday boards carried postings last touched in 2022.
@@ -85,7 +86,9 @@ async function main(): Promise<void> {
       const [name, provider, identifier] = l.split('\t');
       return { name, provider, identifier };
     })
-    .filter((b) => b.name && b.provider && b.identifier && ADAPTERS[b.provider]);
+    .filter(
+      (b) => b.name && b.provider && b.identifier && ADAPTERS[b.provider],
+    );
 
   console.log(
     `${boards.length} boards with an adapter | mode: ${ingest ? 'INGEST (writes)' : 'DRY RUN'}\n`,
@@ -101,14 +104,18 @@ async function main(): Promise<void> {
     try {
       jobs = await ADAPTERS[b.provider].fetchJobs(b.identifier);
     } catch (err) {
-      console.log(`  ${b.name.padEnd(30)} FETCH FAILED ${(err as Error).message.slice(0, 50)}`);
+      console.log(
+        `  ${b.name.padEnd(30)} FETCH FAILED ${(err as Error).message.slice(0, 50)}`,
+      );
       continue;
     }
 
     const fresh = jobs.filter(isFreshIndia);
     totalFresh += fresh.length;
     if (fresh.length === 0) {
-      console.log(`  ${b.name.padEnd(30)} ${b.provider.padEnd(16)} 0 fresh India — skipped`);
+      console.log(
+        `  ${b.name.padEnd(30)} ${b.provider.padEnd(16)} 0 fresh India — skipped`,
+      );
       continue;
     }
 
@@ -132,7 +139,11 @@ async function main(): Promise<void> {
     }
 
     // source = where the JOB came from; discoverySource = what found the COMPANY.
-    const res = await api!.ingestBoardJobs(b.provider.toLowerCase(), entries, DISCOVERY_SOURCE);
+    const res = await api!.ingestBoardJobs(
+      b.provider.toLowerCase(),
+      entries,
+      DISCOVERY_SOURCE,
+    );
     totalCreated += res.created;
     totalDup += res.duplicates ?? 0;
     console.log(

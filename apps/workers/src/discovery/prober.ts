@@ -5,14 +5,24 @@ const UA = 'CareerOS/0.1 (personal job-search agent)';
 const FETCH_TIMEOUT_MS = 12_000;
 
 /** Common career-page paths, ordered by hit rate. Probed politely (~6 max). */
-const CAREER_PATHS = ['/careers', '/jobs', '/careers/jobs', '/join', '/company/careers', '/about/careers'];
+const CAREER_PATHS = [
+  '/careers',
+  '/jobs',
+  '/careers/jobs',
+  '/join',
+  '/company/careers',
+  '/about/careers',
+];
 
 /** Careers-related URL shapes, matched in either an anchor href or a frame src. */
 const CAREER_URL_PATTERN =
   '(?:career|careers|jobs|join-us|joinus|work-with-us|hiring|greenhouse\\.io|lever\\.co|ashbyhq\\.com|myworkdayjobs\\.com|recruitee\\.com|teamtailor\\.com|smartrecruiters\\.com)';
 
 /** Anchor-href patterns that mark a link as careers-related. */
-const CAREER_LINK_RE = new RegExp(`href=["']([^"']*${CAREER_URL_PATTERN}[^"']*)["']`, 'gi');
+const CAREER_LINK_RE = new RegExp(
+  `href=["']([^"']*${CAREER_URL_PATTERN}[^"']*)["']`,
+  'gi',
+);
 
 /**
  * The same shapes, but in an <iframe>/<frame> src.
@@ -41,7 +51,9 @@ export interface ProbeInput {
  * probe common paths → follow redirects → guess ATS tokens from the name.
  * Every request is labeled with our UA; total requests per company ≤ ~12.
  */
-export async function probeCompany(input: ProbeInput): Promise<DiscoveryResult> {
+export async function probeCompany(
+  input: ProbeInput,
+): Promise<DiscoveryResult> {
   const log: string[] = [];
   let website = input.website ?? null;
   let websiteVerified = false;
@@ -63,7 +75,9 @@ export async function probeCompany(input: ProbeInput): Promise<DiscoveryResult> 
       if (detected.identifier) {
         ats = detected;
         careerPageUrl = resolved;
-        log.push(`ATS from hint redirect: ${detected.provider}/${detected.identifier}`);
+        log.push(
+          `ATS from hint redirect: ${detected.provider}/${detected.identifier}`,
+        );
       }
     }
   }
@@ -85,7 +99,9 @@ export async function probeCompany(input: ProbeInput): Promise<DiscoveryResult> 
           if (detected.identifier) {
             ats = detected;
             careerPageUrl = resolved;
-            log.push(`ATS from homepage link: ${detected.provider}/${detected.identifier}`);
+            log.push(
+              `ATS from homepage link: ${detected.provider}/${detected.identifier}`,
+            );
             break;
           }
           if (!careerPageUrl && /career|job|join|hiring/i.test(resolved)) {
@@ -98,13 +114,19 @@ export async function probeCompany(input: ProbeInput): Promise<DiscoveryResult> 
       if (!ats.identifier && !careerPageUrl) {
         for (const path of CAREER_PATHS.slice(0, 4)) {
           const candidate = new URL(path, page.finalUrl).toString();
-          const resolved = await resolveUrl(candidate, log, /* headOnly */ true);
+          const resolved = await resolveUrl(
+            candidate,
+            log,
+            /* headOnly */ true,
+          );
           if (resolved) {
             careerPageUrl = resolved;
             const detected = detectAts(resolved);
             if (detected.identifier) {
               ats = detected;
-              log.push(`ATS from path probe: ${detected.provider}/${detected.identifier}`);
+              log.push(
+                `ATS from path probe: ${detected.provider}/${detected.identifier}`,
+              );
             }
             break;
           }
@@ -123,7 +145,9 @@ export async function probeCompany(input: ProbeInput): Promise<DiscoveryResult> 
         const detected = detectAts(link);
         if (detected.identifier) {
           ats = detected;
-          log.push(`ATS from career page: ${detected.provider}/${detected.identifier}`);
+          log.push(
+            `ATS from career page: ${detected.provider}/${detected.identifier}`,
+          );
           break;
         }
       }
@@ -166,13 +190,19 @@ async function fetchPage(
     const html = (await res.text()).slice(0, 500_000);
     return { html, finalUrl: res.url || url };
   } catch (err) {
-    log.push(`GET ${url} failed: ${err instanceof Error ? err.name : err}`);
+    log.push(
+      `GET ${url} failed: ${err instanceof Error ? err.name : String(err)}`,
+    );
     return null;
   }
 }
 
 /** Follow redirects; return the final URL if it resolves to a 2xx/3xx page. */
-async function resolveUrl(url: string, log: string[], headOnly = false): Promise<string | null> {
+async function resolveUrl(
+  url: string,
+  log: string[],
+  headOnly = false,
+): Promise<string | null> {
   try {
     const res = await fetch(url, {
       method: headOnly ? 'HEAD' : 'GET',
@@ -190,8 +220,10 @@ async function resolveUrl(url: string, log: string[], headOnly = false): Promise
 }
 
 /** Test seam: the extraction rules are worth pinning without a live probe. */
-export const extractCareerLinksForTest = (html: string, baseUrl: string): string[] =>
-  extractCareerLinks(html, baseUrl);
+export const extractCareerLinksForTest = (
+  html: string,
+  baseUrl: string,
+): string[] => extractCareerLinks(html, baseUrl);
 
 function extractCareerLinks(html: string, baseUrl: string): string[] {
   const out = new Set<string>();
@@ -205,7 +237,8 @@ function extractCareerLinks(html: string, baseUrl: string): string[] {
         // http(s) only. A `data:`/`javascript:`/`mailto:` src resolves fine and
         // would consume one of the four probe slots on something that can never
         // be a board — sandboxed embeds legitimately use data: URIs.
-        if (u.protocol === 'http:' || u.protocol === 'https:') out.add(u.toString());
+        if (u.protocol === 'http:' || u.protocol === 'https:')
+          out.add(u.toString());
       } catch {
         /* malformed href/src */
       }
@@ -226,16 +259,22 @@ function extractMetadata(
   const title = html.match(/<title[^>]*>([^<]{1,200})/i)?.[1]?.trim() ?? null;
   const description =
     html
-      .match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']{1,500})["']/i)?.[1]
+      .match(
+        /<meta[^>]+name=["']description["'][^>]+content=["']([^"']{1,500})["']/i,
+      )?.[1]
       ?.trim() ??
     html
-      .match(/<meta[^>]+content=["']([^"']{1,500})["'][^>]+name=["']description["']/i)?.[1]
+      .match(
+        /<meta[^>]+content=["']([^"']{1,500})["'][^>]+name=["']description["']/i,
+      )?.[1]
       ?.trim() ??
     null;
 
   // Company Intelligence harvest: GitHub org + engineering blog, if linked.
   const githubOrg =
-    html.match(/github\.com\/([a-zA-Z0-9][a-zA-Z0-9-]{1,38})(?:["'/?#]|$)/)?.[1] ?? null;
+    html.match(
+      /github\.com\/([a-zA-Z0-9][a-zA-Z0-9-]{1,38})(?:["'/?#]|$)/,
+    )?.[1] ?? null;
   const blogMatch = html.match(
     /href=["']([^"']*(?:engineering\.[^"']{2,80}|\/(?:blog|engineering)\/?))["']/i,
   )?.[1];
@@ -251,15 +290,28 @@ function extractMetadata(
   return {
     title,
     description,
-    githubOrg: githubOrg && !RESERVED_GH.has(githubOrg.toLowerCase()) ? githubOrg : null,
+    githubOrg:
+      githubOrg && !RESERVED_GH.has(githubOrg.toLowerCase()) ? githubOrg : null,
     blogUrl,
   };
 }
 
 /** github.com/<these> are products/pages, not orgs. */
 const RESERVED_GH = new Set([
-  'features', 'pricing', 'about', 'contact', 'login', 'signup', 'sponsors',
-  'marketplace', 'topics', 'collections', 'events', 'apps', 'orgs', 'enterprise',
+  'features',
+  'pricing',
+  'about',
+  'contact',
+  'login',
+  'signup',
+  'sponsors',
+  'marketplace',
+  'topics',
+  'collections',
+  'events',
+  'apps',
+  'orgs',
+  'enterprise',
 ]);
 
 /**
@@ -268,11 +320,17 @@ const RESERVED_GH = new Set([
  * checked for a board-like shape — an ATS's generic 200 error page must not
  * count as a hit.
  */
-async function guessAtsToken(name: string, log: string[]): Promise<AtsDetection> {
-  const base = name.toLowerCase().replace(/[^a-z0-9\s-]/g, '').trim();
-  const slugs = [...new Set([base.replace(/\s+/g, ''), base.replace(/\s+/g, '-')])].filter(
-    (s) => s.length >= 2,
-  );
+async function guessAtsToken(
+  name: string,
+  log: string[],
+): Promise<AtsDetection> {
+  const base = name
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .trim();
+  const slugs = [
+    ...new Set([base.replace(/\s+/g, ''), base.replace(/\s+/g, '-')]),
+  ].filter((s) => s.length >= 2);
 
   for (const slug of slugs) {
     // Each validator PARSES the body and confirms an actual board. Marker/
@@ -381,7 +439,9 @@ async function guessAtsToken(name: string, log: string[]): Promise<AtsDetection>
           }
           if (probe.validate(parsed)) {
             if (boardHasPostings(parsed)) {
-              log.push(`ATS from token guess: ${probe.provider}/${slug} (has postings)`);
+              log.push(
+                `ATS from token guess: ${probe.provider}/${slug} (has postings)`,
+              );
               return { provider: probe.provider, identifier: slug };
             }
             // Remember the first empty shell; keep probing for a live board.
@@ -412,7 +472,11 @@ async function guessAtsToken(name: string, log: string[]): Promise<AtsDetection>
  */
 export function boardHasPostings(parsed: unknown): boolean {
   if (Array.isArray(parsed)) return parsed.length > 0; // Lever, Breezy
-  const p = parsed as { jobs?: unknown[]; offers?: unknown[]; totalFound?: number };
+  const p = parsed as {
+    jobs?: unknown[];
+    offers?: unknown[];
+    totalFound?: number;
+  };
   if (Array.isArray(p?.jobs)) return p.jobs.length > 0; // Greenhouse, Ashby, Workable
   if (Array.isArray(p?.offers)) return p.offers.length > 0; // Recruitee
   if (typeof p?.totalFound === 'number') return p.totalFound > 0; // SmartRecruiters

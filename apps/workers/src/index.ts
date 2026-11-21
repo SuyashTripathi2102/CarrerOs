@@ -3,13 +3,19 @@ import { installProcessGuard } from './process-guard';
 import { startQueueHealthCheck } from './queue-health.runner';
 import { ApiClient } from './api-client';
 import { startCrawlCompanyWorker } from './processors/crawl-company.processor';
-import { ensureBoardSchedules, startCrawlBoardWorker } from './processors/crawl-board.processor';
+import {
+  ensureBoardSchedules,
+  startCrawlBoardWorker,
+} from './processors/crawl-board.processor';
 import {
   startDiscoverCompanyWorker,
   startDiscoveryFanoutWorker,
 } from './processors/discover-company.processor';
 import { startSeedImportWorker } from './processors/seed-import.processor';
-import { ensureRefreshSchedule, startRefreshAllWorker } from './processors/refresh-all.processor';
+import {
+  ensureRefreshSchedule,
+  startRefreshAllWorker,
+} from './processors/refresh-all.processor';
 import {
   ensureEvaluateMatchesSchedule,
   startEvaluateMatchesWorker,
@@ -71,14 +77,16 @@ async function main() {
   await ensureReplayExtractSchedule();
   await ensureRenderExtractSchedule();
 
-  console.log(`CareerOS workers started (${workers.length} processors listening).`);
+  console.log(
+    `CareerOS workers started (${workers.length} processors listening).`,
+  );
 
   const shutdown = async () => {
     await Promise.all(workers.map((w) => w.close()));
     process.exit(0);
   };
-  process.on('SIGTERM', shutdown);
-  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', () => void shutdown());
+  process.on('SIGINT', () => void shutdown());
 }
 
 main().catch((err) => {

@@ -47,12 +47,16 @@ describe('boardHasPostings', () => {
   });
 
   describe('garbage is never a posting', () => {
-    it.each([[null], [undefined], [{}], ['a string'], [42], [{ jobs: 'not an array' }]])(
-      '%p',
-      (payload) => {
-        expect(boardHasPostings(payload)).toBe(false);
-      },
-    );
+    it.each([
+      [null],
+      [undefined],
+      [{}],
+      ['a string'],
+      [42],
+      [{ jobs: 'not an array' }],
+    ])('%p', (payload) => {
+      expect(boardHasPostings(payload)).toBe(false);
+    });
   });
 
   it('the Zensar case: an empty Workable shell must not outrank a live board', () => {

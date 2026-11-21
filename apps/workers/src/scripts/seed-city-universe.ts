@@ -54,7 +54,11 @@ async function main(): Promise<void> {
     .filter((l) => l && !l.startsWith('#'))
     .map((l) => {
       const [name, domain, jobsUrl] = l.split('\t');
-      return { name: (name ?? '').trim(), domain: (domain ?? '').trim(), jobsUrl: (jobsUrl ?? '').trim() };
+      return {
+        name: (name ?? '').trim(),
+        domain: (domain ?? '').trim(),
+        jobsUrl: (jobsUrl ?? '').trim(),
+      };
     })
     .filter((r) => r.name && r.domain)
     .map((r) => ({
@@ -63,7 +67,8 @@ async function main(): Promise<void> {
       // Only a HINT. The API re-runs detectAts on it and keeps the result only
       // if it resolves — a careers URL that reveals nothing leaves the company
       // at DISCOVERED, which is the honest state.
-      atsHintUrl: r.jobsUrl && /^https?:\/\//.test(r.jobsUrl) ? r.jobsUrl : null,
+      atsHintUrl:
+        r.jobsUrl && /^https?:\/\//.test(r.jobsUrl) ? r.jobsUrl : null,
       city,
       country: 'IN',
     }));
@@ -76,7 +81,9 @@ async function main(): Promise<void> {
   if (!apply) {
     console.log('DRY RUN — nothing written. Sample:');
     for (const c of candidates.slice(0, 5)) {
-      console.log(`  ${c.name.padEnd(28)} ${c.website}${c.atsHintUrl ? '  hint:' + c.atsHintUrl.slice(0, 40) : ''}`);
+      console.log(
+        `  ${c.name.padEnd(28)} ${c.website}${c.atsHintUrl ? '  hint:' + c.atsHintUrl.slice(0, 40) : ''}`,
+      );
     }
     console.log('\nRe-run with --apply to seed.');
     return;

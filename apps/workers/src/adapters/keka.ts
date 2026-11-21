@@ -1,6 +1,11 @@
 import type { NormalizedJob } from '@careeros/shared';
 import { htmlToText } from './html';
-import { AtsAdapter, capDescription, fetchJson, workModeFromText } from './types';
+import {
+  AtsAdapter,
+  capDescription,
+  fetchJson,
+  workModeFromText,
+} from './types';
 
 /**
  * Keka (Indian ATS, Hyderabad) — public careers API discovered 2026-07-09.
@@ -32,7 +37,8 @@ export function kekaPostedAt(publishedOn: string | undefined): string | null {
   return Number.isNaN(t.getTime()) ? null : t.toISOString();
 }
 
-const ORG_ID_RE =/\/ats\/documents\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\//i;
+const ORG_ID_RE =
+  /\/ats\/documents\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\//i;
 
 export const kekaAdapter: AtsAdapter = {
   source: 'keka',
@@ -46,7 +52,8 @@ export const kekaAdapter: AtsAdapter = {
     if (!page.ok) throw new Error(`GET ${base}/careers/ -> ${page.status}`);
     const html = await page.text();
     const orgId = ORG_ID_RE.exec(html)?.[1];
-    if (!orgId) throw new Error(`Keka org id not found on ${tenant} careers page`);
+    if (!orgId)
+      throw new Error(`Keka org id not found on ${tenant} careers page`);
 
     const jobs = await fetchJson<KekaJob[]>(
       `${base}/careers/api/embedjobs/default/active/${orgId}`,

@@ -41,7 +41,8 @@ import { FetchTally } from './fetch-failure';
  */
 
 const SEARCH_PATH = '/api/v1/agent/jobs/search';
-const BASE = process.env.FREEHIRE_API_URL?.replace(/\/+$/, '') || 'https://freehire.me';
+const BASE =
+  process.env.FREEHIRE_API_URL?.replace(/\/+$/, '') || 'https://freehire.me';
 
 /** Target roles, one query each. Mirrors the user's preferredRoles. */
 const ROLE_QUERIES = [
@@ -231,14 +232,16 @@ export async function fetchFreehireJobs(): Promise<BoardJob[]> {
 
       let env: Envelope<FreehireJob[]>;
       try {
-        env = await fetchJson<Envelope<FreehireJob[]>>(`${BASE}${SEARCH_PATH}?${params}`);
+        env = await fetchJson<Envelope<FreehireJob[]>>(
+          `${BASE}${SEARCH_PATH}?${params.toString()}`,
+        );
         tally.succeeded();
       } catch (err) {
         tally.failedWith(err);
         // Best-effort source: abandon THIS query, keep the pages already
         // collected, and move on. One flaky page must not lose the rest.
         console.log(
-          `[freehire] "${q}" @${offset} failed: ${err instanceof Error ? err.message : err} — skipping rest of query`,
+          `[freehire] "${q}" @${offset} failed: ${err instanceof Error ? err.message : String(err)} — skipping rest of query`,
         );
         break;
       }
@@ -287,7 +290,9 @@ export async function fetchFreehireJobs(): Promise<BoardJob[]> {
     `[freehire] ${ROLE_QUERIES.length} queries · ${pages} pages (cap ${cap}/query) · ` +
       `fetched=${fetched} accepted=${all.length} ` +
       `rejected=${rejected} dupes-in-run=${dupes} · upstream ATS: ${[...upstream].sort().join(', ')}` +
-      (reportedTotal != null ? ` · source reports ${reportedTotal} India jobs` : ''),
+      (reportedTotal != null
+        ? ` · source reports ${reportedTotal} India jobs`
+        : ''),
   );
 
   tally.assertReachable('freehire');

@@ -1,21 +1,49 @@
-import { describeFetchError, FetchTally, SourceNotConfiguredError, SourceUnreachableError } from './fetch-failure';
+import {
+  describeFetchError,
+  FetchTally,
+  SourceNotConfiguredError,
+  SourceUnreachableError,
+} from './fetch-failure';
 
-const netError = (code: string) => Object.assign(new Error(`getaddrinfo ${code} example.org`), { code });
+const netError = (code: string) =>
+  Object.assign(new Error(`getaddrinfo ${code} example.org`), { code });
+/** What `fn` throws, or undefined: lets a test assert on the thrown object's fields. */
+function thrownBy(fn: () => unknown): unknown {
+  try {
+    fn();
+  } catch (e) {
+    return e;
+  }
+  return undefined;
+}
+
 const undiciError = (code: string) =>
-  Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('x'), { code }) });
+  Object.assign(new TypeError('fetch failed'), {
+    cause: Object.assign(new Error('x'), { code }),
+  });
 
 describe('describeFetchError', () => {
   it.each([
-    ['DNS not ready after wake (node:https)', netError('EAI_AGAIN'), 'EAI_AGAIN'],
+    [
+      'DNS not ready after wake (node:https)',
+      netError('EAI_AGAIN'),
+      'EAI_AGAIN',
+    ],
     ['DNS not ready after wake (fetch)', undiciError('EAI_AGAIN'), 'EAI_AGAIN'],
     ['connection refused', undiciError('ECONNREFUSED'), 'ECONNREFUSED'],
-    ['connect timeout', undiciError('UND_ERR_CONNECT_TIMEOUT'), 'UND_ERR_CONNECT_TIMEOUT'],
+    [
+      'connect timeout',
+      undiciError('UND_ERR_CONNECT_TIMEOUT'),
+      'UND_ERR_CONNECT_TIMEOUT',
+    ],
   ])('treats %s as transient', (_label, err, code) => {
     expect(describeFetchError(err)).toEqual({ kind: 'transient', code });
   });
 
   it('treats a bare "fetch failed" and a request timeout as transient', () => {
-    expect(describeFetchError(new TypeError('fetch failed')).kind).toBe('transient');
+    expect(describeFetchError(new TypeError('fetch failed')).kind).toBe(
+      'transient',
+    );
     expect(describeFetchError(new Error('timeout')).kind).toBe('transient');
   });
 
@@ -35,11 +63,16 @@ describe('describeFetchError', () => {
   });
 
   it('treats an unparseable body as permanent', () => {
-    expect(describeFetchError(new SyntaxError('Unexpected token <'))).toEqual({ kind: 'permanent', code: 'invalid JSON' });
+    expect(describeFetchError(new SyntaxError('Unexpected token <'))).toEqual({
+      kind: 'permanent',
+      code: 'invalid JSON',
+    });
   });
 
   it('never returns the raw message, which can carry a keyed URL', () => {
-    const { code } = describeFetchError(new Error('GET https://api.test/search?app_key=SECRET123 -> 403'));
+    const { code } = describeFetchError(
+      new Error('GET https://api.test/search?app_key=SECRET123 -> 403'),
+    );
     expect(code).toBe('HTTP 403');
     expect(code).not.toContain('SECRET123');
   });
@@ -60,9 +93,10 @@ describe('FetchTally', () => {
   it('counts a crawl whose every request was rate limited (429) as transient, so it is retried', () => {
     const t = new FetchTally();
     for (let i = 0; i < 3; i++) t.failedWith(new Error('POST -> 429'));
-    expect(() => t.assertReachable('jooble')).toThrow(
-      expect.objectContaining({ kind: 'transient', message: 'jooble: all 3 requests failed (HTTP 429 ×3)' }),
-    );
+    expect(thrownBy(() => t.assertReachable('jooble'))).toMatchObject({
+      kind: 'transient',
+      message: 'jooble: all 3 requests failed (HTTP 429 ×3)',
+    });
   });
 
   it('throws a transient SourceUnreachableError when every request failed on the network', () => {
@@ -76,28 +110,42 @@ describe('FetchTally', () => {
     }
     expect(thrown).toBeInstanceOf(SourceUnreachableError);
     expect((thrown as SourceUnreachableError).kind).toBe('transient');
-    expect((thrown as SourceUnreachableError).message).toBe('freehire: all 6 requests failed (EAI_AGAIN ×6)');
+    expect((thrown as SourceUnreachableError).message).toBe(
+      'freehire: all 6 requests failed (EAI_AGAIN ×6)',
+    );
   });
 
   it('is permanent only when no failure was transient; mixed failures count as transient', () => {
     const t = new FetchTally();
     t.failedWith(new Error('POST -> 401'));
     t.failedWith(new Error('POST -> 401'));
-    expect(() => t.assertReachable('jooble')).toThrow(expect.objectContaining({ kind: 'permanent' }));
+    expect(thrownBy(() => t.assertReachable('jooble'))).toMatchObject({
+      kind: 'permanent',
+    });
 
     const mixed = new FetchTally();
     mixed.failedWith(new Error('POST -> 401'));
     mixed.failedWith(netError('ETIMEDOUT'));
-    expect(() => mixed.assertReachable('jooble')).toThrow(expect.objectContaining({ kind: 'transient' }));
+    expect(thrownBy(() => mixed.assertReachable('jooble'))).toMatchObject({
+      kind: 'transient',
+    });
   });
 });
 
 describe('SourceNotConfiguredError', () => {
   it('names the missing setting, never a value', () => {
-    const err = new SourceNotConfiguredError('adzuna', 'ADZUNA_APP_ID/ADZUNA_APP_KEY');
+    const err = new SourceNotConfiguredError(
+      'adzuna',
+      'ADZUNA_APP_ID/ADZUNA_APP_KEY',
+    );
 
-    expect(err.message).toBe('adzuna: not configured (ADZUNA_APP_ID/ADZUNA_APP_KEY not set)');
-    expect(err).toMatchObject({ name: 'SourceNotConfiguredError', source: 'adzuna' });
+    expect(err.message).toBe(
+      'adzuna: not configured (ADZUNA_APP_ID/ADZUNA_APP_KEY not set)',
+    );
+    expect(err).toMatchObject({
+      name: 'SourceNotConfiguredError',
+      source: 'adzuna',
+    });
     expect(err).not.toBeInstanceOf(SourceUnreachableError);
   });
 });

@@ -34,7 +34,10 @@ import { leverAdapter } from '../adapters/lever';
 import { breezyAdapter } from '../adapters/breezy';
 import { ApiClient } from '../api-client';
 
-const ADAPTERS: Record<string, AtsAdapter> = { LEVER: leverAdapter, BREEZY: breezyAdapter };
+const ADAPTERS: Record<string, AtsAdapter> = {
+  LEVER: leverAdapter,
+  BREEZY: breezyAdapter,
+};
 const BATCH = 500;
 
 async function main(): Promise<void> {
@@ -51,14 +54,27 @@ async function main(): Promise<void> {
     .filter((l) => l && !l.startsWith('#'))
     .map((l) => {
       const [provider, identifier] = l.split('\t');
-      return { provider: (provider ?? '').trim(), identifier: (identifier ?? '').trim() };
+      return {
+        provider: (provider ?? '').trim(),
+        identifier: (identifier ?? '').trim(),
+      };
     })
     .filter((r) => r.provider && r.identifier && ADAPTERS[r.provider]);
 
-  console.log(`${cohort.length} boards | mode: ${apply ? 'APPLY (writes)' : 'DRY RUN'}\n`);
+  console.log(
+    `${cohort.length} boards | mode: ${apply ? 'APPLY (writes)' : 'DRY RUN'}\n`,
+  );
 
   const api = apply ? new ApiClient() : null;
-  const totals = { fetched: 0, withBody: 0, missing: 0, changed: 0, unchanged: 0, notFound: 0, failed: 0 };
+  const totals = {
+    fetched: 0,
+    withBody: 0,
+    missing: 0,
+    changed: 0,
+    unchanged: 0,
+    notFound: 0,
+    failed: 0,
+  };
 
   for (const { provider, identifier } of cohort) {
     let jobs;
@@ -66,7 +82,10 @@ async function main(): Promise<void> {
       jobs = await ADAPTERS[provider].fetchJobs(identifier);
     } catch (err) {
       totals.failed++;
-      console.log(`  ${provider}/${identifier}`.padEnd(46) + `FETCH FAILED ${(err as Error).message.slice(0, 40)}`);
+      console.log(
+        `  ${provider}/${identifier}`.padEnd(46) +
+          `FETCH FAILED ${(err as Error).message.slice(0, 40)}`,
+      );
       continue;
     }
 
@@ -75,7 +94,8 @@ async function main(): Promise<void> {
       description: j.description ?? '',
       // An adapter that reports nothing gets MISSING rather than a guess —
       // never default a body-less row to LIST.
-      descriptionSource: (j as { descriptionSource?: string }).descriptionSource ?? 'MISSING',
+      descriptionSource:
+        (j as { descriptionSource?: string }).descriptionSource ?? 'MISSING',
     }));
     const withBody = updates.filter((u) => u.description.length >= 200).length;
     totals.fetched += updates.length;
@@ -90,12 +110,21 @@ async function main(): Promise<void> {
       continue;
     }
 
-    let changed = 0, unchanged = 0, notFound = 0;
+    let changed = 0,
+      unchanged = 0,
+      notFound = 0;
     for (let i = 0; i < updates.length; i += BATCH) {
-      const res = await api!.repairDescriptions(provider.toLowerCase(), updates.slice(i, i + BATCH));
-      changed += res.changed; unchanged += res.unchanged; notFound += res.notFound;
+      const res = await api!.repairDescriptions(
+        provider.toLowerCase(),
+        updates.slice(i, i + BATCH),
+      );
+      changed += res.changed;
+      unchanged += res.unchanged;
+      notFound += res.notFound;
     }
-    totals.changed += changed; totals.unchanged += unchanged; totals.notFound += notFound;
+    totals.changed += changed;
+    totals.unchanged += unchanged;
+    totals.notFound += notFound;
     console.log(
       `  ${(provider + '/' + identifier).padEnd(44)} fetched=${String(updates.length).padStart(5)} ` +
         `changed=${String(changed).padStart(5)} unchanged=${String(unchanged).padStart(4)} notFound=${notFound}`,
@@ -121,4 +150,7 @@ will re-judge them. That is correct — they were judged blind.`);
   }
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

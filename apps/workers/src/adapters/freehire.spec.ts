@@ -31,7 +31,9 @@ describe('mapFreehireJobs', () => {
   it('normalises a dev role into a BoardJob tagged country=IN', () => {
     const [j] = mapFreehireJobs([row()]);
     expect(j.company.name).toBe('Acme Systems');
-    expect(j.job.externalId).toBe('freehire-node-js-backend-developer-hyderabad-abc123');
+    expect(j.job.externalId).toBe(
+      'freehire-node-js-backend-developer-hyderabad-abc123',
+    );
     expect(j.job.title).toBe('Node.js Backend Developer');
     expect(j.job.description).toBe('Build APIs with Node & React'); // markup + entities stripped
     expect(j.job.country).toBe('IN');
@@ -72,8 +74,12 @@ describe('mapFreehireJobs', () => {
       const [byExternal] = mapFreehireJobs([row({ public_slug: undefined })]);
       expect(byExternal.job.externalId).toBe('freehire-ft-991');
 
-      const [byUrl] = mapFreehireJobs([row({ public_slug: undefined, external_id: undefined })]);
-      expect(byUrl.job.externalId).toBe('freehire-https://acme.freshteam.com/jobs/991');
+      const [byUrl] = mapFreehireJobs([
+        row({ public_slug: undefined, external_id: undefined }),
+      ]);
+      expect(byUrl.job.externalId).toBe(
+        'freehire-https://acme.freshteam.com/jobs/991',
+      );
     });
 
     it('keeps two genuinely different postings from the same company', () => {
@@ -103,7 +109,9 @@ describe('mapFreehireJobs', () => {
   });
 
   it('tolerates a missing location and description without dropping the job', () => {
-    const [j] = mapFreehireJobs([row({ location: undefined, description: undefined })]);
+    const [j] = mapFreehireJobs([
+      row({ location: undefined, description: undefined }),
+    ]);
     expect(j.job.location).toBeNull();
     expect(j.job.description).toBe('');
   });

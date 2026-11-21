@@ -35,7 +35,8 @@ const REAL_POSTING = `
 </body></html>`;
 
 /** The exact shape the career extractor was storing. */
-const SYNTHETIC_STUB = 'Backend Engineer, Chanakya Bengaluru Full Time On-Site · Bengaluru — via Sarvam AI careers page.';
+const SYNTHETIC_STUB =
+  'Backend Engineer, Chanakya Bengaluru Full Time On-Site · Bengaluru — via Sarvam AI careers page.';
 
 describe('detailText', () => {
   it('drops nav, header and footer chrome', () => {
@@ -61,7 +62,9 @@ describe('isJobDescription — length alone is not evidence', () => {
   it('rejects a long marketing page with no posting phrases', () => {
     // A homepage clears 200 characters trivially. If length were the only test,
     // every company front page would become a job description.
-    const marketing = 'We build delightful products for modern teams. '.repeat(20);
+    const marketing = 'We build delightful products for modern teams. '.repeat(
+      20,
+    );
     expect(marketing.length).toBeGreaterThan(MIN_DESCRIPTION_CHARS);
     expect(jdMarkerCount(marketing)).toBe(0);
     expect(isJobDescription(marketing)).toBe(false);
@@ -73,7 +76,10 @@ describe('isJobDescription — length alone is not evidence', () => {
 });
 
 describe('decideHydration', () => {
-  const stub = { description: SYNTHETIC_STUB, descriptionSource: 'LIST' as const };
+  const stub = {
+    description: SYNTHETIC_STUB,
+    descriptionSource: 'LIST' as const,
+  };
 
   it('WRITEs a recovered posting and labels it DETAIL', () => {
     const d = decideHydration(stub, REAL_POSTING);
@@ -100,7 +106,10 @@ describe('decideHydration', () => {
   });
 
   it('KEEPs when the detail page is still too thin', () => {
-    const d = decideHydration(stub, '<html><body><p>Coming soon</p></body></html>');
+    const d = decideHydration(
+      stub,
+      '<html><body><p>Coming soon</p></body></html>',
+    );
     expect(d.action).toBe('KEEP');
     expect(d.reason).toMatch(/below 200/);
   });
@@ -134,17 +143,29 @@ describe('decideHydration', () => {
 
 describe('needsHydration', () => {
   it('selects a job with a thin body and an absolute URL', () => {
-    expect(needsHydration({ description: SYNTHETIC_STUB, url: 'https://x.com/jobs/1' })).toBe(true);
+    expect(
+      needsHydration({
+        description: SYNTHETIC_STUB,
+        url: 'https://x.com/jobs/1',
+      }),
+    ).toBe(true);
   });
 
   it('skips a job that already clears the gate', () => {
-    expect(needsHydration({ description: 'x'.repeat(MIN_DESCRIPTION_CHARS), url: 'https://x.com/1' })).toBe(false);
+    expect(
+      needsHydration({
+        description: 'x'.repeat(MIN_DESCRIPTION_CHARS),
+        url: 'https://x.com/1',
+      }),
+    ).toBe(false);
   });
 
   it('skips a job with no usable URL — there is nowhere to fetch from', () => {
     expect(needsHydration({ description: '', url: null })).toBe(false);
     expect(needsHydration({ description: '', url: '/careers/1' })).toBe(false);
-    expect(needsHydration({ description: '', url: 'mailto:jobs@x.com' })).toBe(false);
+    expect(needsHydration({ description: '', url: 'mailto:jobs@x.com' })).toBe(
+      false,
+    );
   });
 });
 

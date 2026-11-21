@@ -31,13 +31,17 @@ export interface AtsAdapter {
 const USER_AGENT = 'CareerOS/0.1 (personal job-search agent)';
 
 export async function fetchJson<T>(url: string): Promise<T> {
-  const res = await fetch(url, { headers: { 'user-agent': USER_AGENT, accept: 'application/json' } });
+  const res = await fetch(url, {
+    headers: { 'user-agent': USER_AGENT, accept: 'application/json' },
+  });
   if (!res.ok) throw new Error(`GET ${url} -> ${res.status}`);
   return (await res.json()) as T;
 }
 
 /** Detect work mode from a location/title string — shared heuristic. */
-export function workModeFromText(text: string | undefined | null): 'REMOTE' | 'HYBRID' | null {
+export function workModeFromText(
+  text: string | undefined | null,
+): 'REMOTE' | 'HYBRID' | null {
   if (!text) return null;
   const t = text.toLowerCase();
   if (t.includes('remote')) return 'REMOTE';

@@ -7,7 +7,9 @@ jest.mock('bullmq', () => ({
   })),
   Worker: jest.fn(),
 }));
-jest.mock('../queues/connection', () => ({ createRedisConnection: () => ({}) }));
+jest.mock('../queues/connection', () => ({
+  createRedisConnection: () => ({}),
+}));
 
 // The same parser and version BullMQ uses to compute the next run.
 import { parseExpression } from 'cron-parser';
@@ -25,7 +27,10 @@ describe('daily brief schedule', () => {
   });
 
   const repeatFor = (id: string) =>
-    mockUpsert.mock.calls.find((c) => c[0] === id)?.[1] as { pattern: string; tz?: string };
+    mockUpsert.mock.calls.find((c) => c[0] === id)?.[1] as {
+      pattern: string;
+      tz?: string;
+    };
 
   const nextUtcHourMinute = (repeat: { pattern: string; tz?: string }) => {
     const next = parseExpression(repeat.pattern, {
@@ -47,6 +52,8 @@ describe('daily brief schedule', () => {
   });
 
   it('sends the CONSIDER digest at 14:00 IST (08:30 UTC)', () => {
-    expect(nextUtcHourMinute(repeatFor('consider-digest-2pm-ist'))).toBe('8:30');
+    expect(nextUtcHourMinute(repeatFor('consider-digest-2pm-ist'))).toBe(
+      '8:30',
+    );
   });
 });

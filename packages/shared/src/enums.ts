@@ -9,7 +9,11 @@ import { z } from 'zod';
 export const WorkModeSchema = z.enum(['REMOTE', 'HYBRID', 'ONSITE']);
 export type WorkMode = z.infer<typeof WorkModeSchema>;
 
-export const VisaSponsorshipSchema = z.enum(['REQUIRED', 'NOT_REQUIRED', 'OPEN_TO_EITHER']);
+export const VisaSponsorshipSchema = z.enum([
+  'REQUIRED',
+  'NOT_REQUIRED',
+  'OPEN_TO_EITHER',
+]);
 export type VisaSponsorship = z.infer<typeof VisaSponsorshipSchema>;
 
 export const CompanySizeSchema = z.enum([

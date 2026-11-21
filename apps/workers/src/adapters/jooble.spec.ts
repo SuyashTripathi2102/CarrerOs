@@ -30,7 +30,11 @@ describe('mapJoobleJobs', () => {
   });
 
   it('drops non-dev roles and dedupes by id', () => {
-    const jobs = mapJoobleJobs([base, base, { ...base, id: 5, title: 'Sales Manager' }]);
+    const jobs = mapJoobleJobs([
+      base,
+      base,
+      { ...base, id: 5, title: 'Sales Manager' },
+    ]);
     expect(jobs.map((j) => j.job.externalId)).toEqual(['jooble-987']);
   });
 });

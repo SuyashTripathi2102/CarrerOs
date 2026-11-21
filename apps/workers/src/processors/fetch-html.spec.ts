@@ -36,7 +36,8 @@ function listen(handler: Parameters<typeof createServer>[1]): Promise<void> {
 afterEach(async () => {
   for (const s of sockets) s.destroy();
   sockets = [];
-  if (server?.listening) await new Promise<void>((r) => server.close(() => r()));
+  if (server?.listening)
+    await new Promise<void>((r) => server.close(() => r()));
 });
 
 describe('fetchHtmlV4 — always settles', () => {
@@ -90,7 +91,10 @@ describe('fetchHtmlV4 — always settles', () => {
 
   it('REGRESSION: a response cut off mid-body resolves instead of waiting for an end that never comes', async () => {
     await listen((_req, res) => {
-      res.writeHead(200, { 'content-type': 'text/html', 'content-length': '9999' });
+      res.writeHead(200, {
+        'content-type': 'text/html',
+        'content-length': '9999',
+      });
       res.write('<html><body>partial');
       res.socket?.destroy(); // no 'end', no 'error'
     });
@@ -101,9 +105,13 @@ describe('fetchHtmlV4 — always settles', () => {
   it('returns the body on a normal 200', async () => {
     await listen((_req, res) => {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-      res.end('<html><body><a href="/jobs/1">Backend Engineer</a></body></html>');
+      res.end(
+        '<html><body><a href="/jobs/1">Backend Engineer</a></body></html>',
+      );
     });
-    await expect(fetchHtmlV4(`${base}/careers`, 2_000)).resolves.toContain('Backend Engineer');
+    await expect(fetchHtmlV4(`${base}/careers`, 2_000)).resolves.toContain(
+      'Backend Engineer',
+    );
   }, 10_000);
 
   it('follows one redirect', async () => {
@@ -116,7 +124,9 @@ describe('fetchHtmlV4 — always settles', () => {
       res.writeHead(200, { 'content-type': 'text/html' });
       res.end('<html>redirected</html>');
     });
-    await expect(fetchHtmlV4(`${base}/careers`, 2_000)).resolves.toContain('redirected');
+    await expect(fetchHtmlV4(`${base}/careers`, 2_000)).resolves.toContain(
+      'redirected',
+    );
   }, 10_000);
 
   it('resolves null on 404 rather than throwing', async () => {
@@ -144,6 +154,8 @@ describe('fetchHtmlV4 — always settles', () => {
   it('resolves null when nothing is listening', async () => {
     // Port 1 on loopback: connection refused, which DOES emit 'error'. Kept so
     // the ordinary failure path stays covered alongside the silent ones.
-    await expect(fetchHtmlV4('http://127.0.0.1:1/careers', 1_000)).resolves.toBeNull();
+    await expect(
+      fetchHtmlV4('http://127.0.0.1:1/careers', 1_000),
+    ).resolves.toBeNull();
   }, 10_000);
 });

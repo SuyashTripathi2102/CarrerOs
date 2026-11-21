@@ -14,7 +14,10 @@ function getJson<T>(url: string, timeoutMs = 12_000): Promise<T> {
       url,
       {
         family: 4,
-        headers: { 'user-agent': 'CareerOS/0.1 (personal job-search agent)', accept: 'application/json' },
+        headers: {
+          'user-agent': 'CareerOS/0.1 (personal job-search agent)',
+          accept: 'application/json',
+        },
       },
       (res) => {
         const status = res.statusCode ?? 0;
@@ -30,7 +33,7 @@ function getJson<T>(url: string, timeoutMs = 12_000): Promise<T> {
           try {
             resolve(JSON.parse(body) as T);
           } catch (e) {
-            reject(e);
+            reject(e instanceof Error ? e : new Error(String(e)));
           }
         });
       },
@@ -92,7 +95,8 @@ const clean = (s: string): string =>
     .replace(/\s+/g, ' ')
     .trim();
 
-const ROLE_OK = /engineer|developer|programmer|\bsde\b|full.?stack|back.?end|front.?end|software|\bmern\b/i;
+const ROLE_OK =
+  /engineer|developer|programmer|\bsde\b|full.?stack|back.?end|front.?end|software|\bmern\b/i;
 
 /** Pure: normalise Adzuna results into BoardJobs (India, dev roles only). */
 export function mapAdzunaResults(results: AdzunaResult[]): BoardJob[] {
@@ -138,7 +142,11 @@ export function mapAdzunaResults(results: AdzunaResult[]): BoardJob[] {
 export async function fetchAdzunaJobs(): Promise<BoardJob[]> {
   const appId = process.env.ADZUNA_APP_ID;
   const appKey = process.env.ADZUNA_APP_KEY;
-  if (!appId || !appKey) throw new SourceNotConfiguredError('adzuna', 'ADZUNA_APP_ID/ADZUNA_APP_KEY');
+  if (!appId || !appKey)
+    throw new SourceNotConfiguredError(
+      'adzuna',
+      'ADZUNA_APP_ID/ADZUNA_APP_KEY',
+    );
 
   const auth = `app_id=${appId}&app_key=${appKey}`;
   const all: BoardJob[] = [];
@@ -172,6 +180,8 @@ export async function fetchAdzunaJobs(): Promise<BoardJob[]> {
     }
   }
   tally.assertReachable('adzuna');
-  console.log(`[adzuna] fetched ${all.length} India dev jobs across ${QUERIES.length} role queries`);
+  console.log(
+    `[adzuna] fetched ${all.length} India dev jobs across ${QUERIES.length} role queries`,
+  );
   return all;
 }

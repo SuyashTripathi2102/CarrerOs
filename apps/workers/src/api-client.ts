@@ -29,9 +29,12 @@ export class ApiClient {
    * One turn of the evaluation conveyor belt. `cap` is the per-user batch size
    * for this tick, so the schedule controls LLM spend directly.
    */
-  reconcileMatches(
-    cap: number,
-  ): Promise<{ users: number; scored: number; apply: number; skipped?: string }> {
+  reconcileMatches(cap: number): Promise<{
+    users: number;
+    scored: number;
+    apply: number;
+    skipped?: string;
+  }> {
     return this.request('POST', `/internal/matches/reconcile?cap=${cap}`);
   }
 
@@ -73,9 +76,15 @@ export class ApiClient {
    * ACTIVE jobs whose body is too thin to judge but which carry their own
    * absolute URL — the evidence exists and was never fetched.
    */
-  hydrationDue(
-    limit: number,
-  ): Promise<{ id: string; externalId: string; source: string; url: string; description: string }[]> {
+  hydrationDue(limit: number): Promise<
+    {
+      id: string;
+      externalId: string;
+      source: string;
+      url: string;
+      description: string;
+    }[]
+  > {
     return this.request('GET', `/internal/jobs/hydration-due?limit=${limit}`);
   }
 
@@ -85,9 +94,21 @@ export class ApiClient {
    */
   repairDescriptions(
     source: string,
-    updates: { externalId: string; description: string; descriptionSource: string }[],
-  ): Promise<{ matched: number; changed: number; unchanged: number; notFound: number }> {
-    return this.request('POST', '/internal/jobs/repair-descriptions', { source, updates });
+    updates: {
+      externalId: string;
+      description: string;
+      descriptionSource: string;
+    }[],
+  ): Promise<{
+    matched: number;
+    changed: number;
+    unchanged: number;
+    notFound: number;
+  }> {
+    return this.request('POST', '/internal/jobs/repair-descriptions', {
+      source,
+      updates,
+    });
   }
 
   /**
@@ -108,8 +129,14 @@ export class ApiClient {
   }
 
   /** `reason` must hold codes and counts only, never a request URL (keys live in some). */
-  recordBoardFailure(source: BoardSource, reason: string): Promise<{ crawlRunId: string }> {
-    return this.request('POST', '/internal/boards/failed', { source, reason: reason.slice(0, 300) });
+  recordBoardFailure(
+    source: BoardSource,
+    reason: string,
+  ): Promise<{ crawlRunId: string }> {
+    return this.request('POST', '/internal/boards/failed', {
+      source,
+      reason: reason.slice(0, 300),
+    });
   }
 
   // ── Company Discovery Engine ──
@@ -119,7 +146,10 @@ export class ApiClient {
   }
 
   getCareerPagesDue(limit: number): Promise<CareerPageDue[]> {
-    return this.request('GET', `/internal/discovery/career-pages/due?limit=${limit}`);
+    return this.request(
+      'GET',
+      `/internal/discovery/career-pages/due?limit=${limit}`,
+    );
   }
 
   storeSnapshot(snapshot: SnapshotInput): Promise<{ ok: boolean }> {
@@ -138,15 +168,24 @@ export class ApiClient {
   }
 
   flagForRender(companyIds: string[]): Promise<{ flagged: number }> {
-    return this.request('POST', '/internal/discovery/flag-render', { companyIds });
+    return this.request('POST', '/internal/discovery/flag-render', {
+      companyIds,
+    });
   }
 
   getRenderDue(limit: number): Promise<CareerPageDue[]> {
     return this.request('GET', `/internal/discovery/render/due?limit=${limit}`);
   }
 
-  applyDiscoveryResult(companyId: string, result: DiscoveryResult): Promise<{ stage: string }> {
-    return this.request('POST', `/internal/discovery/${companyId}/result`, result);
+  applyDiscoveryResult(
+    companyId: string,
+    result: DiscoveryResult,
+  ): Promise<{ stage: string }> {
+    return this.request(
+      'POST',
+      `/internal/discovery/${companyId}/result`,
+      result,
+    );
   }
 
   async bulkDiscover(
@@ -173,7 +212,11 @@ export class ApiClient {
     return { created, merged };
   }
 
-  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  private async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+  ): Promise<T> {
     const res = await fetch(`${this.baseUrl}${path}`, {
       method,
       headers: {
@@ -184,7 +227,9 @@ export class ApiClient {
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      throw new Error(`API ${method} ${path} -> ${res.status}: ${text.slice(0, 300)}`);
+      throw new Error(
+        `API ${method} ${path} -> ${res.status}: ${text.slice(0, 300)}`,
+      );
     }
     return (await res.json()) as T;
   }
@@ -242,7 +287,7 @@ export interface ExtractionRunMetrics {
 export interface CompanyDue {
   id: string;
   name: string;
-  atsProvider: 'GREENHOUSE' | 'LEVER' | 'ASHBY' | string;
+  atsProvider: string; // e.g. 'GREENHOUSE', 'LEVER', 'ASHBY'
   atsIdentifier: string;
 }
 

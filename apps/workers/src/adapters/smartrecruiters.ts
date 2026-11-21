@@ -6,7 +6,12 @@ interface SrPosting {
   id: string;
   name: string;
   releasedDate?: string;
-  location?: { city?: string; country?: string; remote?: boolean; hybrid?: boolean };
+  location?: {
+    city?: string;
+    country?: string;
+    remote?: boolean;
+    hybrid?: boolean;
+  };
   company?: { identifier?: string };
 }
 

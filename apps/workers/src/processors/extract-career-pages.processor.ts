@@ -104,14 +104,22 @@ export function fetchHtmlV4(
       url,
       {
         family: 4,
-        headers: { 'user-agent': 'Mozilla/5.0 (compatible; CareerOS/0.1)', accept: 'text/html' },
+        headers: {
+          'user-agent': 'Mozilla/5.0 (compatible; CareerOS/0.1)',
+          accept: 'text/html',
+        },
       },
       (res) => {
         const status = res.statusCode ?? 0;
         // Follow one redirect manually (keeps it simple + bounded).
         if (status >= 300 && status < 400 && res.headers.location) {
           res.resume();
-          settle(fetchHtmlV4(new URL(res.headers.location, url).toString(), timeoutMs));
+          settle(
+            fetchHtmlV4(
+              new URL(res.headers.location, url).toString(),
+              timeoutMs,
+            ),
+          );
           return;
         }
         if (status >= 400) {
@@ -153,7 +161,10 @@ export function fetchHtmlV4(
 
 /** Never ingest a job missing the fields the pipeline needs downstream. */
 const valid = (b: BoardJob): boolean =>
-  !!b.company?.name && !!b.job?.title && !!b.job?.url && /^https?:\/\//i.test(b.job.url);
+  !!b.company?.name &&
+  !!b.job?.title &&
+  !!b.job?.url &&
+  /^https?:\/\//i.test(b.job.url);
 
 /**
  * Tier-1 career-page extraction. Concurrency 1 (one page at a time — no browser,
@@ -191,21 +202,28 @@ export function startCareerExtractWorker(api: ApiClient): Worker {
           continue;
         }
         const t1 = Date.now();
-        const { boardJobs, jobs, confidence, rejections: rej } = extractCareerPage(
+        const {
+          boardJobs,
+          jobs,
+          confidence,
+          rejections: rej,
+        } = extractCareerPage(
           html,
           company.careerPageUrl,
           company.name,
           CONFIDENCE_THRESHOLD,
         );
         parseMsTotal += Date.now() - t1;
-        for (const [k, v] of Object.entries(rej)) rejections[k] = (rejections[k] ?? 0) + v;
+        for (const [k, v] of Object.entries(rej))
+          rejections[k] = (rejections[k] ?? 0) + v;
         if (jobs.length > 0) {
           confidenceTotal += confidence;
           confidencePages++;
         }
         // Static tier found nothing but the page is a JS app shell → hand it to
         // the render tier, which loads it in a browser and re-runs THIS extractor.
-        if (jobs.length === 0 && looksJsRendered(html)) jsWallCompanyIds.push(company.id);
+        if (jobs.length === 0 && looksJsRendered(html))
+          jsWallCompanyIds.push(company.id);
         const clean = boardJobs.filter(valid);
         if (clean.length > 0) {
           pagesWithJobs++;
@@ -228,7 +246,9 @@ export function startCareerExtractWorker(api: ApiClient): Worker {
             });
             snapshotted++;
           } catch (err) {
-            console.warn(`[career-extract] snapshot failed for ${company.name}: ${err}`);
+            console.warn(
+              `[career-extract] snapshot failed for ${company.name}: ${String(err)}`,
+            );
           }
         }
         await new Promise((r) => setTimeout(r, 400)); // pace
@@ -239,16 +259,21 @@ export function startCareerExtractWorker(api: ApiClient): Worker {
         created: 0,
       };
       if (all.length > 0) {
-        ingested = await api.ingestBoardJobs(`career-page-${EXTRACTOR_VERSION}`, all);
+        ingested = await api.ingestBoardJobs(
+          `career-page-${EXTRACTOR_VERSION}`,
+          all,
+        );
       }
       // Hand JS-app-shell pages to the render tier (no-op there until a render
       // service is configured). A failure must never fail the extraction run.
       if (jsWallCompanyIds.length > 0) {
         try {
           const f = await api.flagForRender(jsWallCompanyIds);
-          console.log(`[career-extract] flagged ${f.flagged} JS-shell pages for render`);
+          console.log(
+            `[career-extract] flagged ${f.flagged} JS-shell pages for render`,
+          );
         } catch (err) {
-          console.warn(`[career-extract] flag-render failed: ${err}`);
+          console.warn(`[career-extract] flag-render failed: ${String(err)}`);
         }
       }
 
@@ -271,14 +296,18 @@ export function startCareerExtractWorker(api: ApiClient): Worker {
           jobsIngested: ingested.created,
           duplicates: ingested.duplicates ?? 0,
           snapshotted,
-          avgConfidence: confidencePages ? Math.round(confidenceTotal / confidencePages) : 0,
+          avgConfidence: confidencePages
+            ? Math.round(confidenceTotal / confidencePages)
+            : 0,
           avgFetchMs: processed ? Math.round(fetchMsTotal / processed) : 0,
-          avgParseMs: confidencePages ? Math.round(parseMsTotal / Math.max(1, processed - fetchFailed)) : 0,
+          avgParseMs: confidencePages
+            ? Math.round(parseMsTotal / Math.max(1, processed - fetchFailed))
+            : 0,
           totalMs,
           rejections,
         });
       } catch (err) {
-        console.warn(`[career-extract] metrics record failed: ${err}`);
+        console.warn(`[career-extract] metrics record failed: ${String(err)}`);
       }
 
       return {
@@ -319,11 +348,16 @@ export function startCareerExtractWorker(api: ApiClient): Worker {
 
 /** Run a batch a few times a day — custom pages change slowly, quota is $0. */
 export async function ensureCareerExtractSchedule(): Promise<void> {
-  const queue = new Queue(QueueNames.CAREER_EXTRACT, { connection: createRedisConnection() });
+  const queue = new Queue(QueueNames.CAREER_EXTRACT, {
+    connection: createRedisConnection(),
+  });
   await queue.upsertJobScheduler(
     'career-extract-6h',
     { pattern: '15 */6 * * *' }, // every 6 hours at :15
-    { name: 'scheduled', opts: { attempts: 1, removeOnComplete: true, removeOnFail: true } },
+    {
+      name: 'scheduled',
+      opts: { attempts: 1, removeOnComplete: true, removeOnFail: true },
+    },
   );
   await queue.close();
   console.log('[scheduler] career-extract: every 6h (concurrency 1)');
@@ -354,14 +388,20 @@ export function startReplayExtractWorker(api: ApiClient): Worker {
       for (const snap of due) {
         reprocessed++;
         const t0 = Date.now();
-        const { boardJobs, jobs, confidence, rejections: rej } = extractCareerPage(
+        const {
+          boardJobs,
+          jobs,
+          confidence,
+          rejections: rej,
+        } = extractCareerPage(
           snap.html,
           snap.url,
           snap.name,
           CONFIDENCE_THRESHOLD,
         );
         parseMsTotal += Date.now() - t0;
-        for (const [k, v] of Object.entries(rej)) rejections[k] = (rejections[k] ?? 0) + v;
+        for (const [k, v] of Object.entries(rej))
+          rejections[k] = (rejections[k] ?? 0) + v;
         if (jobs.length > 0) {
           confidenceTotal += confidence;
           confidencePages++;
@@ -384,7 +424,9 @@ export function startReplayExtractWorker(api: ApiClient): Worker {
             candidateCount: jobs.length,
           });
         } catch (err) {
-          console.warn(`[replay-extract] re-store failed for ${snap.name}: ${err}`);
+          console.warn(
+            `[replay-extract] re-store failed for ${snap.name}: ${String(err)}`,
+          );
         }
       }
 
@@ -393,7 +435,10 @@ export function startReplayExtractWorker(api: ApiClient): Worker {
         created: 0,
       };
       if (all.length > 0) {
-        ingested = await api.ingestBoardJobs(`career-replay-${EXTRACTOR_VERSION}`, all);
+        ingested = await api.ingestBoardJobs(
+          `career-replay-${EXTRACTOR_VERSION}`,
+          all,
+        );
       }
       const totalMs = Date.now() - started;
       console.log(
@@ -414,14 +459,20 @@ export function startReplayExtractWorker(api: ApiClient): Worker {
             jobsIngested: ingested.created,
             duplicates: ingested.duplicates ?? 0,
             snapshotted: 0,
-            avgConfidence: confidencePages ? Math.round(confidenceTotal / confidencePages) : 0,
+            avgConfidence: confidencePages
+              ? Math.round(confidenceTotal / confidencePages)
+              : 0,
             avgFetchMs: 0, // replay does no network fetch
-            avgParseMs: reprocessed ? Math.round(parseMsTotal / reprocessed) : 0,
+            avgParseMs: reprocessed
+              ? Math.round(parseMsTotal / reprocessed)
+              : 0,
             totalMs,
             rejections,
           });
         } catch (err) {
-          console.warn(`[replay-extract] metrics record failed: ${err}`);
+          console.warn(
+            `[replay-extract] metrics record failed: ${String(err)}`,
+          );
         }
       }
 
@@ -437,11 +488,16 @@ export function startReplayExtractWorker(api: ApiClient): Worker {
  * at a time until the whole corpus has been re-mined by the new parser.
  */
 export async function ensureReplayExtractSchedule(): Promise<void> {
-  const queue = new Queue(QueueNames.REPLAY_EXTRACT, { connection: createRedisConnection() });
+  const queue = new Queue(QueueNames.REPLAY_EXTRACT, {
+    connection: createRedisConnection(),
+  });
   await queue.upsertJobScheduler(
     'replay-extract-daily',
     { pattern: '45 3 * * *' }, // 03:45 daily
-    { name: 'scheduled', opts: { attempts: 1, removeOnComplete: true, removeOnFail: true } },
+    {
+      name: 'scheduled',
+      opts: { attempts: 1, removeOnComplete: true, removeOnFail: true },
+    },
   );
   await queue.close();
   console.log('[scheduler] replay-extract: daily (concurrency 1)');
@@ -488,14 +544,20 @@ export function startRenderExtractWorker(api: ApiClient): Worker {
           continue;
         }
         const t1 = Date.now();
-        const { boardJobs, jobs, confidence, rejections: rej } = extractCareerPage(
+        const {
+          boardJobs,
+          jobs,
+          confidence,
+          rejections: rej,
+        } = extractCareerPage(
           html,
           company.careerPageUrl,
           company.name,
           CONFIDENCE_THRESHOLD,
         );
         parseMsTotal += Date.now() - t1;
-        for (const [k, v] of Object.entries(rej)) rejections[k] = (rejections[k] ?? 0) + v;
+        for (const [k, v] of Object.entries(rej))
+          rejections[k] = (rejections[k] ?? 0) + v;
         if (jobs.length > 0) {
           confidenceTotal += confidence;
           confidencePages++;
@@ -519,7 +581,9 @@ export function startRenderExtractWorker(api: ApiClient): Worker {
             });
             snapshotted++;
           } catch (err) {
-            console.warn(`[render-extract] snapshot failed for ${company.name}: ${err}`);
+            console.warn(
+              `[render-extract] snapshot failed for ${company.name}: ${String(err)}`,
+            );
           }
         }
       }
@@ -529,7 +593,10 @@ export function startRenderExtractWorker(api: ApiClient): Worker {
         created: 0,
       };
       if (all.length > 0) {
-        ingested = await api.ingestBoardJobs(`career-render-${EXTRACTOR_VERSION}`, all);
+        ingested = await api.ingestBoardJobs(
+          `career-render-${EXTRACTOR_VERSION}`,
+          all,
+        );
       }
       const totalMs = Date.now() - started;
       console.log(
@@ -550,18 +617,30 @@ export function startRenderExtractWorker(api: ApiClient): Worker {
             jobsIngested: ingested.created,
             duplicates: ingested.duplicates ?? 0,
             snapshotted,
-            avgConfidence: confidencePages ? Math.round(confidenceTotal / confidencePages) : 0,
+            avgConfidence: confidencePages
+              ? Math.round(confidenceTotal / confidencePages)
+              : 0,
             avgFetchMs: processed ? Math.round(fetchMsTotal / processed) : 0,
-            avgParseMs: confidencePages ? Math.round(parseMsTotal / Math.max(1, confidencePages)) : 0,
+            avgParseMs: confidencePages
+              ? Math.round(parseMsTotal / Math.max(1, confidencePages))
+              : 0,
             totalMs,
             rejections,
           });
         } catch (err) {
-          console.warn(`[render-extract] metrics record failed: ${err}`);
+          console.warn(
+            `[render-extract] metrics record failed: ${String(err)}`,
+          );
         }
       }
 
-      return { processed, renderFailed, pagesWithJobs, extracted: all.length, ...ingested };
+      return {
+        processed,
+        renderFailed,
+        pagesWithJobs,
+        extracted: all.length,
+        ...ingested,
+      };
     },
     { connection: createRedisConnection(), concurrency: 1 },
   );
@@ -569,11 +648,16 @@ export function startRenderExtractWorker(api: ApiClient): Worker {
 
 /** Render tier runs every 6h, offset from the static tier. No-op without a service. */
 export async function ensureRenderExtractSchedule(): Promise<void> {
-  const queue = new Queue(QueueNames.RENDER_EXTRACT, { connection: createRedisConnection() });
+  const queue = new Queue(QueueNames.RENDER_EXTRACT, {
+    connection: createRedisConnection(),
+  });
   await queue.upsertJobScheduler(
     'render-extract-6h',
     { pattern: '45 */6 * * *' }, // every 6h at :45 (static runs at :15)
-    { name: 'scheduled', opts: { attempts: 1, removeOnComplete: true, removeOnFail: true } },
+    {
+      name: 'scheduled',
+      opts: { attempts: 1, removeOnComplete: true, removeOnFail: true },
+    },
   );
   await queue.close();
   console.log('[scheduler] render-extract: every 6h (concurrency 1)');
