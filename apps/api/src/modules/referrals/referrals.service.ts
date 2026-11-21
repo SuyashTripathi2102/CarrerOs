@@ -222,11 +222,15 @@ export class ReferralsService {
       person,
     );
 
-    const out = await this.llm.generateJson<{ subject: string; body: string }>(prompt, {
-      system,
-      temperature: 0.5,
-      maxOutputTokens: 600,
-    });
+    const out = await this.llm.generateJson<{ subject: string; body: string }>(
+      prompt,
+      {
+        system,
+        temperature: 0.5,
+        maxOutputTokens: 600,
+        interactive: true,
+      },
+    );
     const draft = `Subject: ${out.subject}\n\n${out.body}`;
 
     // Drafting doesn't undo a real-world contact the user already logged.
@@ -306,11 +310,15 @@ export class ReferralsService {
       { name: contact.name, role: contact.role as ReferralRole },
       contact.followUpCount + 1,
     );
-    const out = await this.llm.generateJson<{ subject: string; body: string }>(prompt, {
-      system,
-      temperature: 0.5,
-      maxOutputTokens: 400,
-    });
+    const out = await this.llm.generateJson<{ subject: string; body: string }>(
+      prompt,
+      {
+        system,
+        temperature: 0.5,
+        maxOutputTokens: 400,
+        interactive: true,
+      },
+    );
     return { subject: out.subject, body: out.body, draft: `Subject: ${out.subject}\n\n${out.body}` };
   }
 

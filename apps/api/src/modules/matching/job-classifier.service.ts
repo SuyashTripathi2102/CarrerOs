@@ -8,6 +8,7 @@ import type {
   RoleFamily,
   Seniority,
 } from './role-classification';
+import { AiSpendBlockedError } from '../ai/spend-policy';
 
 /**
  * Bump when the prompt or the taxonomy changes — stored classifications from
@@ -149,6 +150,15 @@ export class JobClassifierService {
         classified.push(...done);
         if (onBatch && done.length) await onBatch(done);
       } catch (err) {
+        if (err instanceof AiSpendBlockedError) {
+          // Every later batch would be refused the same way: stop here instead of sleeping and
+          // failing through the rest. They stay unclassified and are offered again later.
+          failedIds.push(...jobs.slice(i).map((j) => j.id));
+          this.logger.warn(
+            `classification stopped at ${i}/${jobs.length} jobs: ${err.message}`,
+          );
+          break;
+        }
         failedIds.push(...batch.map((b) => b.id));
         this.logger.error(
           `classify batch ${i / CLASSIFY_BATCH + 1} failed, continuing: ${

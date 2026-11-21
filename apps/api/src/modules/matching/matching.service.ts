@@ -1,4 +1,5 @@
 import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
+import { AiCallKind } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { countrySql } from './location-filter';
@@ -22,6 +23,7 @@ import { atsKeywordAudit } from './ats-keywords';
 import { opportunityScore, type HiringTrend } from './opportunity-score';
 import { SourceTrustService } from '../source-trust/source-trust.service';
 import { AiUsageService } from '../ai/ai-usage.service';
+import { AiSpendBlockedError } from '../ai/spend-policy';
 
 const SIMILARITY_TOP_K = 40; // pgvector prefilter size
 const LLM_SCORE_TOP_N = 15; // how many get deep LLM scoring
@@ -225,6 +227,16 @@ export class MatchingService {
    * clear the bar — pushed as a notification within the crawl tier's latency.
    */
   async matchNewJobs(jobIds: string[]): Promise<{ notified: number; matched: number }> {
+    // Deferring is safe: these jobs stay undecided, and the evaluation belt
+    // judges undecided jobs once the budget allows.
+    const exhausted = await this.budgetExhausted();
+    if (exhausted) {
+      this.logger.warn(
+        `incremental matching deferred for ${jobIds.length} jobs: ${exhausted}`,
+      );
+      return { notified: 0, matched: 0 };
+    }
+
     const users = await this.prisma.user.findMany({
       where: {
         resumes: { some: { isPrimary: true, versions: { some: { embedding: { isNot: null } } } } },
@@ -309,76 +321,33 @@ export class MatchingService {
     return { rescored: matches.length, notified };
   }
 
+  /**
+   * Null while background AI work may still spend today, otherwise why not. The rule itself
+   * (credit period, post-credit budget, reserve for the user's own actions) lives in
+   * ai/spend-policy.ts, where every provider call is checked too.
+   */
+  private budgetExhausted(): Promise<string | null> {
+    return this.ai.blockReason(AiCallKind.GENERATE);
+  }
+
   /** Reconcile every user with a parsed primary resume (system-driven catch-up:
    *  runs after a resume re-parse and on a schedule). */
-  /**
-   * Daily LLM spend ceiling for the evaluation belt, USD. The belt runs
-   * unattended every 15 minutes forever, so without this a config slip — or
-   * simply the calendar — turns into an open-ended bill.
-   *
-   * The calendar part is not hypothetical: the GCP free credit funding this
-   * (₹23,435 remaining of ₹28,320.75, ~$248) EXPIRES 2026-10-07. On 8 October
-   * nothing about the belt changes; the same ticks simply start charging the
-   * attached card instead. A ceiling is what makes that a stopped queue rather
-   * than a surprise invoice.
-   *
-   * Override with AI_DAILY_BUDGET_USD. Set to 0 to disable evaluation entirely.
-   */
-  private num(raw: string | undefined, fallback: number): number {
-    // An EMPTY value means "unset", not "0". Number('') is 0, so parsing
-    // naively would let a blank or deleted env var silently pause evaluation —
-    // indistinguishable from a belt with nothing left to judge, which is the
-    // exact failure class this whole scheduler exists to remove. An explicit
-    // "0" still means pause.
-    const v = raw?.trim();
-    if (!v) return fallback;
-    const parsed = Number(v);
-    return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
-  }
-
-  /**
-   * Today's spend ceiling, which CHANGES on the day the credit dies.
-   *
-   * The funding is a GCP free credit — ~$248 remaining of ₹28,320.75 — that
-   * expires 2026-10-07 and is worth nothing afterwards. Two different regimes
-   * follow from that, and the switch must be automatic:
-   *
-   *   BEFORE expiry  spend freely. Unspent credit is simply lost, so a low
-   *                  ceiling is a pure waste — it does not save anything.
-   *   AFTER expiry   the identical ticks bill the attached card (the account
-   *                  is already "paid ... will accrue a balance"). The ceiling
-   *                  drops hard, so the belt throttles itself on 8 October
-   *                  without anyone remembering to act.
-   *
-   * Dropping to a small non-zero figure rather than 0 is deliberate: /today
-   * keeps judging genuinely fresh arrivals (~$4/day steady state) instead of
-   * going silently dead on a date nobody is watching.
-   */
-  private dailyBudgetUsd(): { budget: number; regime: 'credit' | 'post-credit' } {
-    const expiresAt = process.env.AI_CREDIT_EXPIRES_AT?.trim();
-    const expired = expiresAt ? Date.now() > new Date(expiresAt).getTime() : false;
-    return expired
-      ? { budget: this.num(process.env.AI_DAILY_BUDGET_AFTER_CREDIT_USD, 2), regime: 'post-credit' }
-      : { budget: this.num(process.env.AI_DAILY_BUDGET_USD, 8), regime: 'credit' };
-  }
-
   async reconcileAll(
     cap = 60,
   ): Promise<{ users: number; scored: number; apply: number; skipped?: string }> {
+    // Ahead of the budget check, because re-sending an alert makes no AI call.
+    await this.notifications
+      .retryUndelivered()
+      .catch((err: unknown) =>
+        this.logger.warn(`alert retry skipped: ${String(err)}`),
+      );
+
     // Checked BEFORE any candidate work: the point is to spend nothing once the
     // ceiling is hit, not to notice afterwards.
-    const { budget, regime } = this.dailyBudgetUsd();
-    const spent = await this.ai.spentTodayUsd();
-    if (spent >= budget) {
-      this.logger.warn(
-        `evaluation skipped [${regime}]: $${spent.toFixed(2)} spent today >= $${budget.toFixed(2)} budget`,
-      );
-      return {
-        users: 0,
-        scored: 0,
-        apply: 0,
-        skipped: `daily AI budget reached ($${spent.toFixed(2)}/$${budget.toFixed(2)}, ${regime})`,
-      };
+    const exhausted = await this.budgetExhausted();
+    if (exhausted) {
+      this.logger.warn(`evaluation skipped: ${exhausted}`);
+      return { users: 0, scored: 0, apply: 0, skipped: exhausted };
     }
 
     const users = await this.prisma.user.findMany({
@@ -414,6 +383,11 @@ export class MatchingService {
    * the DB unnotified so the 2 PM digest picks them up.
    */
   async reconcileForUser(userId: string, cap = 60): Promise<ReconcileReport> {
+    // Resume activation reaches this directly, not through reconcileAll, and
+    // re-scores up to 400 jobs: it must not start once the day's budget is spent.
+    const exhausted = await this.budgetExhausted();
+    if (exhausted) throw new AiSpendBlockedError(exhausted);
+
     const resume = await this.getPrimaryResumeContext(userId);
     const countries = await this.preferredCountries(userId);
 
@@ -1088,6 +1062,15 @@ export class MatchingService {
       try {
         scores = await this.scoreBatch(resume.parsed, batch);
       } catch (err) {
+        if (err instanceof AiSpendBlockedError) {
+          // The budget is spent: every later batch would be refused the same way. Stop here; the
+          // rest stay unscored (never recorded as low) and are judged once the budget allows.
+          failedJobIds.push(...toScore.slice(i).map((b) => b.id));
+          this.logger.warn(
+            `scoring stopped at ${i}/${toScore.length} jobs: ${err.message}`,
+          );
+          break;
+        }
         failedJobIds.push(...batch.map((b) => b.id));
         this.logger.error(
           `score batch ${i / SCORE_BATCH + 1} of ${Math.ceil(toScore.length / SCORE_BATCH)} failed, continuing: ${
@@ -1522,6 +1505,16 @@ export class MatchingService {
 
   /** Embed specific jobs (embed-at-ingest path — called by EmbedProcessor). */
   async embedJobsByIds(jobIds: string[]): Promise<number> {
+    // Returning instead of failing keeps the queue quiet; the embedding sweep
+    // re-offers these jobs once spending is allowed again.
+    const blocked = await this.ai.blockReason(AiCallKind.EMBED);
+    if (blocked) {
+      this.logger.warn(
+        `embedding deferred for ${jobIds.length} jobs: ${blocked}`,
+      );
+      return 0;
+    }
+
     const missing = await this.prisma.job.findMany({
       where: { id: { in: jobIds }, embedding: null },
       select: { id: true, title: true, description: true, location: true },

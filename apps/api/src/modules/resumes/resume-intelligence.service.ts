@@ -67,6 +67,7 @@ export class ResumeIntelligenceService {
     if (this.looksLikeText(rawText)) {
       parsed = await this.llm.generateJson<ParsedResume>(
         `${PARSE_PROMPT}\n\nRESUME TEXT:\n${rawText.slice(0, 40_000)}`,
+        { interactive: true },
       );
     } else {
       // Extraction produced gibberish (subsetted fonts, scanned pages...) —
@@ -75,6 +76,7 @@ export class ResumeIntelligenceService {
       const pdf = await this.storage.download(version.fileKey);
       parsed = await this.llm.generateJson<ParsedResume>(PARSE_PROMPT, {
         files: [{ mimeType: 'application/pdf', data: pdf }],
+        interactive: true,
       });
     }
 
@@ -127,7 +129,9 @@ export class ResumeIntelligenceService {
   }
 
   private async storeEmbedding(resumeVersionId: string, summary: string): Promise<void> {
-    const [vector] = await this.embedder.embed([summary]);
+    const [vector] = await this.embedder.embed([summary], {
+      interactive: true,
+    });
     const literal = `[${vector.join(',')}]`;
     // Prisma can't write Unsupported("vector") columns — raw SQL by design.
     await this.prisma.$executeRaw`
