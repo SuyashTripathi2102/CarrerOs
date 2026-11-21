@@ -10,6 +10,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CompaniesService } from '../companies/companies.service';
 import { computeConfidence } from '../discovery/discovery.service';
 import { normalizeCountry } from './country';
+import { plausiblePostedAt } from './posted-at';
 import { jobFingerprint } from './job-fingerprint';
 import { adaptiveTier, TIER_INTERVAL_MS, type Tier } from './crawl-scheduling';
 import {
@@ -658,7 +659,19 @@ export class IngestService implements OnModuleInit {
       const salaryMins = chunk.map((w) => w.job.salaryMin ?? null);
       const salaryMaxs = chunk.map((w) => w.job.salaryMax ?? null);
       const currencies = chunk.map((w) => w.job.currency ?? null);
-      const postedAts = chunk.map((w) => w.job.postedAt ?? null);
+      // Also checked HERE: one implausible date (a source's "no date"
+      // placeholder, garbage, far future) used to fail the timestamptz cast and
+      // with it the whole company crawl (2026-11-21, Keka/FloBiz). It is now
+      // stored as unknown. See posted-at.ts.
+      const postedAts = chunk.map((w) => plausiblePostedAt(w.job.postedAt));
+      const unknownDates = chunk.filter(
+        (w, k) => w.job.postedAt && postedAts[k] === null,
+      ).length;
+      if (unknownDates > 0) {
+        this.logger.warn(
+          `${source ?? 'unknown source'} company ${companyId}: ${unknownDates} implausible postedAt value(s) stored as unknown`,
+        );
+      }
       const fingerprintsCol = chunk.map((w) => w.fingerprint);
       const sources = chunk.map(() => source ?? null);
       // Provenance of the body. NULL when an adapter does not report it — the
