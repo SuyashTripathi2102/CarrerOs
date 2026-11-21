@@ -33,11 +33,15 @@
   powershell -ExecutionPolicy Bypass -File scripts/ensure-stack.ps1 -Restart
 #>
 param(
-  [string]$RepoRoot = 'D:\CarrerOs',
+  [string]$RepoRoot = '',
   [switch]$Restart,
   [int]$DockerWaitSeconds = 180,
   [int]$ApiWaitSeconds = 180
 )
+
+# Resolved here, not as the parameter default: Windows PowerShell 5.1 leaves
+# $PSScriptRoot empty while binding parameters under -File.
+if (-not $RepoRoot) { $RepoRoot = Split-Path $PSScriptRoot -Parent }
 
 $ErrorActionPreference = 'Stop'
 $logDir = Join-Path $env:TEMP 'careeros'

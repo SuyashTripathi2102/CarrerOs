@@ -9,7 +9,11 @@
   UseGuards,
 } from '@nestjs/common';
 import { z } from 'zod';
-import { BoardJobSchema, NormalizedJobSchema } from '@careeros/shared';
+import {
+  BoardJobSchema,
+  BoardSourceSchema,
+  NormalizedJobSchema,
+} from '@careeros/shared';
 import { Public } from '../../common/decorators/public.decorator';
 import { CompaniesService } from '../companies/companies.service';
 import { IngestService } from './ingest.service';
@@ -62,6 +66,12 @@ const BoardBodySchema = z.object({
    */
   discoverySource: z.string().min(1).optional(),
   entries: z.array(BoardJobSchema),
+});
+
+/** `source` is one of the boards the workers crawl (BOARD_SOURCES in @careeros/shared), never free text. */
+export const BoardFailureSchema = z.object({
+  source: BoardSourceSchema,
+  reason: z.string().min(1).max(300),
 });
 
 /**
@@ -129,6 +139,17 @@ export class InternalController {
   @Post('embeddings/reconcile')
   reconcileEmbeddings() {
     return this.ingest.reconcileEmbeddings();
+  }
+
+  /** A board crawl whose every request failed: recorded FAILED, not as an empty success. */
+  @Post('boards/failed')
+  recordBoardFailure(@Body() body: unknown) {
+    const parsed = BoardFailureSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
+    return this.ingest.recordBoardFailure(
+      parsed.data.source,
+      parsed.data.reason,
+    );
   }
 
   @Post('boards/ingest')

@@ -3,6 +3,8 @@ import { ApiClient } from '../api-client';
 import { QueueNames } from '../queues/names';
 import { createRedisConnection } from '../queues/connection';
 
+export const BRIEF_TIMEZONE = 'Asia/Kolkata';
+
 /** 8:00 AM IST morning brief + 2:00 PM CONSIDER digest — the workers only pull
  *  the trigger; the API composes and sends (it owns the DB + Telegram). The
  *  job `name` selects which: 'scheduled' = brief, 'consider-digest' = digest. */
@@ -47,14 +49,16 @@ export async function ensureDailyBriefSchedule(): Promise<void> {
     removeOnComplete: true,
     removeOnFail: true,
   };
+  // Without tz, BullMQ reads a pattern in the server's local time, so the same
+  // pattern fires at different hours on a laptop and on a UTC server.
   await queue.upsertJobScheduler(
     'daily-brief-8am-ist',
-    { pattern: '30 2 * * *' }, // 02:30 UTC = 08:00 IST
+    { pattern: '0 8 * * *', tz: BRIEF_TIMEZONE },
     { name: 'scheduled', opts },
   );
   await queue.upsertJobScheduler(
     'consider-digest-2pm-ist',
-    { pattern: '30 8 * * *' }, // 08:30 UTC = 14:00 IST
+    { pattern: '0 14 * * *', tz: BRIEF_TIMEZONE },
     { name: 'consider-digest', opts },
   );
   await queue.close();

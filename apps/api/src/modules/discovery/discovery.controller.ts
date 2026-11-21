@@ -15,6 +15,8 @@ import { CompanyCandidateSchema, DiscoveryResultSchema } from '@careeros/shared'
 import { Public } from '../../common/decorators/public.decorator';
 import { InternalTokenGuard } from '../internal/internal-token.guard';
 import { DiscoveryService } from './discovery.service';
+import { Role } from '@prisma/client';
+import { Roles } from '../../common/decorators/roles.decorator';
 
 const BulkBodySchema = z.object({
   source: z.string().min(1),
@@ -123,6 +125,8 @@ export class DiscoveryInternalController {
 }
 
 /** User-facing: the conversion funnel — Phase B's success metric. */
+// Operator only (W8): the account's current role is checked against the database by RolesGuard.
+@Roles(Role.ADMIN)
 @Controller('discovery')
 export class DiscoveryController {
   constructor(private readonly discovery: DiscoveryService) {}

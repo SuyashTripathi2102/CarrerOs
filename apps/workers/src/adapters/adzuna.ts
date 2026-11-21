@@ -1,6 +1,7 @@
 import { get } from 'node:https';
 import type { BoardJob } from '@careeros/shared';
 import { capDescription, workModeFromText } from './types';
+import { FetchTally, SourceNotConfiguredError } from './fetch-failure';
 
 /**
  * IPv4-forced JSON GET. The prod box's IPv6 egress is broken and Adzuna's host
@@ -127,20 +128,22 @@ export function mapAdzunaResults(results: AdzunaResult[]): BoardJob[] {
 }
 
 /**
- * Fetch recent India dev jobs across the target roles. No key → empty (logged),
- * like every optional source. Bounded: one page (50) per role, freshest first.
+ * Fetch recent India dev jobs across the target roles. Bounded: a few pages (50
+ * each) per role, freshest first. A failed page abandons only its own role.
+ * Without a key it throws SourceNotConfiguredError (register free at
+ * developer.adzuna.com); it throws SourceUnreachableError only when every
+ * request failed. The key is in the request URL, and getJson's errors never
+ * include the URL, so the failure log below cannot print it.
  */
 export async function fetchAdzunaJobs(): Promise<BoardJob[]> {
   const appId = process.env.ADZUNA_APP_ID;
   const appKey = process.env.ADZUNA_APP_KEY;
-  if (!appId || !appKey) {
-    console.log('[adzuna] ADZUNA_APP_ID/ADZUNA_APP_KEY not set — skipping (register free at developer.adzuna.com)');
-    return [];
-  }
+  if (!appId || !appKey) throw new SourceNotConfiguredError('adzuna', 'ADZUNA_APP_ID/ADZUNA_APP_KEY');
 
   const auth = `app_id=${appId}&app_key=${appKey}`;
   const all: BoardJob[] = [];
   const seen = new Set<string>();
+  const tally = new FetchTally();
   // A few pages per role (50 each) — ~3–5× the volume, still ~18 calls/sweep
   // (well within the free tier). Stops early when a role runs out of results.
   const PAGES = 3;
@@ -152,8 +155,10 @@ export async function fetchAdzunaJobs(): Promise<BoardJob[]> {
       let batch: BoardJob[] = [];
       try {
         const res = await getJson<AdzunaResponse>(url);
+        tally.succeeded();
         batch = mapAdzunaResults(res.results ?? []);
       } catch (err) {
+        tally.failedWith(err);
         console.log(`[adzuna] query "${what}" p${page} failed: ${String(err)}`);
         break;
       }
@@ -166,6 +171,7 @@ export async function fetchAdzunaJobs(): Promise<BoardJob[]> {
       await new Promise((r) => setTimeout(r, 1200)); // gentle on the free tier
     }
   }
+  tally.assertReachable('adzuna');
   console.log(`[adzuna] fetched ${all.length} India dev jobs across ${QUERIES.length} role queries`);
   return all;
 }

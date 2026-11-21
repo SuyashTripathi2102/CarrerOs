@@ -15,7 +15,11 @@ import {
   SEED_IMPORT_QUEUE,
 } from './crawl.constants';
 import { PrismaService } from '../../prisma/prisma.service';
+import { Role } from '@prisma/client';
+import { Roles } from '../../common/decorators/roles.decorator';
 
+// Operator only (W8): the account's current role is checked against the database by RolesGuard.
+@Roles(Role.ADMIN)
 @Controller('crawl')
 export class CrawlController {
   constructor(

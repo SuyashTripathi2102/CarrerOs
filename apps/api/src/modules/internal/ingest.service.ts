@@ -1,4 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { CrawlStatus, CrawlTier, DiscoveryStage, JobStatus, Prisma } from '@prisma/client';
@@ -11,7 +12,17 @@ import { computeConfidence } from '../discovery/discovery.service';
 import { normalizeCountry } from './country';
 import { jobFingerprint } from './job-fingerprint';
 import { adaptiveTier, TIER_INTERVAL_MS, type Tier } from './crawl-scheduling';
-import { decideReconciliation } from './crawl-reconciliation';
+import {
+  decideReconciliation,
+  firstPerExternalId,
+  type DropGuardInput,
+} from './crawl-reconciliation';
+import {
+  RETIREMENT_DROP_GUARD,
+  RETIREMENT_GUARD_OFF,
+  resolveRetirementGuard,
+  type RetirementGuardState,
+} from './retirement-guard';
 import { EMBED_JOBS_QUEUE } from './internal.constants';
 
 /**
@@ -48,14 +59,27 @@ const FAILURE_BACKOFF_MS = 60 * 60 * 1000; // failed company retries in 1h, not 
 const UPSERT_CHUNK = 500;
 
 @Injectable()
-export class IngestService {
+export class IngestService implements OnModuleInit {
   private readonly logger = new Logger(IngestService.name);
+
+  /** Off until onModuleInit has checked the switch and the schema. */
+  private retirementGuard: RetirementGuardState = { ...RETIREMENT_GUARD_OFF };
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly companies: CompaniesService,
     @InjectQueue(EMBED_JOBS_QUEUE) private readonly embedQueue: Queue,
+    private readonly config: ConfigService,
   ) {}
+
+  /** Resolve the retirement drop guard once, at startup (retirement-guard.ts). */
+  async onModuleInit(): Promise<void> {
+    this.retirementGuard = await resolveRetirementGuard(
+      this.config.get<string>(RETIREMENT_DROP_GUARD),
+      () => this.crawlRunsHasRunFlags(),
+      this.logger,
+    );
+  }
 
   /**
    * Full-board sync for one company: batched upsert of what the crawler saw,
@@ -72,6 +96,10 @@ export class IngestService {
     const run = await this.prisma.crawlRun.create({
       data: { companyId, source, status: CrawlStatus.RUNNING },
     });
+    const guard = this.retirementGuard;
+    // Whether the retirement statement ran. Recorded on failure too: a step
+    // after retirement can still throw, and the jobs are retired regardless.
+    let reconciled = false;
 
     try {
       const { created, updated, newJobIds } = await this.batchUpsert(companyId, jobs, source);
@@ -87,11 +115,27 @@ export class IngestService {
       //   3. A PARTIAL board retires nothing. A walk that stopped at a page cap
       //      is successful and non-empty, so it clears both guards above and
       //      then retires every job past the last page it read.
-      const seenIds = jobs.map((j) => j.externalId);
+      //   4. With the drop guard on, a crawl with no previous valid crawl, or
+      //      one that saw fewer than half as many jobs as that crawl, retires
+      //      nothing this time and the next crawl decides.
+      //
+      // One job per externalId, by the same rule batchUpsert applies, so the
+      // seen count, the recorded jobsFound and the reference all agree.
+      const seenIds = firstPerExternalId(jobs).map((j) => j.externalId);
+      const dropGuard: DropGuardInput | undefined = guard.dropGuard
+        ? {
+            reference: await this.previousValidCrawl(
+              companyId,
+              source,
+              run.startedAt,
+            ),
+          }
+        : undefined;
       const decision = decideReconciliation({
         seenExternalIds: seenIds,
         crawlSucceeded: true,
         boardComplete,
+        dropGuard,
       });
       let removed = 0;
       if (decision.retire) {
@@ -104,10 +148,21 @@ export class IngestService {
           },
           data: { status: JobStatus.REMOVED },
         }));
+        reconciled = true;
       } else {
         this.logger.warn(
           `[${source}] company ${companyId}: reconciliation skipped (${decision.reason}) — ` +
-            `existing jobs preserved`,
+            `existing jobs preserved; this crawl saw ${seenIds.length}` +
+            (dropGuard
+              ? dropGuard.reference
+                ? `, the previous valid crawl ${dropGuard.reference.found}`
+                : ', no previous valid crawl'
+              : ''),
+        );
+      }
+      if (guard.recording && seenIds.length !== jobs.length) {
+        this.logger.log(
+          `[${source}] company ${companyId}: ${jobs.length} entries, ${seenIds.length} distinct`,
         );
       }
 
@@ -116,11 +171,15 @@ export class IngestService {
         data: {
           status: CrawlStatus.SUCCEEDED,
           finishedAt: new Date(),
-          jobsFound: jobs.length,
+          // Distinct once the run flags are recorded, so a later crawl compares
+          // like with like. Raw entries, as before, on a database without them.
+          jobsFound: guard.recording ? seenIds.length : jobs.length,
           jobsNew: created,
           jobsRemoved: removed,
         },
       });
+      if (guard.recording)
+        await this.recordRunFlags(run.id, boardComplete, reconciled);
 
       await this.applyAdaptiveSchedule(companyId);
       await this.updateConfidenceAfterCrawl(companyId, jobs.length > 0);
@@ -136,9 +195,83 @@ export class IngestService {
           error: err instanceof Error ? err.message : String(err),
         },
       });
+      // Best effort, as on success: it cannot mask the crawl's own error.
+      if (guard.recording)
+        await this.recordRunFlags(run.id, boardComplete, reconciled);
       await this.bumpNextCrawl(companyId, /* failed */ true);
       throw err;
     }
+  }
+
+  /**
+   * The company's previous valid crawl from this source: SUCCEEDED, complete
+   * and non-empty, and FINISHED before `before` (this run's start). Runs from
+   * before the run flags existed have `complete` NULL and never qualify.
+   *
+   * "Finished before this one started" (R1-D6) rather than only "started
+   * before": a crawl that overlaps this one may still be running when this
+   * one decides, and finish later. It is never eligible, so the daily brief,
+   * reading the same predicate afterwards, selects the same row the decision
+   * did. `"startedAt" <` is implied by it and kept as the index range for
+   * crawl_runs_evidence_idx.
+   */
+  private async previousValidCrawl(
+    companyId: string,
+    source: string,
+    before: Date,
+  ): Promise<{ found: number } | null> {
+    const rows = await this.prisma.$queryRaw<{ found: number }[]>`
+      SELECT "jobsFound" AS found
+      FROM crawl_runs
+      WHERE "companyId" = ${companyId} AND source = ${source}
+        AND status = 'SUCCEEDED' AND complete IS TRUE AND "jobsFound" > 0
+        AND "startedAt" < ${before}
+        AND "finishedAt" < ${before}
+      ORDER BY "startedAt" DESC
+      LIMIT 1
+    `;
+    return rows[0] ?? null;
+  }
+
+  /**
+   * `complete`: what the walk reported (boardComplete). `reconciled`: whether
+   * the retirement statement ran. Both are columns schema.prisma does not
+   * declare, because declaring them would make every crawlRun query select
+   * them and fail on a database without them. So they are written here, in
+   * raw SQL, and only when the startup check found them.
+   *
+   * Best effort, after success and failure alike: a recording failure is
+   * logged and never changes the crawl's status or result. The one UPDATE
+   * writes both columns or neither, so a run whose recording failed keeps
+   * `complete` NULL and can never become a reference.
+   */
+  private async recordRunFlags(
+    runId: string,
+    complete: boolean,
+    reconciled: boolean,
+  ): Promise<void> {
+    try {
+      await this.prisma.$executeRaw`
+        UPDATE crawl_runs SET complete = ${complete}, reconciled = ${reconciled} WHERE id = ${runId}
+      `;
+    } catch (e: unknown) {
+      this.logger.error(
+        `crawl run ${runId}: could not record complete/reconciled ` +
+          `(${e instanceof Error ? e.message : String(e)}); ` +
+          `the run keeps its status and cannot be a reference`,
+      );
+    }
+  }
+
+  /** Startup check: does crawl_runs have the two boolean run-flag columns? */
+  private async crawlRunsHasRunFlags(): Promise<boolean> {
+    const [{ n }] = await this.prisma.$queryRaw<{ n: number }[]>`
+      SELECT count(*)::int AS n
+      FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = 'crawl_runs'
+        AND column_name IN ('complete', 'reconciled') AND data_type = 'boolean'
+    `;
+    return n === 2;
   }
 
   /**
@@ -341,6 +474,29 @@ export class IngestService {
     return { matched, changed, unchanged, notFound: updates.length - matched };
   }
 
+  /**
+   * A board crawl in which every request failed. It gets its own FAILED run
+   * rather than going through ingestBoardJobs with no entries, which would
+   * record a zero-job SUCCESS and make an outage look like an empty board.
+   */
+  async recordBoardFailure(
+    source: string,
+    reason: string,
+  ): Promise<{ crawlRunId: string }> {
+    const now = new Date();
+    const run = await this.prisma.crawlRun.create({
+      data: {
+        source,
+        status: CrawlStatus.FAILED,
+        startedAt: now,
+        finishedAt: now,
+        error: reason,
+      },
+    });
+    this.logger.warn(`[${source}] board crawl failed: ${reason}`);
+    return { crawlRunId: run.id };
+  }
+
   async ingestBoardJobs(
     source: string,
     entries: BoardJob[],
@@ -425,12 +581,8 @@ export class IngestService {
     // can't update one row twice in a statement — an un-deduped batch fails
     // ENTIRELY, silently dropping every job from that company (2026-07-09:
     // 45 Workable crawls/day failing this way). Keep first occurrence.
-    const seen = new Set<string>();
-    const byExternalId = jobs.filter((j) => {
-      if (seen.has(j.externalId)) return false;
-      seen.add(j.externalId);
-      return true;
-    });
+    // The same rule decides the drop guard's seen count (crawl-reconciliation.ts).
+    const byExternalId = firstPerExternalId(jobs);
 
     // Compute the cross-source fingerprint once per job.
     const withFp = byExternalId.map((j) => ({

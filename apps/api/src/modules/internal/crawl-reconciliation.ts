@@ -53,9 +53,36 @@
  * were already discovered, embedded, scored and recommended.
  */
 
+/**
+ * THE identity rule for one crawl's jobs: a job is its exact `externalId`
+ * string (case and whitespace included), and the first occurrence wins. That
+ * is the same equality as the `(companyId, externalId)` unique key that the
+ * upsert conflicts on.
+ *
+ * batchUpsert's de-duplication, the drop guard's seen count and the recorded
+ * `jobsFound` all go through this one function, so they cannot count
+ * differently. A source that lists one posting twice (multi-location
+ * postings do this) is one job on every side of the comparison. Empty and
+ * missing ids never get this far: the shared NormalizedJob schema requires a
+ * non-empty string.
+ */
+export function firstPerExternalId<T extends { externalId: string }>(
+  jobs: readonly T[],
+): T[] {
+  const seen = new Set<string>();
+  return jobs.filter((j) => {
+    if (seen.has(j.externalId)) return false;
+    seen.add(j.externalId);
+    return true;
+  });
+}
+
 export interface ReconciliationInput {
-  /** externalIds the crawl actually returned. */
-  seenExternalIds: string[];
+  /**
+   * externalIds the crawl actually returned, one per job: the output of
+   * firstPerExternalId. Its length is the crawl's seen count.
+   */
+  seenExternalIds: readonly string[];
   /** Did the crawl complete successfully? A thrown adapter never reaches here. */
   crawlSucceeded: boolean;
   /**
@@ -64,23 +91,67 @@ export interface ReconciliationInput {
    * listing's end, so absence from `seenExternalIds` proves nothing.
    */
   boardComplete?: boolean;
+  /**
+   * The drop guard (RETIREMENT_DROP_GUARD). Leave it out when the switch is
+   * off: the decision is then exactly the one made before the guard existed.
+   */
+  dropGuard?: DropGuardInput;
 }
+
+export interface DropGuardInput {
+  /**
+   * The company's previous valid crawl from the same source: SUCCEEDED,
+   * complete and non-empty, with `found` its recorded `jobsFound`. `null` when
+   * there is none.
+   */
+  reference: { found: number } | null;
+}
+
+export type ReconciliationSkipReason =
+  | 'EMPTY_RESULT'
+  | 'CRAWL_FAILED'
+  | 'PARTIAL_BOARD'
+  | 'NO_REFERENCE'
+  | 'SUDDEN_DROP';
 
 export interface ReconciliationDecision {
   /** May this crawl retire absent jobs at all? */
   retire: boolean;
-  /** Why not — recorded on the CrawlRun so a skipped reconcile is visible. */
-  reason?: 'EMPTY_RESULT' | 'CRAWL_FAILED' | 'PARTIAL_BOARD';
+  /** Why not. Logged, and visible on the run as `reconciled = false`. */
+  reason?: ReconciliationSkipReason;
+}
+
+/**
+ * Rule B of the drop guard: this crawl saw fewer than half as many jobs as the
+ * previous valid crawl. Exactly half still retires. Integer arithmetic, so an
+ * odd reference needs no rounding: against 101, 50 is a drop and 51 is not.
+ */
+export function isSuddenDrop(
+  seenCount: number,
+  referenceFound: number,
+): boolean {
+  return 2 * seenCount < referenceFound;
 }
 
 /**
  * Decide whether a crawl is authoritative enough to retire absent jobs.
  *
- * Deliberately NOT "did the count drop a lot" — a threshold would still delete
- * on the failure modes that matter and would need tuning. The only signal that
- * cleanly separates "this board is genuinely empty" from every failure mode is
- * whether the crawl returned anything at all, and no source of that evidence
- * exists today. Until it does, an empty crawl retires nothing.
+ * The first three refusals need no history. An empty result is the one signal
+ * that cleanly separates "this board is genuinely empty" from every failure
+ * mode, so it never retires anything, whatever came before.
+ *
+ * The drop guard adds two refusals that compare this crawl with the company's
+ * previous valid crawl. A count threshold alone could not be trusted to decide
+ * a deletion, and before crawl runs recorded whether a walk was complete there
+ * was no reliable earlier count to compare with. The guard therefore only ever
+ * DEFERS: a crawl that saw less than half of the previous valid crawl retires
+ * nothing, and it becomes the reference for the next crawl. A short response
+ * that persists is retired one crawl late; one that rebounds retires nothing.
+ * A wrong deferral costs one crawl of delay, and a missed drop is no worse than
+ * having no guard.
+ *
+ * Its known limit: it compares neighbouring crawls only, so a board that
+ * shrinks by less than half at every step is never deferred.
  */
 export function decideReconciliation(input: ReconciliationInput): ReconciliationDecision {
   if (!input.crawlSucceeded) return { retire: false, reason: 'CRAWL_FAILED' };
@@ -97,5 +168,12 @@ export function decideReconciliation(input: ReconciliationInput): Reconciliation
   // scoped, a silently short walk "looks like a shrunken catalogue and would
   // mass-close every posting past the failed page".
   if (input.boardComplete === false) return { retire: false, reason: 'PARTIAL_BOARD' };
+  if (input.dropGuard) {
+    const { reference } = input.dropGuard;
+    if (reference === null) return { retire: false, reason: 'NO_REFERENCE' };
+    if (isSuddenDrop(input.seenExternalIds.length, reference.found)) {
+      return { retire: false, reason: 'SUDDEN_DROP' };
+    }
+  }
   return { retire: true };
 }

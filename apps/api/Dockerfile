@@ -18,6 +18,10 @@ RUN npm run build --workspace=@careeros/shared \
 FROM node:22-alpine
 WORKDIR /app
 ENV NODE_ENV=production
+# Inside the container the API must listen on the container's own interface, or its published
+# port reaches nothing. Which interfaces of the HOST machine that port is published on is set in
+# compose.prod.yml, not here.
+ENV HOST=0.0.0.0
 
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json

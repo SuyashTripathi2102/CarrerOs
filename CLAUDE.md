@@ -1,7 +1,8 @@
 # CareerOS — Master Engineering Instruction
 
 > Loaded every session. Read `docs/CAREEROS_2_ROADMAP.md` for the phase plan and
-> `docs/DECISIONS.md` for the ADRs before structural changes.
+> `docs/DECISIONS.md` for the ADRs before structural changes. On a new machine or
+> after a long break, read `docs/HANDOFF.md` first.
 
 ## North star
 

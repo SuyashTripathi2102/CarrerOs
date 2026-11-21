@@ -21,6 +21,11 @@ export interface GenerateOptions {
   files?: FilePart[];
   maxOutputTokens?: number;
   temperature?: number;
+  /**
+   * A person is waiting on this call (parsing their resume, drafting a message). It may use the
+   * small daily reserve that background work is not allowed to touch.
+   */
+  interactive?: boolean;
 }
 
 export interface LlmProvider {
@@ -39,5 +44,9 @@ export interface EmbeddingProvider {
   readonly embeddingModelId: string;
 
   /** Batch embeddings — dimensionality fixed by EMBEDDING_DIMS (pgvector schema). */
-  embed(texts: string[]): Promise<number[][]>;
+  /**
+   * `interactive`: a person is waiting on this (embedding their resume), so it may use the daily
+   * reserve that background work is not allowed to touch.
+   */
+  embed(texts: string[], opts?: { interactive?: boolean }): Promise<number[][]>;
 }

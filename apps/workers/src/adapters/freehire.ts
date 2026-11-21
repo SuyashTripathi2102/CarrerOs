@@ -1,5 +1,6 @@
 import type { BoardJob } from '@careeros/shared';
 import { capDescription, fetchJson, workModeFromText } from './types';
+import { FetchTally } from './fetch-failure';
 
 /**
  * FreeHire (freehire.me) — a keyless public aggregator that fans out across
@@ -195,13 +196,16 @@ let lastStats: FreehireStats | null = null;
 export const freehireLastStats = (): FreehireStats | null => lastStats;
 
 /**
- * Fetch a filtered India slice across the target roles. Never throws: a source
- * outage yields an empty list so one aggregator cannot fail the whole crawl.
+ * Fetch a filtered India slice across the target roles. A failed page abandons
+ * only its own query, so one flaky page cannot lose the rest. Throws
+ * SourceUnreachableError only when every request failed, so an outage is never
+ * recorded as a successful crawl that found nothing.
  */
 export async function fetchFreehireJobs(): Promise<BoardJob[]> {
   const all: BoardJob[] = [];
   const seen = new Set<string>();
   const upstream = new Set<string>();
+  const tally = new FetchTally();
   let fetched = 0;
   let rejected = 0;
   let dupes = 0;
@@ -228,7 +232,9 @@ export async function fetchFreehireJobs(): Promise<BoardJob[]> {
       let env: Envelope<FreehireJob[]>;
       try {
         env = await fetchJson<Envelope<FreehireJob[]>>(`${BASE}${SEARCH_PATH}?${params}`);
+        tally.succeeded();
       } catch (err) {
+        tally.failedWith(err);
         // Best-effort source: abandon THIS query, keep the pages already
         // collected, and move on. One flaky page must not lose the rest.
         console.log(
@@ -284,5 +290,6 @@ export async function fetchFreehireJobs(): Promise<BoardJob[]> {
       (reportedTotal != null ? ` · source reports ${reportedTotal} India jobs` : ''),
   );
 
+  tally.assertReachable('freehire');
   return all;
 }

@@ -1,5 +1,6 @@
 import type {
   BoardJob,
+  BoardSource,
   CompanyCandidate,
   DiscoveryResult,
   NormalizedJob,
@@ -104,6 +105,11 @@ export class ApiClient {
       entries,
       ...(discoverySource ? { discoverySource } : {}),
     });
+  }
+
+  /** `reason` must hold codes and counts only, never a request URL (keys live in some). */
+  recordBoardFailure(source: BoardSource, reason: string): Promise<{ crawlRunId: string }> {
+    return this.request('POST', '/internal/boards/failed', { source, reason: reason.slice(0, 300) });
   }
 
   // ── Company Discovery Engine ──

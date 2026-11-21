@@ -1,6 +1,7 @@
 import { request } from 'node:https';
 import type { BoardJob } from '@careeros/shared';
 import { capDescription, workModeFromText } from './types';
+import { FetchTally, SourceNotConfiguredError } from './fetch-failure';
 
 /**
  * Jooble — a permitted job-aggregator API (free key at jooble.org/api/about,
@@ -133,23 +134,27 @@ export function mapJoobleJobs(jobs: JoobleJob[]): BoardJob[] {
   return out;
 }
 
-/** Fetch recent India dev jobs across the target roles. No key → empty (logged). */
+/**
+ * Fetch recent India dev jobs across the target roles. Without a key it throws
+ * SourceNotConfiguredError (free key at jooble.org/api/about); it throws
+ * SourceUnreachableError only when every request failed.
+ */
 export async function fetchJoobleJobs(): Promise<BoardJob[]> {
   const key = process.env.JOOBLE_API_KEY;
-  if (!key) {
-    console.log('[jooble] JOOBLE_API_KEY not set — skipping (free key at jooble.org/api/about)');
-    return [];
-  }
+  if (!key) throw new SourceNotConfiguredError('jooble', 'JOOBLE_API_KEY');
   const url = `https://jooble.org/api/${key}`;
   const all: BoardJob[] = [];
   const seen = new Set<string>();
+  const tally = new FetchTally();
   for (const keywords of QUERIES) {
     for (let page = 1; page <= PAGES; page++) {
       let batch: BoardJob[] = [];
       try {
         const resp = await postJson<JoobleResponse>(url, { keywords, location: LOCATION, page: String(page) });
+        tally.succeeded();
         batch = mapJoobleJobs(resp.jobs ?? []);
       } catch (err) {
+        tally.failedWith(err);
         console.log(`[jooble] "${keywords}" p${page} failed: ${String(err)}`);
         break;
       }
@@ -162,6 +167,7 @@ export async function fetchJoobleJobs(): Promise<BoardJob[]> {
       await new Promise((r) => setTimeout(r, 1200));
     }
   }
+  tally.assertReachable('jooble');
   console.log(`[jooble] fetched ${all.length} India dev jobs across ${QUERIES.length} role queries`);
   return all;
 }

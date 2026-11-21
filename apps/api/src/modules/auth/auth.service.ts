@@ -1,6 +1,9 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
+  Logger,
+  OnApplicationBootstrap,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -24,7 +27,9 @@ export interface AuthResult extends TokenPair {
 const BCRYPT_ROUNDS = 12;
 
 @Injectable()
-export class AuthService {
+export class AuthService implements OnApplicationBootstrap {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly users: UsersRepository,
     private readonly refreshTokens: RefreshTokensRepository,
@@ -32,16 +37,60 @@ export class AuthService {
     private readonly config: ConfigService,
   ) {}
 
-  async register(email: string, password: string, name?: string): Promise<AuthResult> {
-    const existing = await this.users.findByEmail(email.toLowerCase());
-    if (existing) throw new ConflictException('An account with this email already exists');
+  /**
+   * Says at every start whether the install has an administrator. The operator routes (crawls,
+   * discovery, health, AI usage) admit only ADMIN accounts (W8); with accounts but no ADMIN they
+   * refuse everyone until one is promoted, which the W8 migration does on deployment. A failed
+   * count never stops the start.
+   */
+  async onApplicationBootstrap(): Promise<void> {
+    try {
+      const [admins, accounts] = await Promise.all([
+        this.users.countAdmins(),
+        this.users.count(),
+      ]);
+      if (accounts > 0 && admins === 0) {
+        this.logger.warn(
+          `no ADMIN among ${accounts} account(s): the operator routes refuse everyone until one is promoted`,
+        );
+      } else {
+        this.logger.log(
+          `authorization: ${admins} ADMIN of ${accounts} account(s)`,
+        );
+      }
+    } catch (err) {
+      this.logger.warn(
+        `could not count ADMIN accounts: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
 
-    const user = await this.users.create({
-      email: email.toLowerCase(),
-      passwordHash: await bcrypt.hash(password, BCRYPT_ROUNDS),
-      name: name ?? null,
-    });
-    return this.buildAuthResult(user);
+  /**
+   * Sign-up is open only to create the first account, unless ALLOW_REGISTRATION=true.
+   *
+   * The decision is made under a lock, in the same transaction as the insert
+   * (UsersRepository.createUnderSignupLock), so two sign-ups that arrive together can never both
+   * create "the first account". The quick look at the count before it only spares a closed sign-up
+   * the password hash; on its own it proves nothing. The gate is always checked before the email,
+   * so a closed sign-up reveals nothing about which accounts exist.
+   */
+  async register(email: string, password: string, name?: string): Promise<AuthResult> {
+    const openToAll = this.openToAll();
+    if (!openToAll && (await this.users.count()) > 0)
+      throw new ForbiddenException('Registration is closed');
+
+    // Hashed before the lock is taken, so the lock is held only for the check and the insert.
+    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    const outcome = await this.users.createUnderSignupLock(
+      { email: email.toLowerCase(), passwordHash, name: name ?? null },
+      openToAll,
+    );
+    if ('refused' in outcome) {
+      if (outcome.refused === 'closed')
+        throw new ForbiddenException('Registration is closed');
+      throw new ConflictException('An account with this email already exists');
+    }
+    return this.buildAuthResult(outcome.created);
   }
 
   async login(email: string, password: string): Promise<AuthResult> {
@@ -101,6 +150,14 @@ export class AuthService {
     const stored = await this.refreshTokens.findByHash(this.hashToken(rawToken));
     if (stored && !stored.revokedAt) await this.refreshTokens.revoke(stored.id);
     // Unknown token → still 204: logout must be idempotent.
+  }
+
+  /** ALLOW_REGISTRATION=true, in any case and with spaces around it: sign-up stays open to everyone. */
+  private openToAll(): boolean {
+    return (
+      this.config.get<string>('ALLOW_REGISTRATION')?.trim().toLowerCase() ===
+      'true'
+    );
   }
 
   private async buildAuthResult(user: User): Promise<AuthResult> {

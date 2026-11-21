@@ -21,7 +21,7 @@
   powershell -ExecutionPolicy Bypass -File scripts/verify-restore.ps1
 #>
 param(
-  [string]$LocalPath = 'D:\CareerOS-Backups',
+  [string]$LocalPath = $(if (Test-Path 'D:\CareerOS-Backups') { 'D:\CareerOS-Backups' } else { Join-Path $env:USERPROFILE 'CareerOS-Backups' }),
   [string]$DumpFile = '',
   [string]$Container = 'careeros-postgres-1',
   [string]$DbUser = 'careeros',

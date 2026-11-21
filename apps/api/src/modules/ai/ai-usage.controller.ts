@@ -1,6 +1,8 @@
 import { Controller, Get } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AiUsageService } from './ai-usage.service';
+import { Role } from '@prisma/client';
+import { Roles } from '../../common/decorators/roles.decorator';
 
 /**
  * The AI dashboard endpoint (JWT-guarded by the global guard). Reports the
@@ -8,6 +10,8 @@ import { AiUsageService } from './ai-usage.service';
  * remaining is NOT here — Google doesn't expose trial-credit balance via a
  * simple API; check Cloud Console → Billing → Credits.
  */
+// Operator only (W8): the account's current role is checked against the database by RolesGuard.
+@Roles(Role.ADMIN)
 @Controller('ai')
 export class AiUsageController {
   constructor(
