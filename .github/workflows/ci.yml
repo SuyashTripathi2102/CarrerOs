@@ -38,6 +38,16 @@ jobs:
         working-directory: apps/api
         run: npx jest --ci
 
+      - name: Workers unit tests
+        working-directory: apps/workers
+        run: npx jest --ci
+
+      - name: Lint shared
+        run: npm run lint --workspace=@careeros/shared
+
+      - name: Lint workers
+        run: npm run lint --workspace=workers
+
   docker-images:
     runs-on: ubuntu-latest
     steps:
