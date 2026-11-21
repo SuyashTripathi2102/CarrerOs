@@ -85,7 +85,7 @@ WHERE j.status = 'ACTIVE' AND e."jobId" IS NULL;
 -- this number is fixed: /browse, /today and Telegram all derive state from the
 -- persisted decision, refused jobs are filtered before sorting, and an
 -- unevaluated job renders as a pending STATE with no score. Evidence in
--- docs/CAREEROS_2_ROADMAP.md, 'Reconciliation, 2026-08-23'.
+-- docs/CAREEROS_2_ROADMAP.md at commit 1182d2b, 'Reconciliation, 2026-08-23'.
 --
 -- CONDITION: this counts DECISIONS, not what the user can see. browseByFit's
 -- pool is capped at 72 and ordered by cosine WITHIN evaluated jobs, so on

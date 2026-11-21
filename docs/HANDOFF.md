@@ -8,7 +8,8 @@ on it. This repo is public: no secrets or private job-search notes belong in thi
 
 1. `CLAUDE.md`: the engineering rules. Loaded automatically.
 2. This file: where things stand.
-3. `docs/CAREEROS_2_ROADMAP.md`: the live plan and every measured result, newest at the bottom.
+3. `docs/CAREEROS_2_ROADMAP.md`: the public plan: direction, principles and decisions. Detailed
+   measurements and experiment logs are kept in the maintainer's private notes, not in this repo.
 4. `docs/DECISIONS.md`: the ADRs. Read before structural changes.
 5. `docs/CAREEROS_ULTIMATE_VISION.md`: read before proposing a major feature.
 
@@ -45,20 +46,20 @@ Discovery -> BoardJob -> validate -> dedup -> ingest -> embed -> vector retrieva
   days, so the corpus is stale and every daily backup in that window failed.
 - **Database:** about 2.4 GB live, 918 MB as a dump, fresh on 2026-11-08.
 - **This laptop is the production host.** Closing the lid suspends everything. That is a known
-  limitation, not a bug (roadmap, "Incident 2026-09-10").
+  limitation, not a bug.
 
 ## Where the work stopped
 
-The newest roadmap entries are the source of truth. In short:
+As of this handoff, in short:
 
 - **Telegram Applied button:** shipped 2026-09-10 to close the outcome loop. The period measuring
   it had only just started. Do not change power settings or hosting casually while measuring it.
 - **Evidence Refresh experiment:** closed and parked. The next step before any scheduler is to
   sample the 241 `INSUFFICIENT_EVIDENCE` jobs stratified by source (lever, breezy, workday,
   freehire; 20-30 each). Do not hydrate all 241.
-- **Phase 1 order:** classification-cost optimization, then Adzuna, Gmail, LinkedIn alerts,
-  Naukri/Indeed alerts. `apps/api/src/modules/gmail` already has OAuth, crypto and sync logic, so
-  the roadmap's 2026-08-23 "not built" table is out of date. Check the code.
+- **Phase 1 order:** classification-cost optimization (now parked: see the roadmap), then Adzuna,
+  Gmail, LinkedIn alerts, Naukri/Indeed alerts. `apps/api/src/modules/gmail` already has OAuth,
+  crypto and sync logic, so older notes that call it "not built" are out of date. Check the code.
 - **Known recall limit:** `browseByFit` builds its pool by cosine similarity, so some APPLY
   decisions cannot reach `/today`. Changing it needs BEFORE/AFTER measurement.
 
