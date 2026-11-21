@@ -73,7 +73,7 @@ type Sink = Pick<Console, 'error'>;
 
 export function installProcessGuard(
   log: Sink = console,
-  exit = process.exit,
+  exit: typeof process.exit = (code) => process.exit(code),
 ): void {
   const handle = (kind: string) => (err: unknown) => {
     if (isTransportFault(err)) {

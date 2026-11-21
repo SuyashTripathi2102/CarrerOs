@@ -41,6 +41,9 @@ export default tseslint.config(
         'error',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
+      // A variable read in a closure declared before its single assignment
+      // (fetchText's `req`) cannot be const; this is the documented option.
+      'prefer-const': ['error', { ignoreReadBeforeAssign: true }],
       'prettier/prettier': ['error', { endOfLine: 'auto' }],
     },
   },

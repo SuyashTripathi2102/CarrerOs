@@ -26,7 +26,7 @@ describe('lever: assemble the body from whichever fields the tenant fills', () =
       descriptionPlain: '',
       description:
         '<p>Build and operate Node.js services for our platform.</p>',
-    } as never);
+    });
     expect(body).toMatch(/Build and operate Node\.js services/);
   });
 
@@ -37,7 +37,7 @@ describe('lever: assemble the body from whichever fields the tenant fills', () =
       hostedUrl: 'https://x',
       descriptionPlain: 'PLAIN VERSION',
       description: '<p>HTML VERSION</p>',
-    } as never);
+    });
     expect(body).toContain('PLAIN VERSION');
     expect(body).not.toContain('HTML VERSION');
   });
@@ -50,7 +50,7 @@ describe('lever: assemble the body from whichever fields the tenant fills', () =
       openingPlain: 'About us.',
       descriptionPlain: 'What you will do.',
       additionalPlain: 'Benefits.',
-    } as never);
+    });
     expect(body).toBe('About us.\n\nWhat you will do.\n\nBenefits.');
   });
 
@@ -60,7 +60,7 @@ describe('lever: assemble the body from whichever fields the tenant fills', () =
       text: 'x',
       hostedUrl: 'https://x',
       descriptionBodyPlain: 'Body via descriptionBody.',
-    } as never);
+    });
     expect(body).toBe('Body via descriptionBody.');
   });
 
@@ -68,7 +68,7 @@ describe('lever: assemble the body from whichever fields the tenant fills', () =
     // This must stay distinguishable so the adapter can report MISSING rather
     // than passing '' off as a description.
     expect(
-      buildDescription({ id: '1', text: 'x', hostedUrl: 'https://x' } as never),
+      buildDescription({ id: '1', text: 'x', hostedUrl: 'https://x' }),
     ).toBe('');
     expect(
       buildDescription({
@@ -76,7 +76,7 @@ describe('lever: assemble the body from whichever fields the tenant fills', () =
         text: 'x',
         hostedUrl: 'https://x',
         descriptionPlain: '   ',
-      } as never),
+      }),
     ).toBe('');
   });
 });

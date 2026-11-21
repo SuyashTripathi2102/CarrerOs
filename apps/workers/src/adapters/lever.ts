@@ -76,7 +76,7 @@ export const leverAdapter: AtsAdapter = {
         description: capDescription(body),
         // Lever ships the body with the listing, so anything present is LIST.
         // Genuinely empty is MISSING — never '' passed off as a description.
-        descriptionSource: (body ? 'LIST' : 'MISSING') as 'LIST' | 'MISSING',
+        descriptionSource: body ? 'LIST' : 'MISSING',
         url: p.hostedUrl,
         location: p.categories?.location ?? null,
         country: p.country ?? null,

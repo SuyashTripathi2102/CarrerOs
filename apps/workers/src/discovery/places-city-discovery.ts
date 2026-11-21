@@ -146,7 +146,7 @@ export async function runPlacesCityDiscovery(
           if (!pageToken) break;
         } catch (err) {
           console.warn(
-            `[places-discovery] ${query} p${page}: ${err instanceof Error ? err.message : err}`,
+            `[places-discovery] ${query} p${page}: ${err instanceof Error ? err.message : String(err)}`,
           );
           break;
         }

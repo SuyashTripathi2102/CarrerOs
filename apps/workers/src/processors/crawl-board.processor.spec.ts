@@ -27,19 +27,20 @@ function fakeApi() {
 }
 
 const unreachable =
-  (kind: 'transient' | 'permanent') => async (): Promise<BoardJob[]> => {
-    const t = new FetchTally();
-    const err =
-      kind === 'transient'
-        ? Object.assign(new Error('getaddrinfo EAI_AGAIN x'), {
-            code: 'EAI_AGAIN',
-          })
-        : new Error('POST -> 401');
-    t.failedWith(err);
-    t.failedWith(err);
-    t.assertReachable('jooble');
-    return [];
-  };
+  (kind: 'transient' | 'permanent') => (): Promise<BoardJob[]> =>
+    new Promise((resolve) => {
+      const t = new FetchTally();
+      const err =
+        kind === 'transient'
+          ? Object.assign(new Error('getaddrinfo EAI_AGAIN x'), {
+              code: 'EAI_AGAIN',
+            })
+          : new Error('POST -> 401');
+      t.failedWith(err);
+      t.failedWith(err);
+      t.assertReachable('jooble');
+      resolve([]);
+    });
 const OUTAGE = 'jooble: all 2 requests failed (EAI_AGAIN ×2)';
 const REFUSED = 'jooble: all 2 requests failed (HTTP 401 ×2)';
 const ONE_JOB = [
@@ -107,7 +108,10 @@ describe('crawlBoard: one FAILED run per job, recorded when the job ends (D1)', 
     await expect(
       crawlBoard('jooble', api, unreachable('transient'), { made: 0, max: 4 }),
     ).rejects.toThrow(OUTAGE);
-    await crawlBoard('jooble', api, async () => ONE_JOB, { made: 1, max: 4 });
+    await crawlBoard('jooble', api, () => Promise.resolve(ONE_JOB), {
+      made: 1,
+      max: 4,
+    });
 
     expect(api.recordBoardFailure).not.toHaveBeenCalled();
     expect(api.ingestBoardJobs).toHaveBeenCalledTimes(1);
@@ -136,12 +140,13 @@ describe('crawlBoard: one FAILED run per job, recorded when the job ends (D1)', 
 
   it('a 429 on every request is transient: retried, not ended, before the last attempt', async () => {
     const api = fakeApi();
-    const limited = async (): Promise<BoardJob[]> => {
-      const t = new FetchTally();
-      t.failedWith(new Error('POST -> 429'));
-      t.assertReachable('jooble');
-      return [];
-    };
+    const limited = (): Promise<BoardJob[]> =>
+      new Promise((resolve) => {
+        const t = new FetchTally();
+        t.failedWith(new Error('POST -> 429'));
+        t.assertReachable('jooble');
+        resolve([]);
+      });
 
     const run = crawlBoard('jooble', api, limited, { made: 0, max: 4 });
 
@@ -212,9 +217,8 @@ describe('crawlBoard: when recording the failure fails (F4)', () => {
 describe('crawlBoard: a source that is not configured (D2)', () => {
   it('is skipped: neither ingested nor recorded, and the log says why', async () => {
     const api = fakeApi();
-    const noKey = async (): Promise<BoardJob[]> => {
-      throw new SourceNotConfiguredError('jooble', 'JOOBLE_API_KEY');
-    };
+    const noKey = (): Promise<BoardJob[]> =>
+      Promise.reject(new SourceNotConfiguredError('jooble', 'JOOBLE_API_KEY'));
 
     await expect(
       crawlBoard('jooble', api, noKey, { made: 0, max: 4 }),
@@ -233,9 +237,10 @@ describe('crawlBoard: a source that is not configured (D2)', () => {
 describe('crawlBoard: answers and classification', () => {
   it('classifies an error thrown by an adapter without a tally, keeping URLs out of the record', async () => {
     const api = fakeApi();
-    const failing = async (): Promise<BoardJob[]> => {
-      throw new Error('GET https://api.adzuna.test/jobs?app_key=SECRET -> 503');
-    };
+    const failing = (): Promise<BoardJob[]> =>
+      Promise.reject(
+        new Error('GET https://api.adzuna.test/jobs?app_key=SECRET -> 503'),
+      );
 
     const run = crawlBoard('adzuna', api, failing);
 
@@ -253,7 +258,7 @@ describe('crawlBoard: answers and classification', () => {
   it('ingests a reachable source with no jobs as a genuine zero, not a failure', async () => {
     const api = fakeApi();
 
-    await crawlBoard('freehire', api, async () => []);
+    await crawlBoard('freehire', api, () => Promise.resolve([]));
 
     expect(api.ingestBoardJobs).toHaveBeenCalledWith('freehire', []);
     expect(api.recordBoardFailure).not.toHaveBeenCalled();
@@ -261,14 +266,15 @@ describe('crawlBoard: answers and classification', () => {
 
   it('passes through the SourceUnreachableError message unchanged', async () => {
     const api = fakeApi();
-    const fetcher = async (): Promise<BoardJob[]> => {
-      throw new SourceUnreachableError(
-        'freehire',
-        'transient',
-        6,
-        'fetch failed ×6',
+    const fetcher = (): Promise<BoardJob[]> =>
+      Promise.reject(
+        new SourceUnreachableError(
+          'freehire',
+          'transient',
+          6,
+          'fetch failed ×6',
+        ),
       );
-    };
 
     await expect(crawlBoard('freehire', api, fetcher)).rejects.toThrow(
       'freehire: all 6 requests failed (fetch failed ×6)',

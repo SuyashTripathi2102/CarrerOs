@@ -73,9 +73,11 @@ const probe = (
   workers: number,
   next: number | null,
 ) => ({
-  getJobCounts: async () => counts,
-  getWorkers: async () => Array.from({ length: workers }, (_, i) => i),
-  getJobSchedulers: async () => (next === null ? [] : [{ key: 'k', next }]),
+  getJobCounts: () => Promise.resolve(counts),
+  getWorkers: () =>
+    Promise.resolve(Array.from({ length: workers }, (_, i) => i)),
+  getJobSchedulers: () =>
+    Promise.resolve(next === null ? [] : [{ key: 'k', next }]),
 });
 
 const NOW = Date.parse('2026-09-08T10:28:00.000Z');
@@ -140,9 +142,7 @@ describe('scanQueue', () => {
       1,
       Date.parse('2026-09-04T12:45:00.000Z'),
     );
-    p.getWorkers = async () => {
-      throw new Error('redis hiccup');
-    };
+    p.getWorkers = () => Promise.reject(new Error('redis hiccup'));
     // workers falls back to 0, which is the dead-process fault, not a wedge —
     // an inspection failure must not be reported as a wedge.
     const r = await scanQueue('career-extract', p, NOW);

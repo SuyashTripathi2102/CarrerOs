@@ -121,7 +121,7 @@ async function main(): Promise<void> {
       // counted fresh — absence of a date is not evidence of recency.
       const fresh = india.filter((j) => {
         if (!j.postedAt) return false;
-        const ms = Date.parse(j.postedAt as unknown as string);
+        const ms = Date.parse(j.postedAt);
         return (
           Number.isFinite(ms) && (Date.now() - ms) / 86_400_000 <= MAX_AGE_DAYS
         );

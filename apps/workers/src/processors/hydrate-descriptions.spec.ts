@@ -45,17 +45,23 @@ const POSTING = `<html><body><h1>Backend Engineer</h1>
 
 const STUB = 'Backend Engineer · Bengaluru — via Acme careers page.';
 
-function fakeApi(due: any[], captured: any[]): ApiClient {
+type Due = Awaited<ReturnType<ApiClient['hydrationDue']>>;
+type Captured = {
+  source: string;
+  updates: Parameters<ApiClient['repairDescriptions']>[1];
+};
+
+function fakeApi(due: any[], captured: Captured[]): ApiClient {
   return {
-    hydrationDue: async () => due,
-    repairDescriptions: async (source: string, updates: any[]) => {
+    hydrationDue: () => Promise.resolve(due as Due),
+    repairDescriptions: (source: string, updates: Captured['updates']) => {
       captured.push({ source, updates });
-      return {
+      return Promise.resolve({
         matched: updates.length,
         changed: updates.length,
         unchanged: 0,
         notFound: 0,
-      };
+      });
     },
   } as unknown as ApiClient;
 }
@@ -66,7 +72,7 @@ describe('hydrateDescriptions', () => {
       res.writeHead(200, { 'content-type': 'text/html' });
       res.end(POSTING);
     });
-    const captured: any[] = [];
+    const captured: Captured[] = [];
     const api = fakeApi(
       [
         {
@@ -93,7 +99,7 @@ describe('hydrateDescriptions', () => {
       res.writeHead(200, { 'content-type': 'text/html' });
       res.end(POSTING);
     });
-    const captured: any[] = [];
+    const captured: Captured[] = [];
     const out = await hydrateDescriptions(
       fakeApi(
         [
@@ -117,7 +123,7 @@ describe('hydrateDescriptions', () => {
 
   it('writes NOTHING when the fetch fails', async () => {
     // A timeout must never become a stored fact.
-    const captured: any[] = [];
+    const captured: Captured[] = [];
     const out = await hydrateDescriptions(
       fakeApi(
         [
@@ -145,7 +151,7 @@ describe('hydrateDescriptions', () => {
         `<html><body><p>${'We build delightful products. '.repeat(30)}</p></body></html>`,
       );
     });
-    const captured: any[] = [];
+    const captured: Captured[] = [];
     const out = await hydrateDescriptions(
       fakeApi(
         [
@@ -172,7 +178,7 @@ describe('hydrateDescriptions', () => {
       res.end(POSTING);
     });
     const rich = `About the role. ${'Detailed responsibilities and requirements follow. '.repeat(40)}`;
-    const captured: any[] = [];
+    const captured: Captured[] = [];
     const out = await hydrateDescriptions(
       fakeApi(
         [
@@ -197,7 +203,7 @@ describe('hydrateDescriptions', () => {
       res.writeHead(200, { 'content-type': 'text/html' });
       res.end(POSTING);
     });
-    const captured: any[] = [];
+    const captured: Captured[] = [];
     await hydrateDescriptions(
       fakeApi(
         [
@@ -238,7 +244,7 @@ describe('hydrateDescriptions', () => {
       res.writeHead(200, { 'content-type': 'text/html' });
       res.end(POSTING);
     });
-    const captured: any[] = [];
+    const captured: Captured[] = [];
     const api = fakeApi(
       [
         {

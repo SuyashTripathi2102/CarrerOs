@@ -233,7 +233,7 @@ export async function fetchFreehireJobs(): Promise<BoardJob[]> {
       let env: Envelope<FreehireJob[]>;
       try {
         env = await fetchJson<Envelope<FreehireJob[]>>(
-          `${BASE}${SEARCH_PATH}?${params}`,
+          `${BASE}${SEARCH_PATH}?${params.toString()}`,
         );
         tally.succeeded();
       } catch (err) {
@@ -241,7 +241,7 @@ export async function fetchFreehireJobs(): Promise<BoardJob[]> {
         // Best-effort source: abandon THIS query, keep the pages already
         // collected, and move on. One flaky page must not lose the rest.
         console.log(
-          `[freehire] "${q}" @${offset} failed: ${err instanceof Error ? err.message : err} — skipping rest of query`,
+          `[freehire] "${q}" @${offset} failed: ${err instanceof Error ? err.message : String(err)} — skipping rest of query`,
         );
         break;
       }

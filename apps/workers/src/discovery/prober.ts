@@ -190,7 +190,9 @@ async function fetchPage(
     const html = (await res.text()).slice(0, 500_000);
     return { html, finalUrl: res.url || url };
   } catch (err) {
-    log.push(`GET ${url} failed: ${err instanceof Error ? err.name : err}`);
+    log.push(
+      `GET ${url} failed: ${err instanceof Error ? err.name : String(err)}`,
+    );
     return null;
   }
 }

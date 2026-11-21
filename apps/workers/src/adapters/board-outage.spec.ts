@@ -14,8 +14,8 @@ import {
 const mockHttpsRequest = jest.fn();
 const mockHttpsGet = jest.fn();
 jest.mock('node:https', () => ({
-  request: (...args: unknown[]) => mockHttpsRequest(...args),
-  get: (...args: unknown[]) => mockHttpsGet(...args),
+  request: (...args: unknown[]): unknown => mockHttpsRequest(...args),
+  get: (...args: unknown[]): unknown => mockHttpsGet(...args),
 }));
 
 import { fetchJoobleJobs } from './jooble';
@@ -144,7 +144,7 @@ describe('FreeHire during a network outage', () => {
       Object.assign(new TypeError('fetch failed'), {
         cause: Object.assign(new Error('x'), { code: 'EAI_AGAIN' }),
       }),
-    ) as unknown as typeof fetch;
+    );
 
     const run = fetchFreehireJobs();
 
@@ -156,8 +156,8 @@ describe('FreeHire during a network outage', () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ data: [], meta: { total: 0 } }),
-    }) as unknown as typeof fetch;
+      json: () => Promise.resolve({ data: [], meta: { total: 0 } }),
+    });
 
     await expect(fetchFreehireJobs()).resolves.toEqual([]);
   });
@@ -215,6 +215,8 @@ describe('Adzuna during a network outage', () => {
     expect(String(outage)).not.toContain(ADZUNA_KEY);
     expect(String(refused)).not.toContain(ADZUNA_KEY);
     // The key really is in the request URL, so the checks above are meaningful.
-    expect(String(mockHttpsGet.mock.calls[0][0])).toContain(ADZUNA_KEY);
+    expect(String((mockHttpsGet.mock.calls[0] as unknown[])[0])).toContain(
+      ADZUNA_KEY,
+    );
   });
 });

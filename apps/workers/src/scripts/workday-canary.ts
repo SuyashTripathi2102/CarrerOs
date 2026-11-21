@@ -126,7 +126,7 @@ async function main(): Promise<void> {
       const s = workdayLastStats();
       const row: Row = {
         ...c,
-        companyId: match!.companyId,
+        companyId: match.companyId,
         identifier,
         ms,
         listed: s?.listed ?? 0,
@@ -154,7 +154,7 @@ async function main(): Promise<void> {
           );
         }
         row.synced = await api!.syncCompanyJobs(
-          match!.companyId,
+          match.companyId,
           'workday',
           jobs,
           board.complete,

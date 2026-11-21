@@ -51,7 +51,7 @@ interface CohortJob {
 
 async function readCohort(): Promise<CohortJob[]> {
   const chunks: Buffer[] = [];
-  for await (const c of process.stdin) chunks.push(Buffer.from(c));
+  for await (const c of process.stdin) chunks.push(Buffer.from(c as Buffer));
   const raw = Buffer.concat(chunks).toString('utf8').trim();
   if (!raw) {
     throw new Error(
@@ -59,7 +59,7 @@ async function readCohort(): Promise<CohortJob[]> {
         '  psql ... -t -A -c "<query> ... json_agg" | npx tsx src/experiments/hydrate-82.ts',
     );
   }
-  const parsed = JSON.parse(raw);
+  const parsed: unknown = JSON.parse(raw);
   if (!Array.isArray(parsed) || parsed.length === 0)
     throw new Error('Cohort is empty.');
   return parsed as CohortJob[];

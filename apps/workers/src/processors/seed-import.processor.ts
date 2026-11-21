@@ -22,7 +22,7 @@ export function startSeedImportWorker(
     QueueNames.SEED_IMPORT,
     async (job: Job<SeedImportJobData>) => {
       if (job.data.source !== 'yc')
-        throw new Error(`Unknown seed source ${job.data.source}`);
+        throw new Error(`Unknown seed source ${String(job.data.source)}`);
 
       const res = await fetch(
         'https://yc-oss.github.io/api/companies/all.json',

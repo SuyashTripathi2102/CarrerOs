@@ -23,7 +23,7 @@ export function startDailyBriefWorker(api: ApiClient): Worker {
         const t = await api.recomputeSourceTrust();
         console.log(`[source-trust] recomputed: ${t.sources} sources`);
       } catch (err) {
-        console.warn(`[source-trust] recompute skipped: ${err}`);
+        console.warn(`[source-trust] recompute skipped: ${String(err)}`);
       }
       // Refresh deterministic company signals (growth/velocity/departments) for
       // the whole corpus — SQL only, cheap, keeps the Opportunity Score current.
@@ -31,7 +31,7 @@ export function startDailyBriefWorker(api: ApiClient): Worker {
         const s = await api.deriveCompanySignals();
         console.log(`[company-signals] refreshed: ${s.companies} companies`);
       } catch (err) {
-        console.warn(`[company-signals] refresh skipped: ${err}`);
+        console.warn(`[company-signals] refresh skipped: ${String(err)}`);
       }
       const res = await api.triggerDailyBrief();
       console.log(`[daily-brief] sent: ${res.sent}`);

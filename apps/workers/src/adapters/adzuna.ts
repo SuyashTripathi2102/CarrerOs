@@ -33,7 +33,7 @@ function getJson<T>(url: string, timeoutMs = 12_000): Promise<T> {
           try {
             resolve(JSON.parse(body) as T);
           } catch (e) {
-            reject(e);
+            reject(e instanceof Error ? e : new Error(String(e)));
           }
         });
       },

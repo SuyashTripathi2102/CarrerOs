@@ -287,7 +287,7 @@ export interface ExtractionRunMetrics {
 export interface CompanyDue {
   id: string;
   name: string;
-  atsProvider: 'GREENHOUSE' | 'LEVER' | 'ASHBY' | string;
+  atsProvider: string; // e.g. 'GREENHOUSE', 'LEVER', 'ASHBY'
   atsIdentifier: string;
 }
 

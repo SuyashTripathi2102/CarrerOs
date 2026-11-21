@@ -38,7 +38,7 @@ async function main(): Promise<void> {
       await q.close();
     }
   } finally {
-    c.quit();
+    await c.quit();
   }
 }
 main().catch((e) => {

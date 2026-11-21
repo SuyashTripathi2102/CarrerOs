@@ -79,7 +79,7 @@ async function main(): Promise<void> {
     );
   } finally {
     await queue.close();
-    connection.quit();
+    await connection.quit();
   }
 }
 

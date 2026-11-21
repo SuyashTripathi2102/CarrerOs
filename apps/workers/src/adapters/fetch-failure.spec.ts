@@ -7,6 +7,16 @@ import {
 
 const netError = (code: string) =>
   Object.assign(new Error(`getaddrinfo ${code} example.org`), { code });
+/** What `fn` throws, or undefined: lets a test assert on the thrown object's fields. */
+function thrownBy(fn: () => unknown): unknown {
+  try {
+    fn();
+  } catch (e) {
+    return e;
+  }
+  return undefined;
+}
+
 const undiciError = (code: string) =>
   Object.assign(new TypeError('fetch failed'), {
     cause: Object.assign(new Error('x'), { code }),
@@ -83,12 +93,10 @@ describe('FetchTally', () => {
   it('counts a crawl whose every request was rate limited (429) as transient, so it is retried', () => {
     const t = new FetchTally();
     for (let i = 0; i < 3; i++) t.failedWith(new Error('POST -> 429'));
-    expect(() => t.assertReachable('jooble')).toThrow(
-      expect.objectContaining({
-        kind: 'transient',
-        message: 'jooble: all 3 requests failed (HTTP 429 ×3)',
-      }),
-    );
+    expect(thrownBy(() => t.assertReachable('jooble'))).toMatchObject({
+      kind: 'transient',
+      message: 'jooble: all 3 requests failed (HTTP 429 ×3)',
+    });
   });
 
   it('throws a transient SourceUnreachableError when every request failed on the network', () => {
@@ -111,16 +119,16 @@ describe('FetchTally', () => {
     const t = new FetchTally();
     t.failedWith(new Error('POST -> 401'));
     t.failedWith(new Error('POST -> 401'));
-    expect(() => t.assertReachable('jooble')).toThrow(
-      expect.objectContaining({ kind: 'permanent' }),
-    );
+    expect(thrownBy(() => t.assertReachable('jooble'))).toMatchObject({
+      kind: 'permanent',
+    });
 
     const mixed = new FetchTally();
     mixed.failedWith(new Error('POST -> 401'));
     mixed.failedWith(netError('ETIMEDOUT'));
-    expect(() => mixed.assertReachable('jooble')).toThrow(
-      expect.objectContaining({ kind: 'transient' }),
-    );
+    expect(thrownBy(() => mixed.assertReachable('jooble'))).toMatchObject({
+      kind: 'transient',
+    });
   });
 });
 

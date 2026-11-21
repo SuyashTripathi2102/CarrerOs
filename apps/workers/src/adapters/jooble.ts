@@ -73,7 +73,7 @@ function postJson<T>(
           try {
             resolve(JSON.parse(data) as T);
           } catch (e) {
-            reject(e);
+            reject(e instanceof Error ? e : new Error(String(e)));
           }
         });
       },

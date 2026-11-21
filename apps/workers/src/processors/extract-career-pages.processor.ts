@@ -247,7 +247,7 @@ export function startCareerExtractWorker(api: ApiClient): Worker {
             snapshotted++;
           } catch (err) {
             console.warn(
-              `[career-extract] snapshot failed for ${company.name}: ${err}`,
+              `[career-extract] snapshot failed for ${company.name}: ${String(err)}`,
             );
           }
         }
@@ -273,7 +273,7 @@ export function startCareerExtractWorker(api: ApiClient): Worker {
             `[career-extract] flagged ${f.flagged} JS-shell pages for render`,
           );
         } catch (err) {
-          console.warn(`[career-extract] flag-render failed: ${err}`);
+          console.warn(`[career-extract] flag-render failed: ${String(err)}`);
         }
       }
 
@@ -307,7 +307,7 @@ export function startCareerExtractWorker(api: ApiClient): Worker {
           rejections,
         });
       } catch (err) {
-        console.warn(`[career-extract] metrics record failed: ${err}`);
+        console.warn(`[career-extract] metrics record failed: ${String(err)}`);
       }
 
       return {
@@ -425,7 +425,7 @@ export function startReplayExtractWorker(api: ApiClient): Worker {
           });
         } catch (err) {
           console.warn(
-            `[replay-extract] re-store failed for ${snap.name}: ${err}`,
+            `[replay-extract] re-store failed for ${snap.name}: ${String(err)}`,
           );
         }
       }
@@ -470,7 +470,9 @@ export function startReplayExtractWorker(api: ApiClient): Worker {
             rejections,
           });
         } catch (err) {
-          console.warn(`[replay-extract] metrics record failed: ${err}`);
+          console.warn(
+            `[replay-extract] metrics record failed: ${String(err)}`,
+          );
         }
       }
 
@@ -580,7 +582,7 @@ export function startRenderExtractWorker(api: ApiClient): Worker {
             snapshotted++;
           } catch (err) {
             console.warn(
-              `[render-extract] snapshot failed for ${company.name}: ${err}`,
+              `[render-extract] snapshot failed for ${company.name}: ${String(err)}`,
             );
           }
         }
@@ -626,7 +628,9 @@ export function startRenderExtractWorker(api: ApiClient): Worker {
             rejections,
           });
         } catch (err) {
-          console.warn(`[render-extract] metrics record failed: ${err}`);
+          console.warn(
+            `[render-extract] metrics record failed: ${String(err)}`,
+          );
         }
       }
 
