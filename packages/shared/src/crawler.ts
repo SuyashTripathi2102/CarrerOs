@@ -64,3 +64,12 @@ export const BoardJobSchema = z.object({
   job: NormalizedJobSchema,
 });
 export type BoardJob = z.infer<typeof BoardJobSchema>;
+
+/**
+ * The job boards CareerOS crawls: one name per `crawl_runs.source`. The workers' crawl-board queue and
+ * the API's `POST /internal/boards/failed` both take their names from here, so a typo cannot record a
+ * run for a source that does not exist.
+ */
+export const BOARD_SOURCES = ['remoteok', 'hn-hiring', 'adzuna', 'jooble', 'freehire'] as const;
+export const BoardSourceSchema = z.enum(BOARD_SOURCES);
+export type BoardSource = z.infer<typeof BoardSourceSchema>;

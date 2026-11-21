@@ -474,6 +474,29 @@ export class IngestService implements OnModuleInit {
     return { matched, changed, unchanged, notFound: updates.length - matched };
   }
 
+  /**
+   * A board crawl in which every request failed. It gets its own FAILED run
+   * rather than going through ingestBoardJobs with no entries, which would
+   * record a zero-job SUCCESS and make an outage look like an empty board.
+   */
+  async recordBoardFailure(
+    source: string,
+    reason: string,
+  ): Promise<{ crawlRunId: string }> {
+    const now = new Date();
+    const run = await this.prisma.crawlRun.create({
+      data: {
+        source,
+        status: CrawlStatus.FAILED,
+        startedAt: now,
+        finishedAt: now,
+        error: reason,
+      },
+    });
+    this.logger.warn(`[${source}] board crawl failed: ${reason}`);
+    return { crawlRunId: run.id };
+  }
+
   async ingestBoardJobs(
     source: string,
     entries: BoardJob[],
