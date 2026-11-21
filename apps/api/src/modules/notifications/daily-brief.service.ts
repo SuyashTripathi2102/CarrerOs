@@ -9,6 +9,7 @@ import { activeVersionSql, notActedOnSql } from '../matching/active-resume.sql';
 import { locationTags } from '../matching/location-filter';
 import { opportunityScore, type HiringTrend } from '../matching/opportunity-score';
 import { TelegramChannel } from './channels';
+import { publicDashboardUrl } from './dashboard-url';
 
 /**
  * A retirement gets a line in the brief when it retired at least this many
@@ -43,8 +44,7 @@ export class DailyBriefService {
     private readonly telegram: TelegramChannel,
     config: ConfigService,
   ) {
-    // The dashboard shares the CORS origin — one env, one truth.
-    this.dashboardUrl = config.get<string>('CORS_ORIGIN') || null;
+    this.dashboardUrl = publicDashboardUrl(config.get<string>('DASHBOARD_URL'));
     this.largeRetirementsOn = parseRetirementDropGuard(
       config.get<string>(RETIREMENT_DROP_GUARD),
     ).on;
@@ -98,7 +98,7 @@ export class DailyBriefService {
           (j) => `• ${j.score} · <b>${escapeHtml(j.title)}</b> — ${escapeHtml(j.company)}`,
         ),
       ];
-      const buttons = this.dashboardUrl?.startsWith('http')
+      const buttons = this.dashboardUrl
         ? [[{ text: '📊 Open Mission Control', url: this.dashboardUrl }]]
         : undefined;
 
@@ -132,7 +132,7 @@ export class DailyBriefService {
         const text = await this.compose(user.id, user.name);
         if (this.telegram.isConfigured()) {
           await this.telegram.send(text, {
-            buttons: this.dashboardUrl?.startsWith('http')
+            buttons: this.dashboardUrl
               ? [[{ text: '📊 Open Mission Control', url: this.dashboardUrl }]]
               : undefined,
           });
