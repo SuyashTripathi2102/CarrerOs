@@ -1,6 +1,11 @@
 import type { NormalizedJob } from '@careeros/shared';
 import { htmlToText } from './html';
-import { AtsAdapter, capDescription, fetchJson, workModeFromText } from './types';
+import {
+  AtsAdapter,
+  capDescription,
+  fetchJson,
+  workModeFromText,
+} from './types';
 
 interface RecruiteeOffer {
   id: number;
@@ -45,7 +50,9 @@ export const recruiteeAdapter: AtsAdapter = {
             : o.on_site
               ? ('ONSITE' as const)
               : workModeFromText(o.location),
-        postedAt: o.created_at ? new Date(o.created_at.replace(' UTC', 'Z')).toISOString() : null,
+        postedAt: o.created_at
+          ? new Date(o.created_at.replace(' UTC', 'Z')).toISOString()
+          : null,
       }));
   },
 };

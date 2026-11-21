@@ -25,7 +25,9 @@ describe('identifier: tenant/dc/site', () => {
 
   it('handles high datacenter numbers', () => {
     // accenture is wd103, salesforce wd12, candescent wd501 — not single digit.
-    expect(parseIdentifier('accenture/wd103/AccentureCareers')?.dc).toBe('wd103');
+    expect(parseIdentifier('accenture/wd103/AccentureCareers')?.dc).toBe(
+      'wd103',
+    );
   });
 
   it('REJECTS the legacy two-part form rather than guessing a datacenter', () => {
@@ -46,19 +48,31 @@ describe('identifier: tenant/dc/site', () => {
 describe('freshness: a bound is never a value', () => {
   it('reads exact relative ages', () => {
     expect(listingAgeBound('Posted Today')).toEqual({ kind: 'EXACT', days: 0 });
-    expect(listingAgeBound('Posted Yesterday')).toEqual({ kind: 'EXACT', days: 1 });
-    expect(listingAgeBound('Posted 12 Days Ago')).toEqual({ kind: 'EXACT', days: 12 });
+    expect(listingAgeBound('Posted Yesterday')).toEqual({
+      kind: 'EXACT',
+      days: 1,
+    });
+    expect(listingAgeBound('Posted 12 Days Ago')).toEqual({
+      kind: 'EXACT',
+      days: 12,
+    });
   });
 
   it('treats "30+ Days Ago" as a LOWER BOUND, never as 30', () => {
     // The whole point. "30+" is compatible with 31 days or 300; mapping it to
     // exactly 30 would slip dead postings past the 45-day gate.
-    expect(listingAgeBound('Posted 30+ Days Ago')).toEqual({ kind: 'LOWER_BOUND', days: 30 });
+    expect(listingAgeBound('Posted 30+ Days Ago')).toEqual({
+      kind: 'LOWER_BOUND',
+      days: 30,
+    });
   });
 
   it('returns UNKNOWN for unparseable prose rather than a number', () => {
     expect(listingAgeBound(undefined)).toEqual({ kind: 'UNKNOWN', days: null });
-    expect(listingAgeBound('Posted recently')).toEqual({ kind: 'UNKNOWN', days: null });
+    expect(listingAgeBound('Posted recently')).toEqual({
+      kind: 'UNKNOWN',
+      days: null,
+    });
   });
 
   it('only an EXACT age past the cutoff may skip a listing', () => {
@@ -78,29 +92,54 @@ describe('freshness: a bound is never a value', () => {
 describe('India pre-filter (coarse by design)', () => {
   it('matches the location slug in externalPath', () => {
     expect(
-      listingLooksIndian({ externalPath: '/job/Bangalore/Senior-Digital-Strategist_R169918' }),
+      listingLooksIndian({
+        externalPath: '/job/Bangalore/Senior-Digital-Strategist_R169918',
+      }),
     ).toBe(true);
   });
 
   it('matches bulletFields', () => {
-    expect(listingLooksIndian({ title: 'SRE', bulletFields: ['JR1043296', 'Bengaluru'] })).toBe(true);
+    expect(
+      listingLooksIndian({
+        title: 'SRE',
+        bulletFields: ['JR1043296', 'Bengaluru'],
+      }),
+    ).toBe(true);
   });
 
   it('matches city names as well as the country', () => {
-    for (const city of ['Hyderabad', 'Pune', 'Gurugram', 'Chennai', 'Noida', 'GIFT City']) {
-      expect(listingLooksIndian({ externalPath: `/job/${city}/Engineer_R1` })).toBe(true);
+    for (const city of [
+      'Hyderabad',
+      'Pune',
+      'Gurugram',
+      'Chennai',
+      'Noida',
+      'GIFT City',
+    ]) {
+      expect(
+        listingLooksIndian({ externalPath: `/job/${city}/Engineer_R1` }),
+      ).toBe(true);
     }
   });
 
   it('does not match unrelated locations', () => {
-    expect(listingLooksIndian({ externalPath: '/job/Newcastle/AI-Engineer_R00346138' })).toBe(false);
-    expect(listingLooksIndian({ title: 'Engineer', bulletFields: ['R1', 'Warsaw'] })).toBe(false);
+    expect(
+      listingLooksIndian({
+        externalPath: '/job/Newcastle/AI-Engineer_R00346138',
+      }),
+    ).toBe(false);
+    expect(
+      listingLooksIndian({ title: 'Engineer', bulletFields: ['R1', 'Warsaw'] }),
+    ).toBe(false);
   });
 });
 
 describe('location facet strategy', () => {
   const countryFacet = (values: unknown[]) => [
-    { facetParameter: 'locationMainGroup', values: [{ facetParameter: 'locationCountry', values }] },
+    {
+      facetParameter: 'locationMainGroup',
+      values: [{ facetParameter: 'locationCountry', values }],
+    },
   ];
 
   it('finds the India facet id when a country facet exists (41 of 104 tenants)', () => {
@@ -118,7 +157,10 @@ describe('location facet strategy', () => {
     // with location buckets summing to 313 — so they must never be used as
     // job counts, and local filtering is used instead.
     const f = findIndiaFacet([
-      { facetParameter: 'locationMainGroup', values: [{ facetParameter: 'locations', values: [] }] },
+      {
+        facetParameter: 'locationMainGroup',
+        values: [{ facetParameter: 'locations', values: [] }],
+      },
     ] as never);
     expect(f).toBeNull();
   });
@@ -129,7 +171,9 @@ describe('location facet strategy', () => {
   });
 
   it('returns null when a country facet exists but has no India entry', () => {
-    const f = findIndiaFacet(countryFacet([{ descriptor: 'Japan', id: 'jp', count: 11 }]) as never);
+    const f = findIndiaFacet(
+      countryFacet([{ descriptor: 'Japan', id: 'jp', count: 11 }]) as never,
+    );
     expect(f).toBeNull();
   });
 });
@@ -151,13 +195,21 @@ describe('pagination termination', () => {
       fetched++;
       if (rows.length === 0) break;
       let fresh = 0;
-      for (const r of rows) if (!seen.has(r)) { seen.add(r); fresh++; }
-      if (fresh === 0) { repeated = true; break; }
+      for (const r of rows)
+        if (!seen.has(r)) {
+          seen.add(r);
+          fresh++;
+        }
+      if (fresh === 0) {
+        repeated = true;
+        break;
+      }
       if (rows.length < PAGE) break;
     }
     return { collected: seen.size, pagesFetched: fetched, repeated };
   }
-  const full = (n: number, p: string) => Array.from({ length: PAGE }, (_, i) => `${p}-${i + n}`);
+  const full = (n: number, p: string) =>
+    Array.from({ length: PAGE }, (_, i) => `${p}-${i + n}`);
 
   it('stops on an empty page', () => {
     const r = paginate([full(0, 'a'), []], 25);
@@ -204,7 +256,9 @@ describe('postedAt must satisfy the shared NormalizedJob contract', () => {
   });
 
   it('passes through a value that is already a datetime', () => {
-    expect(toIsoDateTime('2026-08-19T10:23:45.000Z')).toBe('2026-08-19T10:23:45.000Z');
+    expect(toIsoDateTime('2026-08-19T10:23:45.000Z')).toBe(
+      '2026-08-19T10:23:45.000Z',
+    );
   });
 
   it('returns null rather than fabricating a timestamp', () => {
@@ -235,14 +289,20 @@ describe('a walk that stops short must say so', () => {
       fetched++;
       if (rows.length === 0) break;
       let fresh = 0;
-      for (const r of rows) if (!seen.has(r)) { seen.add(r); fresh++; }
+      for (const r of rows)
+        if (!seen.has(r)) {
+          seen.add(r);
+          fresh++;
+        }
       if (fresh === 0) break;
       if (rows.length < PAGE) break;
-      if (fetched >= maxPages) truncated = `page cap reached (${maxPages} pages)`;
+      if (fetched >= maxPages)
+        truncated = `page cap reached (${maxPages} pages)`;
     }
     return { collected: seen.size, truncated };
   }
-  const full = (n: number) => Array.from({ length: PAGE }, (_, i) => `job-${i + n}`);
+  const full = (n: number) =>
+    Array.from({ length: PAGE }, (_, i) => `job-${i + n}`);
 
   it('reports TRUNCATED when the cap stops a still-yielding listing', () => {
     // Accenture's shape: ~43k India postings behind a 500-listing ceiling.
@@ -258,9 +318,9 @@ describe('a walk that stops short must say so', () => {
   it('does NOT report truncation on a natural end', () => {
     // A short page, an empty page and a repeated page are all genuine ends —
     // flagging them would stop retirement forever and let dead jobs accumulate.
-    expect(walk([full(0), ['a', 'b']], 25).truncated).toBeNull();          // short page
-    expect(walk([full(0), []], 25).truncated).toBeNull();                  // empty page
-    expect(walk([full(0), full(0)], 25).truncated).toBeNull();             // repeated page
+    expect(walk([full(0), ['a', 'b']], 25).truncated).toBeNull(); // short page
+    expect(walk([full(0), []], 25).truncated).toBeNull(); // empty page
+    expect(walk([full(0), full(0)], 25).truncated).toBeNull(); // repeated page
   });
 
   it('does not report truncation when the cap is reached exactly at the true end', () => {

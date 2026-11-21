@@ -1,6 +1,11 @@
 import type { NormalizedJob } from '@careeros/shared';
 import { htmlToText } from './html';
-import { AtsAdapter, capDescription, fetchJson, workModeFromText } from './types';
+import {
+  AtsAdapter,
+  capDescription,
+  fetchJson,
+  workModeFromText,
+} from './types';
 
 interface LeverPosting {
   id: string;
@@ -66,27 +71,27 @@ export const leverAdapter: AtsAdapter = {
     return postings.map((p) => {
       const body = buildDescription(p);
       return {
-      externalId: p.id,
-      title: p.text,
-      description: capDescription(body),
-      // Lever ships the body with the listing, so anything present is LIST.
-      // Genuinely empty is MISSING — never '' passed off as a description.
-      descriptionSource: (body ? 'LIST' : 'MISSING') as 'LIST' | 'MISSING',
-      url: p.hostedUrl,
-      location: p.categories?.location ?? null,
-      country: p.country ?? null,
-      workMode:
-        p.workplaceType === 'remote'
-          ? ('REMOTE' as const)
-          : p.workplaceType === 'hybrid'
-            ? ('HYBRID' as const)
-            : p.workplaceType === 'on-site'
-              ? ('ONSITE' as const)
-              : workModeFromText(p.categories?.location),
-      salaryMin: p.salaryRange?.min ?? null,
-      salaryMax: p.salaryRange?.max ?? null,
-      currency: p.salaryRange?.currency ?? null,
-      postedAt: p.createdAt ? new Date(p.createdAt).toISOString() : null,
+        externalId: p.id,
+        title: p.text,
+        description: capDescription(body),
+        // Lever ships the body with the listing, so anything present is LIST.
+        // Genuinely empty is MISSING — never '' passed off as a description.
+        descriptionSource: (body ? 'LIST' : 'MISSING') as 'LIST' | 'MISSING',
+        url: p.hostedUrl,
+        location: p.categories?.location ?? null,
+        country: p.country ?? null,
+        workMode:
+          p.workplaceType === 'remote'
+            ? ('REMOTE' as const)
+            : p.workplaceType === 'hybrid'
+              ? ('HYBRID' as const)
+              : p.workplaceType === 'on-site'
+                ? ('ONSITE' as const)
+                : workModeFromText(p.categories?.location),
+        salaryMin: p.salaryRange?.min ?? null,
+        salaryMax: p.salaryRange?.max ?? null,
+        currency: p.salaryRange?.currency ?? null,
+        postedAt: p.createdAt ? new Date(p.createdAt).toISOString() : null,
       };
     });
   },

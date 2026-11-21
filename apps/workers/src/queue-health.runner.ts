@@ -46,6 +46,8 @@ export function startQueueHealthCheck(): NodeJS.Timeout {
   void tick();
   const timer = setInterval(() => void tick(), EVERY_MS);
   timer.unref?.();
-  console.log(`[queue-health] wedge check: every ${EVERY_MS / 60000}m over ${names.length} queues`);
+  console.log(
+    `[queue-health] wedge check: every ${EVERY_MS / 60000}m over ${names.length} queues`,
+  );
   return timer;
 }

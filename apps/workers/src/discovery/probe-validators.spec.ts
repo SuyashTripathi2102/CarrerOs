@@ -28,7 +28,8 @@ const validators: Record<string, (p: unknown) => boolean> = {
     const jobs = (p as { jobs?: unknown })?.jobs;
     return Array.isArray(jobs) && jobs.length > 0;
   },
-  SMARTRECRUITERS: (p) => ((p as { totalFound?: number })?.totalFound ?? 0) >= 1,
+  SMARTRECRUITERS: (p) =>
+    ((p as { totalFound?: number })?.totalFound ?? 0) >= 1,
   RECRUITEE: (p) => Array.isArray((p as { offers?: unknown[] })?.offers),
   BREEZY: (p) => Array.isArray(p),
 };
@@ -37,7 +38,9 @@ describe('permissive endpoints must NOT confirm on an empty board', () => {
   it('WORKABLE rejects an empty board — the 22-of-22 failure', () => {
     // apply.workable.com 200s with {jobs:[]} for zensar, kyndryl, pepsico,
     // barclays — none of which post there.
-    expect(validators.WORKABLE({ name: 'Zensar', description: null, jobs: [] })).toBe(false);
+    expect(
+      validators.WORKABLE({ name: 'Zensar', description: null, jobs: [] }),
+    ).toBe(false);
   });
 
   it('SMARTRECRUITERS rejects an empty board (already did — zero empty crawls)', () => {
@@ -62,17 +65,30 @@ describe('specific endpoints MAY confirm on an empty board', () => {
     expect(validators[provider](payload)).toBe(true);
   });
 
-  it.each([['LEVER'], ['BREEZY']])('%s accepts an empty array board', (provider) => {
-    expect(validators[provider]([])).toBe(true);
-  });
+  it.each([['LEVER'], ['BREEZY']])(
+    '%s accepts an empty array board',
+    (provider) => {
+      expect(validators[provider]([])).toBe(true);
+    },
+  );
 });
 
 describe('garbage is never a board, for anyone', () => {
-  it.each(Object.keys(validators))('%s rejects malformed payloads', (provider) => {
-    for (const junk of [null, undefined, {}, 'a string', 42, { jobs: 'nope' }]) {
-      expect(validators[provider](junk)).toBe(false);
-    }
-  });
+  it.each(Object.keys(validators))(
+    '%s rejects malformed payloads',
+    (provider) => {
+      for (const junk of [
+        null,
+        undefined,
+        {},
+        'a string',
+        42,
+        { jobs: 'nope' },
+      ]) {
+        expect(validators[provider](junk)).toBe(false);
+      }
+    },
+  );
 });
 
 describe('the real companies that were mislabelled', () => {
@@ -81,11 +97,18 @@ describe('the real companies that were mislabelled', () => {
   it.each([['Zensar'], ['Kyndryl'], ['PepsiCo'], ['Barclays']])(
     '%s no longer confirms as WORKABLE on an empty shell',
     (name) => {
-      expect(validators.WORKABLE({ name, description: null, jobs: [] })).toBe(false);
+      expect(validators.WORKABLE({ name, description: null, jobs: [] })).toBe(
+        false,
+      );
     },
   );
 
   it('a genuine Workable customer with openings still resolves', () => {
-    expect(validators.WORKABLE({ name: 'Some Startup', jobs: [{ id: 'a' }, { id: 'b' }] })).toBe(true);
+    expect(
+      validators.WORKABLE({
+        name: 'Some Startup',
+        jobs: [{ id: 'a' }, { id: 'b' }],
+      }),
+    ).toBe(true);
   });
 });

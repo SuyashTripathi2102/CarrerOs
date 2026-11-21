@@ -29,7 +29,9 @@ describe('isSchedulerWedged', () => {
 
   it('tolerates a tick running slightly late', () => {
     // Ticks drift under load; only a sustained overdue window is a wedge.
-    expect(isSchedulerWedged({ ...ZOMBIE, now: ZOMBIE.nextRunAt + 5 * 60_000 })).toBe(false);
+    expect(
+      isSchedulerWedged({ ...ZOMBIE, now: ZOMBIE.nextRunAt + 5 * 60_000 }),
+    ).toBe(false);
   });
 
   it('does NOT flag a dead process — that is a different fault', () => {
@@ -52,7 +54,9 @@ describe('isSchedulerWedged', () => {
   });
 
   it('describes the wedge for logs, and says nothing when healthy', () => {
-    expect(describeWedge('career-extract', ZOMBIE)).toMatch(/WEDGED.*workers=1 waiting=1/);
+    expect(describeWedge('career-extract', ZOMBIE)).toMatch(
+      /WEDGED.*workers=1 waiting=1/,
+    );
     expect(describeWedge('evaluate-matches', HEALTHY)).toBe('');
   });
 });
@@ -64,7 +68,11 @@ describe('isSchedulerWedged', () => {
  */
 import { scanQueue } from './queue-health';
 
-const probe = (counts: Record<string, number>, workers: number, next: number | null) => ({
+const probe = (
+  counts: Record<string, number>,
+  workers: number,
+  next: number | null,
+) => ({
   getJobCounts: async () => counts,
   getWorkers: async () => Array.from({ length: workers }, (_, i) => i),
   getJobSchedulers: async () => (next === null ? [] : [{ key: 'k', next }]),
@@ -76,7 +84,11 @@ describe('scanQueue', () => {
   it('detects the real career-extract wedge and names the queue', async () => {
     const r = await scanQueue(
       'career-extract',
-      probe({ waiting: 1, active: 0 }, 1, Date.parse('2026-09-04T12:45:00.000Z')),
+      probe(
+        { waiting: 1, active: 0 },
+        1,
+        Date.parse('2026-09-04T12:45:00.000Z'),
+      ),
       NOW,
     );
     expect(r.wedged).toBe(true);
@@ -89,7 +101,11 @@ describe('scanQueue', () => {
     // check becomes noise and gets ignored.
     const r = await scanQueue(
       'replay-extract',
-      probe({ waiting: 0, active: 0 }, 1, Date.parse('2026-09-09T03:45:00.000Z')),
+      probe(
+        { waiting: 0, active: 0 },
+        1,
+        Date.parse('2026-09-09T03:45:00.000Z'),
+      ),
       NOW,
     );
     expect(r.wedged).toBe(false);
@@ -99,20 +115,34 @@ describe('scanQueue', () => {
   it('does NOT flag render-extract, idle with its next fire ahead', async () => {
     const r = await scanQueue(
       'render-extract',
-      probe({ waiting: 0, active: 0 }, 1, Date.parse('2026-09-08T18:45:00.000Z')),
+      probe(
+        { waiting: 0, active: 0 },
+        1,
+        Date.parse('2026-09-08T18:45:00.000Z'),
+      ),
       NOW,
     );
     expect(r.wedged).toBe(false);
   });
 
   it('ignores a queue with no repeatable registered', async () => {
-    const r = await scanQueue('crawl-company', probe({ waiting: 5, active: 1 }, 1, null), NOW);
+    const r = await scanQueue(
+      'crawl-company',
+      probe({ waiting: 5, active: 1 }, 1, null),
+      NOW,
+    );
     expect(r.wedged).toBe(false);
   });
 
   it('survives a queue that cannot report workers', async () => {
-    const p = probe({ waiting: 1, active: 0 }, 1, Date.parse('2026-09-04T12:45:00.000Z'));
-    p.getWorkers = async () => { throw new Error('redis hiccup'); };
+    const p = probe(
+      { waiting: 1, active: 0 },
+      1,
+      Date.parse('2026-09-04T12:45:00.000Z'),
+    );
+    p.getWorkers = async () => {
+      throw new Error('redis hiccup');
+    };
     // workers falls back to 0, which is the dead-process fault, not a wedge —
     // an inspection failure must not be reported as a wedge.
     const r = await scanQueue('career-extract', p, NOW);

@@ -52,8 +52,14 @@ const ADAPTERS: Record<string, AtsAdapter> = {
   WORKDAY: workdayAdapter,
 };
 const WIRED_IN_PRODUCTION = new Set([
-  'GREENHOUSE', 'LEVER', 'ASHBY', 'WORKABLE',
-  'SMARTRECRUITERS', 'RECRUITEE', 'BREEZY', 'KEKA',
+  'GREENHOUSE',
+  'LEVER',
+  'ASHBY',
+  'WORKABLE',
+  'SMARTRECRUITERS',
+  'RECRUITEE',
+  'BREEZY',
+  'KEKA',
 ]);
 
 const INDIA_RE =
@@ -89,7 +95,9 @@ async function main(): Promise<void> {
     .filter((b) => b.name && b.provider && b.identifier);
 
   console.log(`${boards.length} verified boards from ${file}\n`);
-  console.log('company                        provider          total  india  fresh<=45d');
+  console.log(
+    'company                        provider          total  india  fresh<=45d',
+  );
 
   const rows: Row[] = [];
   for (const b of boards) {
@@ -97,31 +105,50 @@ async function main(): Promise<void> {
     if (!adapter) {
       rows.push({ ...b, total: null, india: 0, fresh: 0, error: 'NO ADAPTER' });
       console.log(
-        `${b.name.slice(0, 30).padEnd(31)}${b.provider.padEnd(18)}` + '   — no adapter —',
+        `${b.name.slice(0, 30).padEnd(31)}${b.provider.padEnd(18)}` +
+          '   — no adapter —',
       );
       continue;
     }
     try {
       const jobs = await adapter.fetchJobs(b.identifier);
       const india = jobs.filter(
-        (j) => j.country === 'IN' || INDIA_RE.test(`${j.location ?? ''} ${j.title ?? ''}`),
+        (j) =>
+          j.country === 'IN' ||
+          INDIA_RE.test(`${j.location ?? ''} ${j.title ?? ''}`),
       );
       // Freshness on the stated date only. A posting with no date is NOT
       // counted fresh — absence of a date is not evidence of recency.
       const fresh = india.filter((j) => {
         if (!j.postedAt) return false;
         const ms = Date.parse(j.postedAt as unknown as string);
-        return Number.isFinite(ms) && (Date.now() - ms) / 86_400_000 <= MAX_AGE_DAYS;
+        return (
+          Number.isFinite(ms) && (Date.now() - ms) / 86_400_000 <= MAX_AGE_DAYS
+        );
       });
-      rows.push({ ...b, total: jobs.length, india: india.length, fresh: fresh.length, error: null });
+      rows.push({
+        ...b,
+        total: jobs.length,
+        india: india.length,
+        fresh: fresh.length,
+        error: null,
+      });
       console.log(
         `${b.name.slice(0, 30).padEnd(31)}${b.provider.padEnd(18)}` +
           `${String(jobs.length).padStart(5)}${String(india.length).padStart(7)}${String(fresh.length).padStart(11)}`,
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      rows.push({ ...b, total: null, india: 0, fresh: 0, error: msg.slice(0, 60) });
-      console.log(`${b.name.slice(0, 30).padEnd(31)}${b.provider.padEnd(18)}   FAILED ${msg.slice(0, 40)}`);
+      rows.push({
+        ...b,
+        total: null,
+        india: 0,
+        fresh: 0,
+        error: msg.slice(0, 60),
+      });
+      console.log(
+        `${b.name.slice(0, 30).padEnd(31)}${b.provider.padEnd(18)}   FAILED ${msg.slice(0, 40)}`,
+      );
     }
     await new Promise((r) => setTimeout(r, 800)); // polite
   }
@@ -139,14 +166,26 @@ ${label}
   FRESH India (<=45d)      ${sum(rs, 'fresh')}
   fresh India per company  ${denom > 0 ? (sum(rs, 'fresh') / denom).toFixed(2) : '—'}`;
 
-  console.log(block('=== ADAPTERS WIRED IN PRODUCTION TODAY ===', wired,
-    boards.filter((b) => WIRED_IN_PRODUCTION.has(b.provider)).length));
-  console.log(block('=== ALL ADAPTERS THAT EXIST (incl. unwired Workday) ===', ok, boards.length));
+  console.log(
+    block(
+      '=== ADAPTERS WIRED IN PRODUCTION TODAY ===',
+      wired,
+      boards.filter((b) => WIRED_IN_PRODUCTION.has(b.provider)).length,
+    ),
+  );
+  console.log(
+    block(
+      '=== ALL ADAPTERS THAT EXIST (incl. unwired Workday) ===',
+      ok,
+      boards.length,
+    ),
+  );
 
   const failed = rows.filter((r) => r.error);
   if (failed.length > 0) {
     console.log(`\nfailed / no adapter (${failed.length}):`);
-    for (const f of failed) console.log(`  ${f.name.padEnd(30)} ${f.provider.padEnd(16)} ${f.error}`);
+    for (const f of failed)
+      console.log(`  ${f.name.padEnd(30)} ${f.provider.padEnd(16)} ${f.error}`);
   }
 
   console.log(`

@@ -60,16 +60,22 @@ async function readCohort(): Promise<CohortJob[]> {
     );
   }
   const parsed = JSON.parse(raw);
-  if (!Array.isArray(parsed) || parsed.length === 0) throw new Error('Cohort is empty.');
+  if (!Array.isArray(parsed) || parsed.length === 0)
+    throw new Error('Cohort is empty.');
   return parsed as CohortJob[];
 }
 
 async function main() {
   const cohort = await readCohort();
-  console.log(`cohort: ${cohort.length} job(s) — mode: ${COMMIT ? 'COMMIT' : 'DRY RUN (no writes)'}`);
+  console.log(
+    `cohort: ${cohort.length} job(s) — mode: ${COMMIT ? 'COMMIT' : 'DRY RUN (no writes)'}`,
+  );
 
   const api = new ApiClient();
-  const writes = new Map<string, { externalId: string; description: string; descriptionSource: string }[]>();
+  const writes = new Map<
+    string,
+    { externalId: string; description: string; descriptionSource: string }[]
+  >();
   let fetched = 0;
   let failed = 0;
   let recovered = 0;
@@ -80,7 +86,10 @@ async function main() {
     if (html === null) failed++;
     else fetched++;
 
-    const d = decideHydration({ description: job.description, descriptionSource: null }, html);
+    const d = decideHydration(
+      { description: job.description, descriptionSource: null },
+      html,
+    );
     if (d.action === 'WRITE') {
       recovered++;
       const list = writes.get(job.source) ?? [];
@@ -90,7 +99,9 @@ async function main() {
         descriptionSource: d.descriptionSource,
       });
       writes.set(job.source, list);
-      console.log(`  RECOVERED ${String(d.description.length).padStart(6)}ch  ${job.url}`);
+      console.log(
+        `  RECOVERED ${String(d.description.length).padStart(6)}ch  ${job.url}`,
+      );
     } else {
       const bucket = d.reason.split('—')[0].trim();
       kept[bucket] = (kept[bucket] ?? 0) + 1;
@@ -104,16 +115,21 @@ async function main() {
   console.log(`  fetched          ${fetched}`);
   console.log(`  fetch failed     ${failed}`);
   console.log(`  body recovered   ${recovered}`);
-  for (const [reason, n] of Object.entries(kept)) console.log(`  kept: ${reason} — ${n}`);
+  for (const [reason, n] of Object.entries(kept))
+    console.log(`  kept: ${reason} — ${n}`);
 
   if (!COMMIT) {
-    console.log(`\nDRY RUN — nothing written. Re-run with --commit to apply ${recovered} description(s).`);
+    console.log(
+      `\nDRY RUN — nothing written. Re-run with --commit to apply ${recovered} description(s).`,
+    );
     return;
   }
 
   for (const [source, updates] of writes) {
     const res = await api.repairDescriptions(source, updates);
-    console.log(`  wrote ${res.changed}/${updates.length} for source=${source}`);
+    console.log(
+      `  wrote ${res.changed}/${updates.length} for source=${source}`,
+    );
   }
   console.log(
     `\nWritten. The vectors rebuild on their own (repairDescriptions clears them)\n` +

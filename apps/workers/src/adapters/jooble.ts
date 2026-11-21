@@ -38,7 +38,11 @@ interface JoobleResponse {
 }
 
 /** IPv4-forced JSON POST (this box's IPv6 egress is broken — see adzuna.ts). */
-function postJson<T>(urlStr: string, bodyObj: unknown, timeoutMs = 12_000): Promise<T> {
+function postJson<T>(
+  urlStr: string,
+  bodyObj: unknown,
+  timeoutMs = 12_000,
+): Promise<T> {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify(bodyObj);
     const u = new URL(urlStr);
@@ -91,7 +95,8 @@ const clean = (s: string): string =>
     .replace(/\s+/g, ' ')
     .trim();
 
-const ROLE_OK = /engineer|developer|programmer|\bsde\b|full.?stack|back.?end|front.?end|software|\bmern\b/i;
+const ROLE_OK =
+  /engineer|developer|programmer|\bsde\b|full.?stack|back.?end|front.?end|software|\bmern\b/i;
 
 const validUrl = (u: string | undefined): string | null => {
   if (!u) return null;
@@ -150,7 +155,11 @@ export async function fetchJoobleJobs(): Promise<BoardJob[]> {
     for (let page = 1; page <= PAGES; page++) {
       let batch: BoardJob[] = [];
       try {
-        const resp = await postJson<JoobleResponse>(url, { keywords, location: LOCATION, page: String(page) });
+        const resp = await postJson<JoobleResponse>(url, {
+          keywords,
+          location: LOCATION,
+          page: String(page),
+        });
         tally.succeeded();
         batch = mapJoobleJobs(resp.jobs ?? []);
       } catch (err) {
@@ -168,6 +177,8 @@ export async function fetchJoobleJobs(): Promise<BoardJob[]> {
     }
   }
   tally.assertReachable('jooble');
-  console.log(`[jooble] fetched ${all.length} India dev jobs across ${QUERIES.length} role queries`);
+  console.log(
+    `[jooble] fetched ${all.length} India dev jobs across ${QUERIES.length} role queries`,
+  );
   return all;
 }

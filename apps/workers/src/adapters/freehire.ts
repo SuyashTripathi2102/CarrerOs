@@ -41,7 +41,8 @@ import { FetchTally } from './fetch-failure';
  */
 
 const SEARCH_PATH = '/api/v1/agent/jobs/search';
-const BASE = process.env.FREEHIRE_API_URL?.replace(/\/+$/, '') || 'https://freehire.me';
+const BASE =
+  process.env.FREEHIRE_API_URL?.replace(/\/+$/, '') || 'https://freehire.me';
 
 /** Target roles, one query each. Mirrors the user's preferredRoles. */
 const ROLE_QUERIES = [
@@ -231,7 +232,9 @@ export async function fetchFreehireJobs(): Promise<BoardJob[]> {
 
       let env: Envelope<FreehireJob[]>;
       try {
-        env = await fetchJson<Envelope<FreehireJob[]>>(`${BASE}${SEARCH_PATH}?${params}`);
+        env = await fetchJson<Envelope<FreehireJob[]>>(
+          `${BASE}${SEARCH_PATH}?${params}`,
+        );
         tally.succeeded();
       } catch (err) {
         tally.failedWith(err);
@@ -287,7 +290,9 @@ export async function fetchFreehireJobs(): Promise<BoardJob[]> {
     `[freehire] ${ROLE_QUERIES.length} queries · ${pages} pages (cap ${cap}/query) · ` +
       `fetched=${fetched} accepted=${all.length} ` +
       `rejected=${rejected} dupes-in-run=${dupes} · upstream ATS: ${[...upstream].sort().join(', ')}` +
-      (reportedTotal != null ? ` · source reports ${reportedTotal} India jobs` : ''),
+      (reportedTotal != null
+        ? ` · source reports ${reportedTotal} India jobs`
+        : ''),
   );
 
   tally.assertReachable('freehire');

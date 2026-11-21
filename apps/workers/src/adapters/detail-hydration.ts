@@ -68,7 +68,12 @@ export function isJobDescription(text: string): boolean {
 }
 
 export type HydrationAction =
-  | { action: 'WRITE'; description: string; descriptionSource: 'DETAIL'; reason: string }
+  | {
+      action: 'WRITE';
+      description: string;
+      descriptionSource: 'DETAIL';
+      reason: string;
+    }
   | { action: 'KEEP'; reason: string };
 
 export interface CurrentJob {
@@ -82,11 +87,17 @@ export interface CurrentJob {
  * Returns KEEP far more often than WRITE, and that is the point: the only
  * outcome that changes stored data is one where a real posting body was read.
  */
-export function decideHydration(current: CurrentJob, fetchedHtml: string | null): HydrationAction {
+export function decideHydration(
+  current: CurrentJob,
+  fetchedHtml: string | null,
+): HydrationAction {
   // A failed fetch is an absence of evidence, not evidence of absence. Marking
   // the job MISSING here would convert a timeout into a permanent verdict.
   if (fetchedHtml === null) {
-    return { action: 'KEEP', reason: 'fetch failed — no page was read, nothing may be concluded' };
+    return {
+      action: 'KEEP',
+      reason: 'fetch failed — no page was read, nothing may be concluded',
+    };
   }
 
   const text = detailText(fetchedHtml);
@@ -125,7 +136,10 @@ export function decideHydration(current: CurrentJob, fetchedHtml: string | null)
  * An absolute http(s) URL is required — a relative or missing one gives nowhere
  * to go — and a body that already clears the gate needs no help.
  */
-export function needsHydration(job: { description: string | null; url: string | null }): boolean {
+export function needsHydration(job: {
+  description: string | null;
+  url: string | null;
+}): boolean {
   if (!job.url || !/^https?:\/\//i.test(job.url)) return false;
   return (job.description ?? '').length < MIN_DESCRIPTION_CHARS;
 }

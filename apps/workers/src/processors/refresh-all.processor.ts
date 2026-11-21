@@ -16,15 +16,18 @@ export function startRefreshAllWorker(api: ApiClient): Worker {
   // ignores an add whose jobId still exists in ANY state — keeping finished
   // jobs around would turn every future tick into a no-op. Crawl history
   // lives in Postgres (crawl_runs), not Redis.
-  const companyQueue = new Queue<CrawlCompanyJobData>(QueueNames.CRAWL_COMPANY, {
-    connection: createRedisConnection(),
-    defaultJobOptions: {
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 30_000 },
-      removeOnComplete: true,
-      removeOnFail: true,
+  const companyQueue = new Queue<CrawlCompanyJobData>(
+    QueueNames.CRAWL_COMPANY,
+    {
+      connection: createRedisConnection(),
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 30_000 },
+        removeOnComplete: true,
+        removeOnFail: true,
+      },
     },
-  });
+  );
 
   return new Worker(
     QueueNames.REFRESH_ALL,
@@ -66,7 +69,9 @@ export async function ensureRefreshSchedule(): Promise<void> {
     { name: 'scheduled' },
   );
   // Remove the obsolete 24h scheduler from the pre-tiering design, if present.
-  await refreshQueue.removeJobScheduler('refresh-all-24h').catch(() => undefined);
+  await refreshQueue
+    .removeJobScheduler('refresh-all-24h')
+    .catch(() => undefined);
   await refreshQueue.close();
 
   const boardQueue = new Queue<CrawlBoardJobData>(QueueNames.CRAWL_BOARD, {
@@ -98,5 +103,7 @@ export async function ensureRefreshSchedule(): Promise<void> {
   );
   await discoveryQueue.close();
 
-  console.log('[scheduler] due-companies: 15m; boards: 24h; discovery-fanout: 10m');
+  console.log(
+    '[scheduler] due-companies: 15m; boards: 24h; discovery-fanout: 10m',
+  );
 }

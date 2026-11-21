@@ -56,9 +56,12 @@ const stripHtml = (html: string) =>
 const firstUrl = (text: string): string | null =>
   text.match(/https?:\/\/[^\s)|]+/i)?.[0]?.replace(/[.,]$/, '') ?? null;
 
-const ROLE = /engineer|developer|\bsde\b|programmer|full.?stack|back.?end|front.?end|software|architect/i;
-const INDIA = /india|bangalore|bengaluru|mumbai|pune|hyderabad|delhi|gurgaon|gurugram|noida|chennai/i;
-const WORLDWIDE = /remote\s*\(?\s*(worldwide|anywhere|global)|worldwide|(fully|100%)\s*remote|remote,?\s*(worldwide|anywhere)/i;
+const ROLE =
+  /engineer|developer|\bsde\b|programmer|full.?stack|back.?end|front.?end|software|architect/i;
+const INDIA =
+  /india|bangalore|bengaluru|mumbai|pune|hyderabad|delhi|gurgaon|gurugram|noida|chennai/i;
+const WORLDWIDE =
+  /remote\s*\(?\s*(worldwide|anywhere|global)|worldwide|(fully|100%)\s*remote|remote,?\s*(worldwide|anywhere)/i;
 // Restricted to a region an India-based applicant can't take — the big HN
 // majority. If a posting says US/EU/UK-only, skip it however good it looks.
 const REGION_LOCKED =
@@ -75,8 +78,10 @@ function isRelevant(text: string): boolean {
 function looksLikeCompany(s: string): boolean {
   if (s.length < 2 || s.length > 60) return false;
   if (/^https?:/i.test(s)) return false; // URL
-  if (/\$|\d{2,3}\s?k\b|\d{2,3}[-–]\d{2,3}\s?k|salary|equity|benefits/i.test(s)) return false; // salary/comp
-  if (/^(remote|onsite|hybrid|full.?time|part.?time|contract|intern)/i.test(s)) return false;
+  if (/\$|\d{2,3}\s?k\b|\d{2,3}[-–]\d{2,3}\s?k|salary|equity|benefits/i.test(s))
+    return false; // salary/comp
+  if (/^(remote|onsite|hybrid|full.?time|part.?time|contract|intern)/i.test(s))
+    return false;
   if (/^[A-Za-z .]+,\s*[A-Z]{2}$/.test(s)) return false; // "Blaine, WA" city, state
   if (/remote|worldwide|anywhere/i.test(s) && s.length < 30) return false;
   return true;
@@ -95,11 +100,18 @@ function parseComment(c: AlgoliaComment): BoardJob | null {
   if (text.length < 60 || !isRelevant(text)) return null;
 
   const header = stripHtml(c.text.split(/<p>|\n/)[0] ?? text);
-  const parts = header.split('|').map((p) => p.trim()).filter(Boolean);
+  const parts = header
+    .split('|')
+    .map((p) => p.trim())
+    .filter(Boolean);
   if (parts.length < 2) return null;
 
   // Drop a trailing unclosed "(...": "Enveritas (YC S18, non-profit" -> "Enveritas".
-  const clean = (s: string) => s.replace(/\s*\([^)]*$/, '').replace(/^\W+|\W+$/g, '').trim();
+  const clean = (s: string) =>
+    s
+      .replace(/\s*\([^)]*$/, '')
+      .replace(/^\W+|\W+$/g, '')
+      .trim();
 
   const company = clean(parts[0]).slice(0, 60);
   if (!looksLikeCompany(company)) return null;
@@ -111,7 +123,9 @@ function parseComment(c: AlgoliaComment): BoardJob | null {
 
   const url = firstUrl(text);
   const applyUrl = url && !url.includes('news.ycombinator.com') ? url : null;
-  const location = parts.find((p) => /remote|worldwide|anywhere/i.test(p) || INDIA.test(p)) ?? null;
+  const location =
+    parts.find((p) => /remote|worldwide|anywhere/i.test(p) || INDIA.test(p)) ??
+    null;
 
   return {
     company: { name: company, atsHintUrl: applyUrl },
@@ -133,7 +147,9 @@ export async function fetchHnWhoIsHiring(): Promise<BoardJob[]> {
     console.log('[hn-whoishiring] no thread found');
     return [];
   }
-  const thread = await fetchJson<AlgoliaItem>(`https://hn.algolia.com/api/v1/items/${threadId}`);
+  const thread = await fetchJson<AlgoliaItem>(
+    `https://hn.algolia.com/api/v1/items/${threadId}`,
+  );
   const comments = thread.children ?? [];
   const jobs: BoardJob[] = [];
   for (const c of comments) {
@@ -144,6 +160,8 @@ export async function fetchHnWhoIsHiring(): Promise<BoardJob[]> {
       /* one malformed comment never stops the batch */
     }
   }
-  console.log(`[hn-whoishiring] thread ${threadId}: ${comments.length} comments -> ${jobs.length} relevant jobs`);
+  console.log(
+    `[hn-whoishiring] thread ${threadId}: ${comments.length} comments -> ${jobs.length} relevant jobs`,
+  );
   return jobs;
 }

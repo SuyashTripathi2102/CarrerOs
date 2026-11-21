@@ -11,15 +11,22 @@ export interface DiscoverCompanyJobData {
   careerPageUrl?: string | null;
 }
 
-export function startDiscoverCompanyWorker(api: ApiClient): Worker<DiscoverCompanyJobData> {
+export function startDiscoverCompanyWorker(
+  api: ApiClient,
+): Worker<DiscoverCompanyJobData> {
   return new Worker<DiscoverCompanyJobData>(
     QueueNames.DISCOVER_COMPANY,
     async (job: Job<DiscoverCompanyJobData>) => {
       const result = await probeCompany(job.data);
-      const applied = await api.applyDiscoveryResult(job.data.companyId, result);
+      const applied = await api.applyDiscoveryResult(
+        job.data.companyId,
+        result,
+      );
       console.log(
         `[discover] ${job.data.name}: -> ${applied.stage}` +
-          (result.atsIdentifier ? ` (${result.atsProvider}/${result.atsIdentifier})` : ''),
+          (result.atsIdentifier
+            ? ` (${result.atsProvider}/${result.atsIdentifier})`
+            : ''),
       );
       return applied;
     },
@@ -33,15 +40,18 @@ export function startDiscoverCompanyWorker(api: ApiClient): Worker<DiscoverCompa
 
 /** Fan out due discovery work — called by its own repeatable scheduler. */
 export function startDiscoveryFanoutWorker(api: ApiClient): Worker {
-  const discoverQueue = new Queue<DiscoverCompanyJobData>(QueueNames.DISCOVER_COMPANY, {
-    connection: createRedisConnection(),
-    defaultJobOptions: {
-      attempts: 2,
-      backoff: { type: 'exponential', delay: 60_000 },
-      removeOnComplete: true,
-      removeOnFail: true,
+  const discoverQueue = new Queue<DiscoverCompanyJobData>(
+    QueueNames.DISCOVER_COMPANY,
+    {
+      connection: createRedisConnection(),
+      defaultJobOptions: {
+        attempts: 2,
+        backoff: { type: 'exponential', delay: 60_000 },
+        removeOnComplete: true,
+        removeOnFail: true,
+      },
     },
-  });
+  );
 
   return new Worker(
     QueueNames.DISCOVERY_FANOUT,
@@ -60,7 +70,9 @@ export function startDiscoveryFanoutWorker(api: ApiClient): Worker {
           opts: { jobId: `discover-${c.id}` },
         })),
       );
-      console.log(`[discovery-fanout] enqueued ${due.length} companies to probe`);
+      console.log(
+        `[discovery-fanout] enqueued ${due.length} companies to probe`,
+      );
       return { enqueued: due.length };
     },
     { connection: createRedisConnection() },

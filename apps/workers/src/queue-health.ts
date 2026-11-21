@@ -96,7 +96,9 @@ export async function scanQueue(
   ]);
   // Earliest scheduled fire across this queue's repeatables. A queue with no
   // repeatable is not in scope -- nothing is overdue if nothing is scheduled.
-  const nexts = scheds.map((s) => s.next).filter((n): n is number => typeof n === 'number');
+  const nexts = scheds
+    .map((s) => s.next)
+    .filter((n): n is number => typeof n === 'number');
   const input = {
     nextRunAt: nexts.length ? Math.min(...nexts) : null,
     workersAttached: workers.length,
@@ -104,5 +106,9 @@ export async function scanQueue(
     active: counts.active ?? 0,
     now,
   };
-  return { name, wedged: isSchedulerWedged(input), message: describeWedge(name, input) };
+  return {
+    name,
+    wedged: isSchedulerWedged(input),
+    message: describeWedge(name, input),
+  };
 }

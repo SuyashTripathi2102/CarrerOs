@@ -15,6 +15,8 @@ describe('kekaPostedAt', () => {
   });
 
   it('keeps a real publish date', () => {
-    expect(kekaPostedAt('2026-11-20T09:30:00Z')).toBe('2026-11-20T09:30:00.000Z');
+    expect(kekaPostedAt('2026-11-20T09:30:00Z')).toBe(
+      '2026-11-20T09:30:00.000Z',
+    );
   });
 });

@@ -15,19 +15,27 @@ export interface SeedImportJobData {
  * converts them to MONITORED. YC's public dataset (yc-oss.github.io) lists
  * every YC company with website, industry, team size, and an isHiring flag.
  */
-export function startSeedImportWorker(api: ApiClient): Worker<SeedImportJobData> {
+export function startSeedImportWorker(
+  api: ApiClient,
+): Worker<SeedImportJobData> {
   return new Worker<SeedImportJobData>(
     QueueNames.SEED_IMPORT,
     async (job: Job<SeedImportJobData>) => {
-      if (job.data.source !== 'yc') throw new Error(`Unknown seed source ${job.data.source}`);
+      if (job.data.source !== 'yc')
+        throw new Error(`Unknown seed source ${job.data.source}`);
 
-      const res = await fetch('https://yc-oss.github.io/api/companies/all.json', {
-        headers: { 'user-agent': 'CareerOS/0.1 (personal job-search agent)' },
-      });
+      const res = await fetch(
+        'https://yc-oss.github.io/api/companies/all.json',
+        {
+          headers: { 'user-agent': 'CareerOS/0.1 (personal job-search agent)' },
+        },
+      );
       if (!res.ok) throw new Error(`YC dataset fetch -> ${res.status}`);
       const all = (await res.json()) as YcCompany[];
 
-      const hiring = all.filter((c) => c.isHiring && c.website && c.status !== 'Inactive');
+      const hiring = all.filter(
+        (c) => c.isHiring && c.website && c.status !== 'Inactive',
+      );
       const limited = job.data.limit ? hiring.slice(0, job.data.limit) : hiring;
 
       const candidates: CompanyCandidate[] = limited.map((c) => ({

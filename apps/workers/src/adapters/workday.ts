@@ -1,6 +1,11 @@
 import type { NormalizedJob } from '@careeros/shared';
 import { htmlToText } from './html';
-import { AtsAdapter, BoardFetch, capDescription, workModeFromText } from './types';
+import {
+  AtsAdapter,
+  BoardFetch,
+  capDescription,
+  workModeFromText,
+} from './types';
 
 /**
  * Workday CXS adapter.
@@ -142,7 +147,8 @@ export function listingAgeBound(postedOn: string | undefined): {
 } {
   if (!postedOn) return { kind: 'UNKNOWN', days: null };
   const s = postedOn.toLowerCase();
-  if (s.includes('today') || s.includes('just posted')) return { kind: 'EXACT', days: 0 };
+  if (s.includes('today') || s.includes('just posted'))
+    return { kind: 'EXACT', days: 0 };
   if (s.includes('yesterday')) return { kind: 'EXACT', days: 1 };
   const plus = s.match(/(\d+)\+\s*days?/);
   if (plus) return { kind: 'LOWER_BOUND', days: Number(plus[1]) };
@@ -163,26 +169,44 @@ export function couldBeFresh(postedOn: string | undefined): boolean {
  *  avoids detail-fetching obvious non-India rows; `country` from the detail
  *  payload is the authority. */
 export function listingLooksIndian(p: JobPosting): boolean {
-  return INDIA_RE.test([p.title, p.externalPath, ...(p.bulletFields ?? [])].join(' '));
+  return INDIA_RE.test(
+    [p.title, p.externalPath, ...(p.bulletFields ?? [])].join(' '),
+  );
 }
 
 /** Locate the India facet id, when the tenant exposes a country facet at all.
  *  Measured split across 104 tenants: locationCountry 41 · locations 54 · none 9.
  *  `locations` counts are NOT usable — they double-count multi-location jobs
  *  (fractal: total 132, buckets sum 313). */
-export function findIndiaFacet(facets: FacetGroup[] | undefined): { param: string; id: string } | null {
-  const group = (facets ?? []).find((f) => f.facetParameter === 'locationMainGroup');
-  const country = (group?.values ?? []).find((v) => v.facetParameter === 'locationCountry');
+export function findIndiaFacet(
+  facets: FacetGroup[] | undefined,
+): { param: string; id: string } | null {
+  const group = (facets ?? []).find(
+    (f) => f.facetParameter === 'locationMainGroup',
+  );
+  const country = (group?.values ?? []).find(
+    (v) => v.facetParameter === 'locationCountry',
+  );
   if (!country) return null;
-  const india = (country.values ?? []).find((v) => /^india$/i.test(v.descriptor ?? ''));
+  const india = (country.values ?? []).find((v) =>
+    /^india$/i.test(v.descriptor ?? ''),
+  );
   if (!india?.id) return null;
   return { param: 'locationCountry', id: india.id };
 }
 
-async function postJson<T>(url: string, body: unknown, timeoutMs: number): Promise<T> {
+async function postJson<T>(
+  url: string,
+  body: unknown,
+  timeoutMs: number,
+): Promise<T> {
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'user-agent': UA, 'content-type': 'application/json', accept: 'application/json' },
+    headers: {
+      'user-agent': UA,
+      'content-type': 'application/json',
+      accept: 'application/json',
+    },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(timeoutMs),
   });
@@ -237,7 +261,9 @@ export async function listAll(
       // see (`externalId notIn seenIds`). A silent partial walk is therefore a
       // mass-retirement waiting for the next crawl.
       truncatedReason = `list request failed at offset ${offset}: ${(err as Error).message}`;
-      console.log(`[workday] ${t.tenant} list @${offset} failed: ${(err as Error).message}`);
+      console.log(
+        `[workday] ${t.tenant} list @${offset} failed: ${(err as Error).message}`,
+      );
       break;
     }
     pages++;
@@ -273,15 +299,22 @@ export async function listAll(
 }
 
 /** Bounded-concurrency map. Keeps upstream load predictable. */
-async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (t: T) => Promise<R>,
+): Promise<R[]> {
   const out: R[] = [];
   let i = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (i < items.length) {
-      const idx = i++;
-      out[idx] = await fn(items[idx]);
-    }
-  });
+  const workers = Array.from(
+    { length: Math.min(limit, items.length) },
+    async () => {
+      while (i < items.length) {
+        const idx = i++;
+        out[idx] = await fn(items[idx]);
+      }
+    },
+  );
   await Promise.all(workers);
   return out;
 }
@@ -301,96 +334,114 @@ let lastStats: WorkdayStats | null = null;
 export const workdayLastStats = (): WorkdayStats | null => lastStats;
 
 async function fetchBoardInternal(identifier: string): Promise<BoardFetch> {
-    const t = parseIdentifier(identifier);
-    if (!t) {
-      // Legacy `tenant/site` rows land here. Throwing (rather than returning [])
-      // marks the CrawlRun FAILED, which retires nothing — returning an empty
-      // list would look like a successful empty board.
-      throw new Error(`workday: identifier must be tenant/dc/site, got "${identifier}"`);
+  const t = parseIdentifier(identifier);
+  if (!t) {
+    // Legacy `tenant/site` rows land here. Throwing (rather than returning [])
+    // marks the CrawlRun FAILED, which retires nothing — returning an empty
+    // list would look like a successful empty board.
+    throw new Error(
+      `workday: identifier must be tenant/dc/site, got "${identifier}"`,
+    );
+  }
+
+  // One probe request: gives the facets AND the first page.
+  const probe = await postJson<ListResponse>(
+    listUrl(t),
+    { appliedFacets: {}, limit: PAGE_SIZE, offset: 0, searchText: '' },
+    LIST_TIMEOUT_MS,
+  );
+  const india = findIndiaFacet(probe.facets);
+
+  // Strategy A: server-side country facet (41 of 104 tenants).
+  // Strategies B/C: no usable country facet — list everything and pre-filter
+  // locally, because `locations` facet counts double-count multi-location jobs.
+  const { postings, pages, repeatedPage, truncatedReason } = await listAll(
+    t,
+    india ? { [india.param]: [india.id] } : {},
+  );
+
+  const candidates = postings.filter(
+    (p) =>
+      p.externalPath &&
+      (india ? true : listingLooksIndian(p)) &&
+      couldBeFresh(p.postedOn),
+  );
+
+  const details = await mapLimit(candidates, DETAIL_CONCURRENCY, async (p) => {
+    try {
+      const d = await getJson<DetailResponse>(
+        detailUrl(t, p.externalPath!),
+        DETAIL_TIMEOUT_MS,
+      );
+      return { p, info: d.jobPostingInfo ?? null };
+    } catch {
+      return { p, info: null };
+    }
+  });
+
+  const jobs: NormalizedJob[] = [];
+  let detailFailed = 0;
+
+  for (const { p, info } of details) {
+    if (!info) {
+      detailFailed++;
+      continue; // no country, no date, no description — cannot judge it
+    }
+    // Country is authoritative here; the listing pre-filter was only a hint.
+    const country = info.country?.descriptor ?? null;
+    const locationText = [info.location, country].filter(Boolean).join(', ');
+    const isIndia = country
+      ? /^india$/i.test(country)
+      : INDIA_RE.test(locationText);
+    if (!isIndia) continue;
+
+    // Freshness on the REAL date. Rows without one are kept rather than
+    // guessed at — ingest applies the same age rule downstream.
+    if (info.startDate) {
+      const ageDays = Math.floor(
+        (Date.now() - Date.parse(info.startDate)) / 86_400_000,
+      );
+      if (Number.isFinite(ageDays) && ageDays > MAX_AGE_DAYS) continue;
     }
 
-    // One probe request: gives the facets AND the first page.
-    const probe = await postJson<ListResponse>(
-      listUrl(t),
-      { appliedFacets: {}, limit: PAGE_SIZE, offset: 0, searchText: '' },
-      LIST_TIMEOUT_MS,
-    );
-    const india = findIndiaFacet(probe.facets);
-
-    // Strategy A: server-side country facet (41 of 104 tenants).
-    // Strategies B/C: no usable country facet — list everything and pre-filter
-    // locally, because `locations` facet counts double-count multi-location jobs.
-    const { postings, pages, repeatedPage, truncatedReason } = await listAll(
-      t,
-      india ? { [india.param]: [india.id] } : {},
-    );
-
-    const candidates = postings.filter(
-      (p) => p.externalPath && (india ? true : listingLooksIndian(p)) && couldBeFresh(p.postedOn),
-    );
-
-    const details = await mapLimit(candidates, DETAIL_CONCURRENCY, async (p) => {
-      try {
-        const d = await getJson<DetailResponse>(detailUrl(t, p.externalPath!), DETAIL_TIMEOUT_MS);
-        return { p, info: d.jobPostingInfo ?? null };
-      } catch {
-        return { p, info: null };
-      }
+    const description = htmlToText(info.jobDescription ?? '');
+    jobs.push({
+      externalId: info.jobReqId || p.externalPath!,
+      title: info.title || p.title || '',
+      description: capDescription(description),
+      url:
+        info.externalUrl ||
+        `https://${t.tenant}.${t.dc}.myworkdayjobs.com/${t.site}${p.externalPath}`,
+      location: locationText || null,
+      country: country && /^india$/i.test(country) ? 'IN' : null,
+      workMode: workModeFromText(`${info.title ?? ''} ${locationText}`),
+      postedAt: toIsoDateTime(info.startDate),
     });
+  }
 
-    const jobs: NormalizedJob[] = [];
-    let detailFailed = 0;
+  lastStats = {
+    listed: postings.length,
+    indiaCandidates: candidates.length,
+    detailFetched: details.length,
+    detailFailed,
+    acceptedIndiaFresh: jobs.length,
+    pages,
+    repeatedPage,
+    facetFiltered: Boolean(india),
+  };
 
-    for (const { p, info } of details) {
-      if (!info) {
-        detailFailed++;
-        continue; // no country, no date, no description — cannot judge it
-      }
-      // Country is authoritative here; the listing pre-filter was only a hint.
-      const country = info.country?.descriptor ?? null;
-      const locationText = [info.location, country].filter(Boolean).join(', ');
-      const isIndia = country ? /^india$/i.test(country) : INDIA_RE.test(locationText);
-      if (!isIndia) continue;
+  console.log(
+    `[workday] ${t.tenant}/${t.site}: listed=${postings.length} pages=${pages}` +
+      `${repeatedPage ? ' [REPEATED-PAGE]' : ''}${truncatedReason ? ' [TRUNCATED]' : ''} ` +
+      `facet=${india ? 'country' : 'local'} ` +
+      `candidates=${candidates.length} detailFailed=${detailFailed} accepted=${jobs.length}`,
+  );
 
-      // Freshness on the REAL date. Rows without one are kept rather than
-      // guessed at — ingest applies the same age rule downstream.
-      if (info.startDate) {
-        const ageDays = Math.floor((Date.now() - Date.parse(info.startDate)) / 86_400_000);
-        if (Number.isFinite(ageDays) && ageDays > MAX_AGE_DAYS) continue;
-      }
-
-      const description = htmlToText(info.jobDescription ?? '');
-      jobs.push({
-        externalId: info.jobReqId || p.externalPath!,
-        title: info.title || p.title || '',
-        description: capDescription(description),
-        url: info.externalUrl || `https://${t.tenant}.${t.dc}.myworkdayjobs.com/${t.site}${p.externalPath}`,
-        location: locationText || null,
-        country: country && /^india$/i.test(country) ? 'IN' : null,
-        workMode: workModeFromText(`${info.title ?? ''} ${locationText}`),
-        postedAt: toIsoDateTime(info.startDate),
-      });
-    }
-
-    lastStats = {
-      listed: postings.length,
-      indiaCandidates: candidates.length,
-      detailFetched: details.length,
-      detailFailed,
-      acceptedIndiaFresh: jobs.length,
-      pages,
-      repeatedPage,
-      facetFiltered: Boolean(india),
-    };
-
-    console.log(
-      `[workday] ${t.tenant}/${t.site}: listed=${postings.length} pages=${pages}` +
-        `${repeatedPage ? ' [REPEATED-PAGE]' : ''}${truncatedReason ? ' [TRUNCATED]' : ''} ` +
-        `facet=${india ? 'country' : 'local'} ` +
-        `candidates=${candidates.length} detailFailed=${detailFailed} accepted=${jobs.length}`,
-    );
-
-  return { jobs, complete: truncatedReason === null, reason: truncatedReason ?? undefined };
+  return {
+    jobs,
+    complete: truncatedReason === null,
+    reason: truncatedReason ?? undefined,
+  };
 }
 
 export const workdayAdapter: AtsAdapter = {

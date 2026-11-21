@@ -23,14 +23,22 @@ describe('isTransportFault', () => {
     // must still crash loudly rather than be swallowed as network noise.
     const err = Object.assign(new Error('expected 1 board, got 0'), {
       code: 'ERR_ASSERTION',
-      stack: 'AssertionError\n    at crawlBoard (/CarrerOs/apps/workers/src/x.ts:10:1)',
+      stack:
+        'AssertionError\n    at crawlBoard (/CarrerOs/apps/workers/src/x.ts:10:1)',
     });
     expect(isTransportFault(err)).toBe(false);
   });
 
   it('recognises ordinary socket failures', () => {
-    for (const code of ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'UND_ERR_BODY_TIMEOUT']) {
-      expect(isTransportFault(Object.assign(new Error(code), { code }))).toBe(true);
+    for (const code of [
+      'ECONNRESET',
+      'ETIMEDOUT',
+      'ENOTFOUND',
+      'UND_ERR_BODY_TIMEOUT',
+    ]) {
+      expect(isTransportFault(Object.assign(new Error(code), { code }))).toBe(
+        true,
+      );
     }
   });
 
@@ -83,7 +91,9 @@ describe('installProcessGuard', () => {
       Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }),
     );
     expect(exit).not.toHaveBeenCalled();
-    expect(log.error).toHaveBeenCalledWith(expect.stringContaining('transport fault survived'));
+    expect(log.error).toHaveBeenCalledWith(
+      expect.stringContaining('transport fault survived'),
+    );
 
     process.emit('uncaughtException', new TypeError('x.map is not a function'));
     expect(exit).toHaveBeenCalledWith(1);

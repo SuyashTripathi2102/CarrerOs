@@ -29,12 +29,16 @@ const NEGATIVE =
 
 const CITY =
   /\b(bengaluru|bangalore|mumbai|pune|hyderabad|chennai|delhi|noida|gurgaon|gurugram|indore|kolkata|ahmedabad|jaipur|kochi|coimbatore|chandigarh|remote|hybrid)\b/i;
-const EXPERIENCE = /\b\d{1,2}\s*[-–to]{1,3}\s*\d{1,2}\s*(?:\+?\s*)?(?:years?|yrs?)\b/i;
-const EMPLOYMENT = /\b(full[\s-]?time|part[\s-]?time|contract|permanent|internship|freelance)\b/i;
-const DEPARTMENT = /\b(engineering|technology|product|design|data|infrastructure|platform|backend|frontend|devops|qa)\b/i;
+const EXPERIENCE =
+  /\b\d{1,2}\s*[-–to]{1,3}\s*\d{1,2}\s*(?:\+?\s*)?(?:years?|yrs?)\b/i;
+const EMPLOYMENT =
+  /\b(full[\s-]?time|part[\s-]?time|contract|permanent|internship|freelance)\b/i;
+const DEPARTMENT =
+  /\b(engineering|technology|product|design|data|infrastructure|platform|backend|frontend|devops|qa)\b/i;
 const SALARY = /(₹|\bINR\b|\bLPA\b|\$\s?\d|\d\s?(?:lpa|lakhs?))/i;
 // Substring match (not \b): "/careers/react-developer" must count as a job URL.
-const JOB_URL = /(job|career|position|opening|vacanc|apply|requisition|\/jd|\/p\/|posting)/i;
+const JOB_URL =
+  /(job|career|position|opening|vacanc|apply|requisition|\/jd|\/p\/|posting)/i;
 
 const clean = (s: string): string =>
   s
@@ -73,7 +77,9 @@ export function looksJsRendered(html: string): boolean {
       html,
     );
   const textLen = clean(
-    html.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' '),
+    html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' '),
   ).length;
   return spaMarker && anchors < 8 && textLen < 1500;
 }
@@ -97,7 +103,9 @@ function candidates(html: string): Candidate[] {
     if (title) out.push({ title, href: hrefM?.[1] ?? null, context: text });
   }
   // Anchor candidates — title is the link text; href may be the apply URL.
-  for (const m of html.matchAll(/<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+  for (const m of html.matchAll(
+    /<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi,
+  )) {
     const title = clean(m[2]);
     if (title) out.push({ title, href: m[1], context: title });
   }
@@ -127,7 +135,12 @@ type Classified = { job: ExtractedJob } | { reject: string };
 function classify(c: Candidate, baseUrl: string): Classified {
   const title = c.title;
   const words = title.split(/\s+/);
-  if (words.length < 2 || words.length > 9 || title.length < 4 || title.length > 90)
+  if (
+    words.length < 2 ||
+    words.length > 9 ||
+    title.length < 4 ||
+    title.length > 90
+  )
     return { reject: 'bad-length' };
   if (NEGATIVE.test(title)) return { reject: 'negative-signal' }; // certs/services/nav
   if (!ROLE.test(title)) return { reject: 'no-role' }; // a job title names a role
@@ -176,13 +189,16 @@ function classify(c: Candidate, baseUrl: string): Classified {
   // A bare role title with NO supporting signal is probably prose, not a posting.
   if (evidence.length < 2) return { reject: 'insufficient-evidence' };
 
-  return { job: { title, url, location: loc, score: Math.min(100, score), evidence } };
+  return {
+    job: { title, url, location: loc, score: Math.min(100, score), evidence },
+  };
 }
 
 const externalIdFor = (url: string | null, title: string): string => {
   const basis = url ?? title;
   let h = 5381;
-  for (let i = 0; i < basis.length; i++) h = ((h << 5) + h + basis.charCodeAt(i)) >>> 0;
+  for (let i = 0; i < basis.length; i++)
+    h = ((h << 5) + h + basis.charCodeAt(i)) >>> 0;
   return `careerpage-${h.toString(36)}`;
 };
 
@@ -218,8 +234,15 @@ export function extractCareerPage(
   jobs.sort((a, b) => b.score - a.score);
 
   const strong = jobs.filter((j) => j.score >= threshold && j.url);
-  const avg = jobs.length ? Math.round(jobs.reduce((s, j) => s + j.score, 0) / jobs.length) : 0;
-  const confidence = strong.length >= 3 ? Math.min(95, 60 + strong.length) : strong.length ? 55 : Math.min(45, avg);
+  const avg = jobs.length
+    ? Math.round(jobs.reduce((s, j) => s + j.score, 0) / jobs.length)
+    : 0;
+  const confidence =
+    strong.length >= 3
+      ? Math.min(95, 60 + strong.length)
+      : strong.length
+        ? 55
+        : Math.min(45, avg);
 
   const reasons: string[] = [
     `${jobs.length} candidate title(s) survived filtering`,
@@ -249,7 +272,12 @@ export function extractCareerPage(
       descriptionSource: 'MISSING',
       url: j.url!,
       location: j.location,
-      country: j.location && CITY.test(j.location) && !/remote|hybrid/i.test(j.location) ? 'IN' : null,
+      country:
+        j.location &&
+        CITY.test(j.location) &&
+        !/remote|hybrid/i.test(j.location)
+          ? 'IN'
+          : null,
       workMode: /remote/i.test(j.location ?? '') ? 'REMOTE' : null,
     },
   }));

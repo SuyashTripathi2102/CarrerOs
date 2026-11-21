@@ -48,20 +48,26 @@ const ADAPTERS: Record<string, AtsAdapter> = {
  */
 export const CRAWLABLE_ADAPTER_NAMES = Object.keys(ADAPTERS);
 
-export function startCrawlCompanyWorker(api: ApiClient): Worker<CrawlCompanyJobData> {
+export function startCrawlCompanyWorker(
+  api: ApiClient,
+): Worker<CrawlCompanyJobData> {
   return new Worker<CrawlCompanyJobData>(
     QueueNames.CRAWL_COMPANY,
     async (job: Job<CrawlCompanyJobData>) => {
       const { companyId, companyName, atsProvider, atsIdentifier } = job.data;
       const adapter = ADAPTERS[atsProvider];
-      if (!adapter) throw new Error(`No adapter for ATS provider ${atsProvider}`);
+      if (!adapter)
+        throw new Error(`No adapter for ATS provider ${atsProvider}`);
 
       // An adapter that can walk off the end of a board reports whether it saw
       // all of it. One that cannot paginate always sees the whole board, so the
       // absence of fetchBoard is a genuine "complete", not an unknown.
       const board = adapter.fetchBoard
         ? await adapter.fetchBoard(atsIdentifier)
-        : { jobs: await adapter.fetchJobs(atsIdentifier), complete: true as const };
+        : {
+            jobs: await adapter.fetchJobs(atsIdentifier),
+            complete: true as const,
+          };
       if (!board.complete) {
         console.warn(
           `[crawl-company] ${companyName}: PARTIAL board (${board.reason ?? 'unknown'}) — ` +

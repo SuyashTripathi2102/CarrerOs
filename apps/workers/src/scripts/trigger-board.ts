@@ -11,7 +11,13 @@ import { Queue } from 'bullmq';
 import { QueueNames } from '../queues/names';
 import { createRedisConnection } from '../queues/connection';
 
-const BOARDS = ['remoteok', 'hn-hiring', 'adzuna', 'jooble', 'freehire'] as const;
+const BOARDS = [
+  'remoteok',
+  'hn-hiring',
+  'adzuna',
+  'jooble',
+  'freehire',
+] as const;
 
 async function main(): Promise<void> {
   const board = process.argv[2];
@@ -28,7 +34,9 @@ async function main(): Promise<void> {
       { board },
       { attempts: 1, removeOnComplete: true, removeOnFail: false },
     );
-    console.log(`[trigger] queued ${board} (job ${job.id}) — watch the worker log`);
+    console.log(
+      `[trigger] queued ${board} (job ${job.id}) — watch the worker log`,
+    );
   } finally {
     await queue.close();
     await connection.quit();

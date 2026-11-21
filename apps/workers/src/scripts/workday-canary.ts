@@ -18,7 +18,11 @@
  *   npx tsx src/scripts/workday-canary.ts --ingest # also sync through the API
  */
 import { readFileSync } from 'node:fs';
-import { workdayAdapter, workdayLastStats, parseIdentifier } from '../adapters/workday';
+import {
+  workdayAdapter,
+  workdayLastStats,
+  parseIdentifier,
+} from '../adapters/workday';
 import { ApiClient } from '../api-client';
 
 /**
@@ -30,7 +34,9 @@ import { ApiClient } from '../api-client';
  * (single-writer ingest; workers never touch the database), so the cohort is
  * handed in instead.
  */
-function loadCohort(path: string): Map<string, { companyId: string; identifier: string }> {
+function loadCohort(
+  path: string,
+): Map<string, { companyId: string; identifier: string }> {
   const out = new Map<string, { companyId: string; identifier: string }>();
   for (const line of readFileSync(path, 'utf8').split('\n')) {
     const [companyId, identifier] = line.trim().split('\t');
@@ -92,11 +98,23 @@ async function main(): Promise<void> {
 
     if (!identifier || !parseIdentifier(identifier)) {
       rows.push({
-        ...c, ms: 0, listed: 0, candidates: 0, detailFetched: 0, detailFailed: 0,
-        accepted: 0, pages: 0, repeatedPage: false, facetFiltered: false,
-        error: identifier ? `unparseable identifier "${identifier}"` : 'not in cohort file',
+        ...c,
+        ms: 0,
+        listed: 0,
+        candidates: 0,
+        detailFetched: 0,
+        detailFailed: 0,
+        accepted: 0,
+        pages: 0,
+        repeatedPage: false,
+        facetFiltered: false,
+        error: identifier
+          ? `unparseable identifier "${identifier}"`
+          : 'not in cohort file',
       });
-      console.log(`  ${c.tenant.padEnd(12)} SKIPPED — ${rows[rows.length - 1].error}`);
+      console.log(
+        `  ${c.tenant.padEnd(12)} SKIPPED — ${rows[rows.length - 1].error}`,
+      );
       continue;
     }
 
@@ -107,7 +125,10 @@ async function main(): Promise<void> {
       const ms = Date.now() - t0;
       const s = workdayLastStats();
       const row: Row = {
-        ...c, companyId: match!.companyId, identifier, ms,
+        ...c,
+        companyId: match!.companyId,
+        identifier,
+        ms,
         listed: s?.listed ?? 0,
         candidates: s?.indiaCandidates ?? 0,
         detailFetched: s?.detailFetched ?? 0,
@@ -128,7 +149,9 @@ async function main(): Promise<void> {
         // claimed a complete board would be a measurement tool causing the very
         // damage it exists to rule out.
         if (!board.complete) {
-          console.log(`  ${c.tenant}: PARTIAL board (${board.reason}) — retiring nothing`);
+          console.log(
+            `  ${c.tenant}: PARTIAL board (${board.reason}) — retiring nothing`,
+          );
         }
         row.synced = await api!.syncCompanyJobs(
           match!.companyId,
@@ -142,12 +165,23 @@ async function main(): Promise<void> {
         `  ${c.tenant.padEnd(12)} listed=${String(row.listed).padEnd(5)} cand=${String(row.candidates).padEnd(5)} ` +
           `accepted=${String(row.accepted).padEnd(5)} pages=${String(row.pages).padEnd(3)} ` +
           `${row.repeatedPage ? 'REPEAT ' : ''}${row.facetFiltered ? 'facet' : 'local'} ${ms}ms` +
-          (row.synced ? `  → created=${row.synced.created} removed=${row.synced.removed}` : ''),
+          (row.synced
+            ? `  → created=${row.synced.created} removed=${row.synced.removed}`
+            : ''),
       );
     } catch (err) {
       rows.push({
-        ...c, identifier, ms: Date.now() - t0, listed: 0, candidates: 0, detailFetched: 0,
-        detailFailed: 0, accepted: 0, pages: 0, repeatedPage: false, facetFiltered: false,
+        ...c,
+        identifier,
+        ms: Date.now() - t0,
+        listed: 0,
+        candidates: 0,
+        detailFetched: 0,
+        detailFailed: 0,
+        accepted: 0,
+        pages: 0,
+        repeatedPage: false,
+        facetFiltered: false,
         error: (err as Error).message,
       });
       console.log(`  ${c.tenant.padEnd(12)} ERROR — ${(err as Error).message}`);
@@ -159,7 +193,9 @@ async function main(): Promise<void> {
   const sum = (f: keyof Row) => ok.reduce((a, r) => a + (Number(r[f]) || 0), 0);
   const lat = ok.map((r) => r.ms).sort((a, b) => a - b);
 
-  console.log('\n==============================================================');
+  console.log(
+    '\n==============================================================',
+  );
   console.log(' WORKDAY CANARY RESULT');
   console.log('==============================================================');
   console.log(`tenants attempted        ${rows.length}`);
@@ -170,16 +206,31 @@ async function main(): Promise<void> {
   console.log(`detail requests          ${sum('detailFetched')}`);
   console.log(`  failed                 ${sum('detailFailed')}`);
   const df = sum('detailFetched');
-  console.log(`  success rate            ${df ? (100 * (df - sum('detailFailed')) / df).toFixed(1) : '-'}%`);
+  console.log(
+    `  success rate            ${df ? ((100 * (df - sum('detailFailed'))) / df).toFixed(1) : '-'}%`,
+  );
   console.log(`ACCEPTED (India+fresh)   ${sum('accepted')}`);
   console.log(`pages fetched            ${sum('pages')}`);
-  console.log(`repeated-page stops      ${ok.filter((r) => r.repeatedPage).length} -> ${ok.filter((r) => r.repeatedPage).map((r) => r.tenant).join(', ') || 'none'}`);
-  console.log(`facet-filtered tenants   ${ok.filter((r) => r.facetFiltered).length} / ${ok.length}`);
-  console.log(`per-tenant wall time     p50 ${lat[Math.floor(lat.length / 2)] ?? 0}ms · max ${lat[lat.length - 1] ?? 0}ms`);
+  console.log(
+    `repeated-page stops      ${ok.filter((r) => r.repeatedPage).length} -> ${
+      ok
+        .filter((r) => r.repeatedPage)
+        .map((r) => r.tenant)
+        .join(', ') || 'none'
+    }`,
+  );
+  console.log(
+    `facet-filtered tenants   ${ok.filter((r) => r.facetFiltered).length} / ${ok.length}`,
+  );
+  console.log(
+    `per-tenant wall time     p50 ${lat[Math.floor(lat.length / 2)] ?? 0}ms · max ${lat[lat.length - 1] ?? 0}ms`,
+  );
 
   if (ingest) {
-    console.log(`\ningest: created=${ok.reduce((a, r) => a + (r.synced?.created ?? 0), 0)} ` +
-      `removed=${ok.reduce((a, r) => a + (r.synced?.removed ?? 0), 0)}  <-- removed MUST be 0`);
+    console.log(
+      `\ningest: created=${ok.reduce((a, r) => a + (r.synced?.created ?? 0), 0)} ` +
+        `removed=${ok.reduce((a, r) => a + (r.synced?.removed ?? 0), 0)}  <-- removed MUST be 0`,
+    );
   }
 
   const errs = rows.filter((r) => r.error);
@@ -189,12 +240,19 @@ async function main(): Promise<void> {
   }
 
   console.log('\n--- per tenant ---');
-  console.log('tenant'.padEnd(13) + 'behaviour'.padEnd(30) + 'listed  cand   accepted  pages');
+  console.log(
+    'tenant'.padEnd(13) +
+      'behaviour'.padEnd(30) +
+      'listed  cand   accepted  pages',
+  );
   for (const r of rows) {
     console.log(
-      r.tenant.padEnd(13) + r.why.padEnd(30) +
-      String(r.listed).padEnd(8) + String(r.candidates).padEnd(7) +
-      String(r.accepted).padEnd(10) + String(r.pages),
+      r.tenant.padEnd(13) +
+        r.why.padEnd(30) +
+        String(r.listed).padEnd(8) +
+        String(r.candidates).padEnd(7) +
+        String(r.accepted).padEnd(10) +
+        String(r.pages),
     );
   }
 }

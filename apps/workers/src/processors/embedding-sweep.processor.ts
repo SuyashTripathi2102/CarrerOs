@@ -52,7 +52,9 @@ export function startEmbeddingSweepWorker(api: ApiClient): Worker {
  * qualifies. Frequent enough that a lost batch is recovered the same hour.
  */
 export async function ensureEmbeddingSweepSchedule(): Promise<void> {
-  const queue = new Queue(QueueNames.EMBEDDING_SWEEP, { connection: createRedisConnection() });
+  const queue = new Queue(QueueNames.EMBEDDING_SWEEP, {
+    connection: createRedisConnection(),
+  });
   await queue.upsertJobScheduler(
     'embedding-sweep-30m',
     { every: 30 * 60 * 1000 },

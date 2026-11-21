@@ -48,20 +48,38 @@ function isTransientStatus(status: number): boolean {
  * are retried. Other 4xx (a bad key, a refusal, a page gone) and unparseable
  * bodies will not fix themselves in minutes.
  */
-export function describeFetchError(err: unknown): { kind: FetchFailureKind; code: string } {
-  const e = err as { code?: unknown; cause?: { code?: unknown }; message?: unknown } | null;
-  const code = typeof e?.cause?.code === 'string' ? e.cause.code : typeof e?.code === 'string' ? e.code : undefined;
+export function describeFetchError(err: unknown): {
+  kind: FetchFailureKind;
+  code: string;
+} {
+  const e = err as {
+    code?: unknown;
+    cause?: { code?: unknown };
+    message?: unknown;
+  } | null;
+  const code =
+    typeof e?.cause?.code === 'string'
+      ? e.cause.code
+      : typeof e?.code === 'string'
+        ? e.code
+        : undefined;
   if (code && TRANSIENT_CODES.has(code)) return { kind: 'transient', code };
 
   const message = typeof e?.message === 'string' ? e.message : String(err);
   const status = /->\s*(\d{3})\b/.exec(message)?.[1];
   if (status) {
     const s = Number(status);
-    return { kind: isTransientStatus(s) ? 'transient' : 'permanent', code: `HTTP ${s}` };
+    return {
+      kind: isTransientStatus(s) ? 'transient' : 'permanent',
+      code: `HTTP ${s}`,
+    };
   }
-  if (/\btime(d)?\s?out\b/i.test(message)) return { kind: 'transient', code: 'timeout' };
-  if (/fetch failed/i.test(message)) return { kind: 'transient', code: 'fetch failed' };
-  if (err instanceof SyntaxError) return { kind: 'permanent', code: 'invalid JSON' };
+  if (/\btime(d)?\s?out\b/i.test(message))
+    return { kind: 'transient', code: 'timeout' };
+  if (/fetch failed/i.test(message))
+    return { kind: 'transient', code: 'fetch failed' };
+  if (err instanceof SyntaxError)
+    return { kind: 'permanent', code: 'invalid JSON' };
   return { kind: 'permanent', code: err instanceof Error ? err.name : 'error' };
 }
 

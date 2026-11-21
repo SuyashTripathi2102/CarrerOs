@@ -70,6 +70,12 @@ export type BoardJob = z.infer<typeof BoardJobSchema>;
  * the API's `POST /internal/boards/failed` both take their names from here, so a typo cannot record a
  * run for a source that does not exist.
  */
-export const BOARD_SOURCES = ['remoteok', 'hn-hiring', 'adzuna', 'jooble', 'freehire'] as const;
+export const BOARD_SOURCES = [
+  'remoteok',
+  'hn-hiring',
+  'adzuna',
+  'jooble',
+  'freehire',
+] as const;
 export const BoardSourceSchema = z.enum(BOARD_SOURCES);
 export type BoardSource = z.infer<typeof BoardSourceSchema>;

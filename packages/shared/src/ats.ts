@@ -45,7 +45,8 @@ export function detectAts(url: string): AtsDetection {
 
   if (host === 'boards.greenhouse.io' || host === 'job-boards.greenhouse.io') {
     // boards.greenhouse.io/{token}[/jobs/{id}] — "embed" pages put it in ?for=
-    const token = segments[0] === 'embed' ? u.searchParams.get('for') : segments[0];
+    const token =
+      segments[0] === 'embed' ? u.searchParams.get('for') : segments[0];
     return { provider: 'GREENHOUSE', identifier: token ?? null };
   }
   if (host === 'jobs.lever.co') {
@@ -77,7 +78,10 @@ export function detectAts(url: string): AtsDetection {
   if (host.endsWith('.teamtailor.com')) {
     return { provider: 'TEAMTAILOR', identifier: host.split('.')[0] };
   }
-  if (host === 'jobs.smartrecruiters.com' || host === 'careers.smartrecruiters.com') {
+  if (
+    host === 'jobs.smartrecruiters.com' ||
+    host === 'careers.smartrecruiters.com'
+  ) {
     return { provider: 'SMARTRECRUITERS', identifier: segments[0] ?? null };
   }
   if (host === 'apply.workable.com') {
@@ -88,10 +92,17 @@ export function detectAts(url: string): AtsDetection {
   if (host.endsWith('.workable.com') && host !== 'www.workable.com') {
     return { provider: 'WORKABLE', identifier: host.split('.')[0] };
   }
-  if (host.endsWith('.breezy.hr') && host !== 'app.breezy.hr' && host !== 'www.breezy.hr') {
+  if (
+    host.endsWith('.breezy.hr') &&
+    host !== 'app.breezy.hr' &&
+    host !== 'www.breezy.hr'
+  ) {
     return { provider: 'BREEZY', identifier: host.split('.')[0] };
   }
-  if (host.endsWith('.keka.com') && !['www', 'app', 'cdn'].includes(host.split('.')[0])) {
+  if (
+    host.endsWith('.keka.com') &&
+    !['www', 'app', 'cdn'].includes(host.split('.')[0])
+  ) {
     // Tenant from subdomain; the adapter resolves the org document id from
     // the careers page at crawl time (it's embedded in page content, not URL).
     return { provider: 'KEKA', identifier: host.split('.')[0] };

@@ -1,6 +1,11 @@
 import type { NormalizedJob } from '@careeros/shared';
 import { htmlToText } from './html';
-import { AtsAdapter, capDescription, fetchJson, workModeFromText } from './types';
+import {
+  AtsAdapter,
+  capDescription,
+  fetchJson,
+  workModeFromText,
+} from './types';
 
 interface WorkableJob {
   shortcode: string;
@@ -32,8 +37,12 @@ export const workableAdapter: AtsAdapter = {
         location: loc?.city ?? null,
         country: loc?.country ?? null,
         workMode:
-          j.remote || j.location?.telecommuting ? ('REMOTE' as const) : workModeFromText(loc?.city),
-        postedAt: j.published_on ? new Date(j.published_on).toISOString() : null,
+          j.remote || j.location?.telecommuting
+            ? ('REMOTE' as const)
+            : workModeFromText(loc?.city),
+        postedAt: j.published_on
+          ? new Date(j.published_on).toISOString()
+          : null,
       };
     });
   },

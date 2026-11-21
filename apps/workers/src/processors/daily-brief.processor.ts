@@ -42,7 +42,9 @@ export function startDailyBriefWorker(api: ApiClient): Worker {
 }
 
 export async function ensureDailyBriefSchedule(): Promise<void> {
-  const queue = new Queue(QueueNames.DAILY_BRIEF, { connection: createRedisConnection() });
+  const queue = new Queue(QueueNames.DAILY_BRIEF, {
+    connection: createRedisConnection(),
+  });
   const opts = {
     attempts: 3,
     backoff: { type: 'exponential' as const, delay: 60_000 },
