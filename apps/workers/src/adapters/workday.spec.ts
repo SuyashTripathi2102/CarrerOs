@@ -1,9 +1,14 @@
 import {
   couldBeFresh,
   findIndiaFacet,
+  HttpStatusError,
+  listAll,
   listingAgeBound,
   listingLooksIndian,
   parseIdentifier,
+  postWithRateLimitRetry,
+  RATE_LIMIT_RETRIES,
+  retryAfterSeconds,
   toIsoDateTime,
 } from './workday';
 
@@ -331,4 +336,129 @@ describe('a walk that stops short must say so', () => {
     const exact = Array.from({ length: 25 }, (_, i) => full(i * PAGE));
     expect(walk(exact, 25).truncated).toContain('page cap');
   });
+});
+
+describe('rate limit (HTTP 429): retried, then reported as before', () => {
+  const rateLimited = (retryAfterSec: number | null = null) =>
+    new HttpStatusError(
+      429,
+      retryAfterSec,
+      'POST https://x.wd1.myworkdayjobs.com/wday/cxs/x/y/jobs -> 429',
+    );
+
+  function scripted(steps: Array<'ok' | Error>) {
+    let calls = 0;
+    const post = () => {
+      const step = steps[calls++] ?? 'ok';
+      return step === 'ok' ? Promise.resolve('page') : Promise.reject(step);
+    };
+    const waits: number[] = [];
+    const wait = (ms: number) => {
+      waits.push(ms);
+      return Promise.resolve();
+    };
+    return { post, wait, waits, calls: () => calls };
+  }
+
+  beforeEach(() =>
+    jest.spyOn(console, 'log').mockImplementation(() => undefined),
+  );
+  afterEach(() => jest.restoreAllMocks());
+
+  it('waits 2 s, then 4 s, and returns the page when the limit lifts', async () => {
+    const s = scripted([rateLimited(), rateLimited(), 'ok']);
+    await expect(
+      postWithRateLimitRetry(s.post, 'acme list @0', s.wait),
+    ).resolves.toBe('page');
+    expect(s.waits).toEqual([2_000, 4_000]);
+    expect(s.calls()).toBe(3);
+  });
+
+  it('honours Retry-After, capped at 30 s', async () => {
+    const s = scripted([rateLimited(7), rateLimited(120), 'ok']);
+    await postWithRateLimitRetry(s.post, 'acme list @0', s.wait);
+    expect(s.waits).toEqual([7_000, 30_000]);
+  });
+
+  it(`gives up after ${RATE_LIMIT_RETRIES} retries and throws the 429, so the board is still reported partial`, async () => {
+    const s = scripted([
+      rateLimited(),
+      rateLimited(),
+      rateLimited(),
+      rateLimited(),
+      'ok',
+    ]);
+    await expect(
+      postWithRateLimitRetry(s.post, 'acme list @0', s.wait),
+    ).rejects.toThrow('-> 429');
+    expect(s.waits).toEqual([2_000, 4_000, 8_000]);
+    expect(s.calls()).toBe(RATE_LIMIT_RETRIES + 1);
+  });
+
+  it('does not retry any other failure', async () => {
+    const s = scripted([new HttpStatusError(500, null, 'POST x -> 500'), 'ok']);
+    await expect(
+      postWithRateLimitRetry(s.post, 'acme list @0', s.wait),
+    ).rejects.toThrow('-> 500');
+    const t = scripted([new Error('fetch failed'), 'ok']);
+    await expect(
+      postWithRateLimitRetry(t.post, 'acme list @0', t.wait),
+    ).rejects.toThrow('fetch failed');
+    expect([...s.waits, ...t.waits]).toEqual([]);
+  });
+
+  it('listAll rides out a 429 on a page and still walks the board to its end', async () => {
+    const realFetch = global.fetch;
+    const page = (n: number) => ({
+      total: n,
+      jobPostings: Array.from({ length: n }, (_, i) => ({
+        externalPath: `/job/x/${i}`,
+        title: `Job ${i}`,
+      })),
+    });
+    const replies = [
+      {
+        ok: false,
+        status: 429,
+        headers: new Headers({ 'retry-after': '0' }),
+        json: () => Promise.resolve({}),
+      },
+      {
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        json: () => Promise.resolve(page(3)),
+      },
+    ];
+    global.fetch = jest.fn(() =>
+      Promise.resolve(replies.shift()),
+    ) as unknown as typeof fetch;
+    try {
+      const out = await listAll(
+        { tenant: 'acme', dc: 'wd1', site: 'Careers' },
+        {},
+      );
+      expect(out.postings).toHaveLength(3);
+      expect(out.truncatedReason).toBeNull();
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    } finally {
+      global.fetch = realFetch;
+    }
+  });
+
+  it.each([
+    [null, null],
+    ['', null],
+    ['  ', null],
+    ['7', 7],
+    ['0', 0],
+    ['-1', null],
+    ['soon', null],
+    ['Wed, 21 Oct 2026 07:28:00 GMT', null],
+  ])(
+    'reads Retry-After %p as %p (a missing header is "no value", never "retry now")',
+    (h, want) => {
+      expect(retryAfterSeconds(h)).toBe(want);
+    },
+  );
 });

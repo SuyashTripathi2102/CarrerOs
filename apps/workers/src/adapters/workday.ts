@@ -44,8 +44,9 @@ const UA = 'CareerOS/0.1 (personal job-search agent)';
 const PAGE_SIZE = 20;
 /** Listing pages per tenant. Chosen bound, not a measured optimum. */
 const MAX_PAGES = Number(process.env.WORKDAY_MAX_PAGES ?? 25);
-/** Parallel detail fetches per tenant. Deliberately low: no rate limit has ever
- *  been observed, but only because nothing has pushed hard enough to find one. */
+/** Parallel detail fetches per tenant. Deliberately low. Workday's rate limit
+ *  has now been seen on the LIST endpoint (HTTP 429, 75 times on 22-23 Nov 2026,
+ *  across a dozen large tenants crawled at the same time); see RATE_LIMIT_RETRIES. */
 const DETAIL_CONCURRENCY = Number(process.env.WORKDAY_DETAIL_CONCURRENCY ?? 3);
 const PAGE_DELAY_MS = 150;
 const LIST_TIMEOUT_MS = 20_000;
@@ -53,7 +54,72 @@ const DETAIL_TIMEOUT_MS = 15_000;
 /** Only jobs a human could still act on; mirrors RECONCILE_MAX_AGE_DAYS. */
 const MAX_AGE_DAYS = 45;
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** A non-2xx reply. The message is the same "POST <url> -> <status>" as before. */
+export class HttpStatusError extends Error {
+  constructor(
+    readonly status: number,
+    /** Seconds from a numeric Retry-After header, or null. */
+    readonly retryAfterSec: number | null,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'HttpStatusError';
+  }
+}
+
+/**
+ * A numeric Retry-After header in seconds, or null. A missing header is null, and
+ * Number(null) is 0: read naively it would mean "retry now". An HTTP-date is not
+ * parsed (null, so the default backoff applies).
+ */
+export function retryAfterSeconds(header: string | null): number | null {
+  if (header == null || header.trim() === '') return null;
+  const n = Number(header);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+/** Retries of one list page after HTTP 429, waiting Retry-After or 2 s, 4 s, 8 s. */
+export const RATE_LIMIT_RETRIES = 3;
+const RATE_LIMIT_BASE_MS = 2_000;
+/** A Retry-After longer than this is capped: the next page should not wait minutes. */
+const RATE_LIMIT_MAX_WAIT_MS = 30_000;
+
+/**
+ * Runs `post`, retrying only after HTTP 429 (Workday's rate limit), at most
+ * RATE_LIMIT_RETRIES times. Every other failure, and a 429 after the last retry,
+ * is thrown as it was, so the caller's partial-board handling is unchanged.
+ */
+export async function postWithRateLimitRetry<T>(
+  post: () => Promise<T>,
+  label: string,
+  wait: (ms: number) => Promise<void> = sleep,
+): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await post();
+    } catch (err) {
+      if (
+        !(err instanceof HttpStatusError) ||
+        err.status !== 429 ||
+        attempt >= RATE_LIMIT_RETRIES
+      ) {
+        throw err;
+      }
+      const ms = Math.min(
+        RATE_LIMIT_MAX_WAIT_MS,
+        err.retryAfterSec != null
+          ? err.retryAfterSec * 1000
+          : RATE_LIMIT_BASE_MS * 2 ** attempt,
+      );
+      console.log(
+        `[workday] ${label}: rate-limited (429), retry ${attempt + 1}/${RATE_LIMIT_RETRIES} in ${Math.round(ms / 1000)} s`,
+      );
+      await wait(ms);
+    }
+  }
+}
 
 const INDIA_RE =
   /india|bengaluru|bangalore|mumbai|pune|new delhi|delhi|hyderabad|chennai|noida|gurgaon|gurugram|indore|kolkata|ahmedabad|jaipur|kochi|trivandrum|chandigarh|gift city/i;
@@ -210,7 +276,13 @@ async function postJson<T>(
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(timeoutMs),
   });
-  if (!res.ok) throw new Error(`POST ${url} -> ${res.status}`);
+  if (!res.ok) {
+    throw new HttpStatusError(
+      res.status,
+      retryAfterSeconds(res.headers?.get?.('retry-after') ?? null),
+      `POST ${url} -> ${res.status}`,
+    );
+  }
   return (await res.json()) as T;
 }
 
@@ -249,10 +321,14 @@ export async function listAll(
   for (let offset = 0; pages < maxPages; offset += PAGE_SIZE) {
     let page: ListResponse;
     try {
-      page = await postJson<ListResponse>(
-        listUrl(t),
-        { appliedFacets, limit: PAGE_SIZE, offset, searchText: '' },
-        LIST_TIMEOUT_MS,
+      page = await postWithRateLimitRetry(
+        () =>
+          postJson<ListResponse>(
+            listUrl(t),
+            { appliedFacets, limit: PAGE_SIZE, offset, searchText: '' },
+            LIST_TIMEOUT_MS,
+          ),
+        `${t.tenant} list @${offset}`,
       );
     } catch (err) {
       // Keep what we have, but SAY that it is partial. The comment that used to
