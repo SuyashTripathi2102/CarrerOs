@@ -29,7 +29,7 @@ docker ps -a --format '{{.Names}}' | grep -qx "$SCRATCH" && fail "container $SCR
 IMAGE="$(docker inspect -f '{{.Image}}' "$LIVE" 2>/dev/null || true)"
 [[ -n "$IMAGE" ]] || fail "cannot read the image of $LIVE"
 
-trap 'docker rm -f "$SCRATCH" >/dev/null 2>&1 || true; echo "[verify] scratch container removed"' EXIT
+trap 'docker rm -f -v "$SCRATCH" >/dev/null 2>&1 || true; echo "[verify] scratch container and its volume removed"' EXIT
 
 step "restoring ${DUMP_FILE##*/} into a throwaway container"
 docker run -d --rm --name "$SCRATCH" --network none --pull never \
