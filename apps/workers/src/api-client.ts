@@ -38,7 +38,7 @@ export class ApiClient {
     return this.request('POST', `/internal/matches/reconcile?cap=${cap}`);
   }
 
-  triggerDailyBrief(): Promise<{ sent: number }> {
+  triggerDailyBrief(): Promise<{ sent: number; skipped?: number }> {
     return this.request('POST', '/internal/daily-brief');
   }
 

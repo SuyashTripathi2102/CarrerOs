@@ -192,7 +192,7 @@ describe('the section inside the brief', () => {
 
   it('a failing query costs the section, not the brief', async () => {
     const { service, sent } = build({ guard: 'on', queryThrows: true });
-    await expect(service.sendAll()).resolves.toEqual({ sent: 1 });
+    await expect(service.sendAll()).resolves.toEqual({ sent: 1, skipped: 0 });
     expect(sent[0]).toContain('Daily Brief');
     expect(sent[0]).not.toContain('Large retirements');
     expect(Logger.prototype.warn).toHaveBeenCalledWith(

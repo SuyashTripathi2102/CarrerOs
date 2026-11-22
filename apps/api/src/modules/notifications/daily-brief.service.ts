@@ -1,4 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -8,7 +12,7 @@ import {
 import { activeVersionSql, notActedOnSql } from '../matching/active-resume.sql';
 import { locationTags } from '../matching/location-filter';
 import { opportunityScore, type HiringTrend } from '../matching/opportunity-score';
-import { TelegramChannel } from './channels';
+import { TelegramChannel, TelegramSendError } from './channels';
 import { publicDashboardUrl } from './dashboard-url';
 
 /**
@@ -18,6 +22,31 @@ import { publicDashboardUrl } from './dashboard-url';
  * worth a person's attention.
  */
 export const LARGE_RETIREMENT_MIN = 50;
+
+/** The calendar day in IST (UTC+05:30, no daylight saving), as YYYY-MM-DD. */
+export function istDay(now: Date): string {
+  return new Date(now.getTime() + 5.5 * 3_600_000).toISOString().slice(0, 10);
+}
+
+/**
+ * Whether a failed brief may be sent again without risking a duplicate. Only failures where
+ * the message certainly did not arrive qualify: nothing was sent yet (the brief could not be
+ * composed), the connection never opened (DNS, unreachable: the wake-from-sleep case), Telegram
+ * asked us to slow down, or answered 5xx. A timeout or a lost reply ('ambiguous') may have
+ * delivered it, and a refused bot or chat ('config', 'rejected') would only fail again.
+ */
+export function briefFailureIsRetryable(
+  err: unknown,
+  sendAttempted: boolean,
+): boolean {
+  if (!sendAttempted) return true;
+  return (
+    err instanceof TelegramSendError &&
+    (err.failure === 'not-sent' ||
+      err.failure === 'rate-limited' ||
+      err.failure === 'server')
+  );
+}
 const LARGE_RETIREMENT_LINES = 5;
 
 export interface LargeRetirement {
@@ -52,6 +81,8 @@ export class DailyBriefService {
 
   private readonly dashboardUrl: string | null;
   private readonly largeRetirementsOn: boolean;
+  /** userId -> the IST day their scheduled brief last went out, so a retried job never repeats it. */
+  private readonly briefSentOn = new Map<string, string>();
 
   /**
    * Midday CONSIDER digest (notification policy, 2026-07-09): APPLY jobs push
@@ -117,8 +148,17 @@ export class DailyBriefService {
     return { sent };
   }
 
-  /** Compose + send the brief for every user with a parsed primary resume. */
-  async sendAll(): Promise<{ sent: number }> {
+  /**
+   * Compose + send the brief for every user with a parsed primary resume, at most once per IST day.
+   *
+   * If any user's brief certainly did not arrive (see briefFailureIsRetryable), this throws after
+   * trying everyone, so the worker's job fails and BullMQ retries it; users already served today
+   * are skipped on the retry. On 22 Nov 2026 the brief that fired as the laptop woke failed on
+   * DNS (EAI_AGAIN) and was lost, because the failure was logged and the job still succeeded.
+   */
+  async sendAll(
+    now: Date = new Date(),
+  ): Promise<{ sent: number; skipped: number }> {
     const users = await this.prisma.user.findMany({
       where: {
         resumes: { some: { isPrimary: true, versions: { some: { embedding: { isNot: null } } } } },
@@ -126,27 +166,44 @@ export class DailyBriefService {
       select: { id: true, name: true },
     });
 
+    const today = istDay(now);
     let sent = 0;
+    let skipped = 0;
+    let retryable = 0;
     for (const user of users) {
+      if (this.briefSentOn.get(user.id) === today) {
+        skipped++;
+        continue;
+      }
+      let sendAttempted = false;
       try {
         const text = await this.compose(user.id, user.name);
         if (this.telegram.isConfigured()) {
+          sendAttempted = true;
           await this.telegram.send(text, {
             buttons: this.dashboardUrl
               ? [[{ text: '📊 Open Mission Control', url: this.dashboardUrl }]]
               : undefined,
           });
+          this.briefSentOn.set(user.id, today);
           sent++;
         } else {
           this.logger.log(`[daily-brief]\n${text.replace(/<[^>]+>/g, '')}`);
         }
       } catch (err) {
+        const again = briefFailureIsRetryable(err, sendAttempted);
+        if (again) retryable++;
         this.logger.error(
-          `daily brief failed for ${user.id}: ${err instanceof Error ? err.message : err}`,
+          `daily brief failed for ${user.id}${again ? ' (will retry)' : ''}: ${err instanceof Error ? err.message : err}`,
         );
       }
     }
-    return { sent };
+    if (retryable > 0) {
+      throw new ServiceUnavailableException(
+        `daily brief not delivered to ${retryable} user(s); sent ${sent}, skipped ${skipped}: retry`,
+      );
+    }
+    return { sent, skipped };
   }
 
   /** Structured brief — consumed by the Telegram formatter AND the dashboard. */

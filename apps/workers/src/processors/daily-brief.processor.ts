@@ -34,7 +34,9 @@ export function startDailyBriefWorker(api: ApiClient): Worker {
         console.warn(`[company-signals] refresh skipped: ${String(err)}`);
       }
       const res = await api.triggerDailyBrief();
-      console.log(`[daily-brief] sent: ${res.sent}`);
+      console.log(
+        `[daily-brief] sent: ${res.sent}${res.skipped ? `, skipped ${res.skipped} (already sent today)` : ''}`,
+      );
       return res;
     },
     { connection: createRedisConnection() },
@@ -45,8 +47,12 @@ export async function ensureDailyBriefSchedule(): Promise<void> {
   const queue = new Queue(QueueNames.DAILY_BRIEF, {
     connection: createRedisConnection(),
   });
+  // 6 attempts, 1-2-4-8-16 min apart: about 31 min of retries. After a laptop wakes, the network can
+  // flap for that long (22 Nov 2026: DNS failures from 22:09 to about 22:40 IST). The API refuses only
+  // failures that certainly did not deliver, and skips users already served today, so a retry never
+  // sends a brief twice.
   const opts = {
-    attempts: 3,
+    attempts: 6,
     backoff: { type: 'exponential' as const, delay: 60_000 },
     removeOnComplete: true,
     removeOnFail: true,
