@@ -32,12 +32,16 @@ export const BOARDS = {
 } satisfies Record<BoardSource, BoardFetcher>;
 
 /**
- * Retries at +5, +10 and +20 minutes. A daily crawl that fires the moment a
- * laptop wakes meets a network that is not up yet; an immediate retry fails the
- * same way, so the delay is what makes the retry useful.
+ * Retries at +5, +10, +20, +40 and +80 minutes (about 2.6 hours in all). A daily crawl
+ * that fires the moment a laptop wakes meets a network that is not up yet; an immediate
+ * retry fails the same way, so the delay is what makes the retry useful. On 22 Nov 2026
+ * the Wi-Fi flapped for about 40 minutes after the wake: Jooble's four attempts
+ * (22:09 to 22:48 IST) all failed (EAI_AGAIN, ENETUNREACH) and the day's crawl was lost,
+ * while later attempts would have found the network settled. At most 6 attempts of one
+ * board, a few requests each, once a day.
  */
 export const BOARD_RETRY = {
-  attempts: 4,
+  attempts: 6,
   backoff: { type: 'exponential' as const, delay: 5 * 60_000 },
 };
 

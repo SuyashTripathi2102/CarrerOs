@@ -2,6 +2,7 @@ import { Job, Queue, Worker } from 'bullmq';
 import IORedis from 'ioredis';
 import type { BoardJob, BoardSource } from '@careeros/shared';
 import {
+  BOARD_RETRY,
   boardJobProcessor,
   type CrawlBoardJobData,
 } from './crawl-board.processor';
@@ -28,8 +29,11 @@ import {
 const REDIS = process.env.W5_INT_REDIS_URL;
 const describeRedis = REDIS ? describe : describe.skip;
 const QUEUE = 'w5-int-crawl-board';
-/** BOARD_RETRY's 4 attempts, with a 50 ms backoff instead of +5/+10/+20 minutes. */
-const FAST = { attempts: 4, backoff: { type: 'fixed' as const, delay: 50 } };
+/** BOARD_RETRY's attempts, with a 50 ms backoff instead of +5/+10/+20/+40/+80 minutes. */
+const FAST = {
+  attempts: BOARD_RETRY.attempts,
+  backoff: { type: 'fixed' as const, delay: 50 },
+};
 const ONE_JOB = [
   {
     company: { name: 'Acme' },
@@ -173,14 +177,14 @@ describeRedis('crawl-board under real BullMQ (W5 fix)', () => {
     expect(api.ingestBoardJobs).toHaveBeenCalledWith('jooble', ONE_JOB);
   }, 30_000);
 
-  it('an outage through all 4 attempts: failed after 4 fetches, exactly one FAILED run', async () => {
+  it(`an outage through all ${BOARD_RETRY.attempts} attempts: failed after ${BOARD_RETRY.attempts} fetches, exactly one FAILED run`, async () => {
     const api = fakeApi();
     const f = scripted([OUTAGE]);
 
     const end = await runJob(f.fetcher, api);
 
     expect(end.state).toBe('failed');
-    expect(f.calls()).toBe(4);
+    expect(f.calls()).toBe(BOARD_RETRY.attempts);
     expect(api.recordBoardFailure).toHaveBeenCalledTimes(1);
     expect(api.recordBoardFailure).toHaveBeenCalledWith(
       'jooble',
@@ -251,7 +255,7 @@ describeRedis('crawl-board under real BullMQ (W5 fix)', () => {
     expect(api.recordBoardFailure).not.toHaveBeenCalled();
   }, 30_000);
 
-  it('recording fails on the last of 4 attempts: the job still fails with the classified reason', async () => {
+  it(`recording fails on the last of ${BOARD_RETRY.attempts} attempts: the job still fails with the classified reason`, async () => {
     const api = fakeApi();
     api.recordBoardFailure.mockRejectedValue(
       new Error('API POST /internal/boards/failed -> 503: unavailable'),
@@ -261,7 +265,7 @@ describeRedis('crawl-board under real BullMQ (W5 fix)', () => {
     const end = await runJob(f.fetcher, api);
 
     expect(end.state).toBe('failed');
-    expect(f.calls()).toBe(4);
+    expect(f.calls()).toBe(BOARD_RETRY.attempts);
     expect(api.recordBoardFailure).toHaveBeenCalledTimes(1);
     expect(end.failedReason).toBe(OUTAGE_REASON);
   }, 30_000);
