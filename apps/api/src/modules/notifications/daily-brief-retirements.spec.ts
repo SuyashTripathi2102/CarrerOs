@@ -100,14 +100,18 @@ function build(
     telegram as never,
     config as never,
   );
+  // data()'s real shape: the v2 brief reads mustApply and worthALook as well.
   jest.spyOn(service, 'data').mockResolvedValue({
     newJobs24h: 0,
     indiaNew24h: 0,
+    recommended24h: 0,
     topOpps: [],
+    mustApply: [],
+    worthALook: [],
     trending: [],
     missingSkills: [],
     followUps: [],
-  } as never);
+  });
   return { service, sent, queries, params, prisma };
 }
 

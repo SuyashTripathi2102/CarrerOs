@@ -10,6 +10,13 @@ import { locationTags } from '../matching/location-filter';
 import { opportunityScore, type HiringTrend } from '../matching/opportunity-score';
 import { TelegramChannel } from './channels';
 import { publicDashboardUrl } from './dashboard-url';
+import {
+  ageLabel,
+  formatBrief,
+  formatDigest,
+  type JobLine,
+  PLACEHOLDER_TITLE_PG,
+} from './telegram-format';
 
 /**
  * A retirement gets a line in the brief when it retired at least this many
@@ -71,10 +78,22 @@ export class DailyBriefService {
     let sent = 0;
     for (const user of users) {
       const jobs = await this.prisma.$queryRaw<
-        { matchId: string; score: number; title: string; company: string; jobId: string }[]
+        {
+          matchId: string;
+          score: number;
+          title: string;
+          company: string;
+          jobId: string;
+          url?: string;
+          location?: string | null;
+          workMode?: string | null;
+          fit?: number | null;
+          action?: string | null;
+        }[]
       >`
         SELECT m.id AS "matchId", round(m."opportunityScore") AS score, j.title,
-               c.name AS company, j.id AS "jobId"
+               c.name AS company, j.id AS "jobId", j.url, j.location, j."workMode"::text AS "workMode",
+               m."overallScore" AS fit, m."actionRecommendation" AS action
         FROM job_matches m
         JOIN jobs j ON j.id = m."jobId" AND j.status = 'ACTIVE'
         JOIN companies c ON c.id = j."companyId"
@@ -82,20 +101,27 @@ export class DailyBriefService {
           AND m."resumeVersionId" = ${activeVersionSql(user.id)}
           AND m.verdict = 'CONSIDER'
           AND m."notifiedAt" IS NULL
+          AND j.title !~* ${PLACEHOLDER_TITLE_PG}
           AND COALESCE(j."postedAt", j."firstSeenAt") >= now() - interval '30 days'
           AND (j.country = 'IN' OR j.location ~* 'india|bengaluru|bangalore|mumbai|pune|delhi|hyderabad|chennai|noida|gurgaon|indore|ahmedabad')
           AND ${notActedOnSql(user.id)}
-        ORDER BY m."opportunityScore" DESC
+        ORDER BY CASE m."actionRecommendation" WHEN 'WORTH_APPLYING' THEN 0 WHEN 'REVIEW_FIRST' THEN 1
+                   WHEN 'LOW_PRIORITY' THEN 2 ELSE 3 END,
+                 m."opportunityScore" DESC
         LIMIT 8
       `;
       if (jobs.length === 0) continue;
 
       const lines = [
-        `🟡 <b>Midday digest — ${jobs.length} worth a look</b>`,
-        `Good matches that didn't quite hit "apply now" — your call:`,
-        ``,
-        ...jobs.map(
-          (j) => `• ${j.score} · <b>${escapeHtml(j.title)}</b> — ${escapeHtml(j.company)}`,
+        formatDigest(
+          jobs.map((j) => ({
+            title: j.title,
+            url: j.url ?? '',
+            company: j.company,
+            place: locationTags(j.location ?? null, j.workMode ?? null) || null,
+            fitPct: j.fit != null ? Number(j.fit) : null,
+            note: j.action === 'LOW_PRIORITY' ? 'low priority' : null,
+          })),
         ),
       ];
       const buttons = this.dashboardUrl
@@ -166,25 +192,39 @@ export class DailyBriefService {
           WHERE j."firstSeenAt" >= ${dayAgo}
             AND (j.country = 'IN' OR j.location ~* 'india|bengaluru|bangalore|mumbai|pune|delhi|hyderabad|chennai|noida|gurgaon|gurugram|indore|kolkata')
         `,
-        this.prisma.jobMatch.count({
-          where: {
-            userId,
-            resumeVersionId: activeVersionId ?? '',
-            createdAt: { gte: dayAgo },
-            verdict: { in: ['APPLY', 'CONSIDER'] },
-          },
-        }),
-        this.prisma.$queryRaw<
-          { jobId: string; score: number; title: string; company: string; location: string | null; workMode: string | null; url: string }[]
-        >`
+      this.prisma.jobMatch.count({
+        where: {
+          userId,
+          resumeVersionId: activeVersionId ?? '',
+          createdAt: { gte: dayAgo },
+          verdict: { in: ['APPLY', 'CONSIDER'] },
+        },
+      }),
+      this.prisma.$queryRaw<
+        {
+          jobId: string;
+          score: number;
+          title: string;
+          company: string;
+          location: string | null;
+          workMode: string | null;
+          url: string;
+          fit?: number | null;
+          gaps?: string[] | null;
+          seenAt?: Date | null;
+        }[]
+      >`
           SELECT j.id AS "jobId", round(m."opportunityScore") AS score, j.title, c.name AS company,
-                 j.location, j."workMode"::text AS "workMode", j.url
+                 j.location, j."workMode"::text AS "workMode", j.url,
+                 m."overallScore" AS fit, m."missingSkills" AS gaps,
+                 COALESCE(j."postedAt", j."firstSeenAt") AS "seenAt"
           FROM job_matches m
           JOIN jobs j ON j.id = m."jobId" AND j.status = 'ACTIVE'
           JOIN companies c ON c.id = j."companyId"
           WHERE m."userId" = ${userId}
             AND m."resumeVersionId" = ${activeVersionSql(userId)}
             AND m.verdict = 'APPLY'
+            AND j.title !~* ${PLACEHOLDER_TITLE_PG}
             AND COALESCE(j."postedAt", j."firstSeenAt") >= ${weekAgo}
             AND ${notActedOnSql(userId)}
           ORDER BY m."opportunityScore" DESC LIMIT 3
@@ -200,6 +240,7 @@ export class DailyBriefService {
           WHERE m."userId" = ${userId}
             AND m."resumeVersionId" = ${activeVersionSql(userId)}
             AND m.verdict = 'CONSIDER'
+            AND j.title !~* ${PLACEHOLDER_TITLE_PG}
             AND COALESCE(j."postedAt", j."firstSeenAt") >= ${new Date(Date.now() - 30 * 86_400_000)}
             AND ${notActedOnSql(userId)}
           ORDER BY m."opportunityScore" DESC LIMIT 3
@@ -267,55 +308,54 @@ export class DailyBriefService {
   }
 
   private async compose(userId: string, name: string | null): Promise<string> {
-    const { newJobs24h, indiaNew24h, topOpps, trending, missingSkills, followUps } =
-      await this.data(userId);
-
-    const lines: string[] = [
-      `☀️ <b>Daily Brief — ${new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}</b>`,
-      `Good morning${name ? ` ${escapeHtml(name.split(' ')[0])}` : ''} 👋`,
-      ``,
-      `📥 New jobs (24h): <b>${newJobs24h}</b> · 🇮🇳 India: <b>${indiaNew24h}</b>`,
-    ];
-
-    if (topOpps.length > 0) {
-      lines.push(``, `🎯 <b>Today's top opportunities</b> (ranked by fit + referral + freshness)`);
-      topOpps.forEach((j, i) => {
-        const tags = locationTags(j.location, j.workMode);
-        const why = j.why.length ? ` · <i>${escapeHtml(j.why.join(', '))}</i>` : '';
-        const age = j.ageDays <= 0 ? 'today' : `${j.ageDays}d ago`;
-        lines.push(
-          `${i + 1}. <b>${j.score}</b> · <b>${escapeHtml(j.title)}</b> — ${escapeHtml(j.company)}${tags ? ' · ' + escapeHtml(tags) : ''} · ${age}${why}`,
-        );
-      });
-    } else {
-      lines.push(``, `No qualified opportunities today — the bar stays high on purpose.`);
-    }
-
-    if (followUps.length > 0) {
-      lines.push(``, `📬 <b>Follow up</b> — no response yet:`);
-      for (const f of followUps) {
-        lines.push(
-          `• ${escapeHtml(f.title)} — ${escapeHtml(f.company)} · applied ${f.daysWaiting}d ago`,
-        );
-      }
-    }
-
-    if (trending.length > 0) {
-      lines.push(
-        ``,
-        `📈 <b>Hiring this week:</b> ${trending.map((t) => `${escapeHtml(t.company)} (+${t.newJobs7d})`).join(', ')}`,
-      );
-    }
-    if (missingSkills.length > 0) {
-      lines.push(
-        `🧩 <b>Learn next:</b> ${missingSkills.map((s) => `${escapeHtml(s.skill)} → unlocks ${s.count} matches`).join(' · ')}`,
-      );
-    }
-
-    const retirements = await this.largeRetirementLines();
-    if (retirements.length > 0) lines.push(``, ...retirements);
-
-    return lines.join('\n');
+    const {
+      newJobs24h,
+      indiaNew24h,
+      topOpps,
+      mustApply,
+      worthALook,
+      missingSkills,
+      followUps,
+    } = await this.data(userId);
+    const place = (j: { location: string | null; workMode: string | null }) =>
+      locationTags(j.location, j.workMode) || null;
+    const doToday: JobLine[] = mustApply.map((j) => ({
+      title: j.title,
+      url: j.url,
+      company: j.company,
+      place: place(j),
+      age: j.seenAt ? ageLabel(new Date(j.seenAt), new Date(j.seenAt)) : null,
+      fitPct: j.fit != null ? Number(j.fit) : null,
+      gaps: Array.isArray(j.gaps) ? j.gaps : [],
+    }));
+    const closest: JobLine[] = topOpps.map((j) => ({
+      title: j.title,
+      url: j.url,
+      company: j.company,
+      place: place(j),
+      age: j.ageDays <= 0 ? 'today' : `${j.ageDays}d ago`,
+    }));
+    return formatBrief({
+      dateLabel: new Date().toLocaleDateString('en-IN', {
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+      }),
+      firstName: name ? name.split(' ')[0] : null,
+      doToday,
+      worthALook: worthALook.map((j) => ({
+        title: j.title,
+        url: j.url,
+        company: j.company,
+        place: place(j),
+      })),
+      closest,
+      followUps,
+      newJobs24h,
+      indiaNew24h,
+      learnNext: missingSkills.map((m) => ({ skill: m.skill, count: m.count })),
+      extra: await this.largeRetirementLines(),
+    });
   }
 
   /**

@@ -28,8 +28,8 @@ import { publicDashboardUrl } from './dashboard-url';
 import { encodeAppliedToken } from './telegram-callback';
 
 // Telegram caps a message at 4096 characters; the rest of the card needs room.
-const REASONING_MAX_CHARS = 2500;
-import { decide, Decision, freshnessLine, salaryLine } from './decision';
+import { decide, Decision, salaryLine } from './decision';
+import { ageLabel, cleanJobUrl, formatAlert, PLACEHOLDER_TITLE } from './telegram-format';
 
 const RENOTIFY_SCORE_DELTA = 5; // re-notify only if the opportunity improved this much
 
@@ -144,6 +144,11 @@ export class NotificationsService {
       return false;
     }
 
+    // A recruiter's placeholder ("Referral - Dummy ID") or a test requisition is not an opening.
+    if (PLACEHOLDER_TITLE.test(match.job.title)) {
+      this.logger.log(`holding notification for "${match.job.title}" — a placeholder posting`);
+      return false;
+    }
     // Board copy of a directly-crawled company? Hold — the official posting
     // (with the real apply link + full description) arrives within the
     // company's crawl-tier interval and notifies then. Never send a user to
@@ -575,8 +580,9 @@ export class NotificationsService {
   }
 
   /**
-   * Decision-first format (ROADMAP Phase D-1): verdict + why in <10 seconds.
-   * The job is evidence; the decision is the product.
+   * Decision-first format, v2 (23 Nov 2026; layout in telegram-format.ts): the decision and one
+   * score, the title as the apply link, one line of facts, only the reasons specific to this job,
+   * and a short analysis. The full analysis stays on the dashboard.
    */
   private formatMatch(
     match: {
@@ -607,41 +613,44 @@ export class NotificationsService {
     twinCount = 1,
     decision: Decision,
   ): string {
-    const lines: string[] = [
-      `<b>${decision.action} · ${decision.banner}</b>`,
-      ``,
-      `<b>${escapeHtml(match.job.title)}</b>`,
-      `${escapeHtml(match.job.company.name)}${(() => {
-        const tags = locationTags(match.job.location, match.job.workMode);
-        return tags ? ' · ' + escapeHtml(tags) : '';
-      })()}`,
-      `${freshnessLine(match.job.postedAt, match.job.firstSeenAt)} · ${salaryLine(match.job.salaryMin, match.job.salaryMax, match.job.currency)}`,
-      ``,
-      `🎯 Resume match: <b>${Math.round(match.overallScore)}%</b>`,
-    ];
+    const { job } = match;
+    const listed = job.salaryMin != null || job.salaryMax != null;
+    return formatAlert({
+      action: decision.action,
+      fitPct: match.overallScore,
+      title: job.title,
+      applyUrl: this.applyUrlFor(job),
+      company: job.company.name,
+      place: locationTags(job.location, job.workMode) || null,
+      age: `posted ${ageLabel(job.postedAt, job.firstSeenAt)}`,
+      salary: listed
+        ? salaryLine(job.salaryMin, job.salaryMax, job.currency).replace(/^💰\s*/u, '')
+        : null,
+      reasons: decision.reasons,
+      missingSkills: match.missingSkills,
+      analysis: match.reasoning,
+      twinCount,
+    });
+  }
 
-    if (match.missingSkills.length > 0) {
-      lines.push(`❌ Missing: ${escapeHtml(match.missingSkills.join(', '))}`);
-    }
-
-    lines.push(``, `<b>Why:</b>`);
-    for (const reason of decision.reasons) lines.push(`• ${escapeHtml(reason)}`);
-
-    if (match.reasoning) {
-      // Full reasoning — the "why" is the product. Telegram allows 4096 chars,
-      // so cap defensively and only ever at a sentence boundary: a hard cut
-      // mid-sentence ("whereas you only…") is worse than saying less.
-      const { text, truncated } = truncateAtSentence(match.reasoning, REASONING_MAX_CHARS);
-      lines.push(``, `<i>${escapeHtml(text)}</i>`);
-      if (truncated) lines.push(`<i>Full analysis on the dashboard →</i>`);
-    }
-
-    if (twinCount > 1) {
-      lines.push(``, `ℹ️ ${twinCount} postings of this role at ${escapeHtml(match.job.company.name)}`);
-    }
-
-    lines.push(``, this.officialApplyLine(match.job));
-    return lines.join('\n');
+  /**
+   * The official-link rule: never route through an aggregator when a better link exists. A
+   * direct-crawl job already carries the official URL; a board copy falls back to the company's
+   * ATS board, then its career page, then the board's own link. The title link, the Apply button
+   * and the "Apply via" line all use this one URL.
+   */
+  private applyUrlFor(job: {
+    url: string;
+    externalId: string;
+    company: { atsProvider: string; atsIdentifier: string | null; careerPageUrl: string | null };
+  }): string {
+    if (!job.externalId.startsWith('remoteok-')) return job.url;
+    const career = job.company.careerPageUrl;
+    return (
+      boardRootUrl(job.company.atsProvider, job.company.atsIdentifier) ??
+      (career && !career.toLowerCase().includes('remoteok') ? career : null) ??
+      job.url
+    );
   }
 
   /** URL buttons (callback buttons need bot polling — Phase D-4). */
@@ -651,12 +660,7 @@ export class NotificationsService {
     externalId: string;
     company: { atsProvider: string; atsIdentifier: string | null; careerPageUrl: string | null };
   }) {
-    const isBoardCopy = job.externalId.startsWith('remoteok-');
-    const applyUrl = isBoardCopy
-      ? (boardRootUrl(job.company.atsProvider, job.company.atsIdentifier) ??
-        job.company.careerPageUrl ??
-        job.url)
-      : job.url;
+    const applyUrl = cleanJobUrl(this.applyUrlFor(job));
 
     const rows = [[{ text: '🚀 Apply', url: applyUrl }]];
     // "Read more": full description + why + track-application, on the dashboard.
@@ -675,46 +679,6 @@ export class NotificationsService {
     return rows;
   }
 
-  /**
-   * The official-link rule: never route through an aggregator when a better
-   * link exists. Direct-crawl jobs already carry the official URL; board
-   * copies fall back to the company's ATS board → career page → board link
-   * (honestly labeled) in that order.
-   */
-  private officialApplyLine(job: {
-    url: string;
-    externalId: string;
-    company: { atsProvider: string; atsIdentifier: string | null; careerPageUrl: string | null };
-  }): string {
-    const isBoardCopy = job.externalId.startsWith('remoteok-');
-    if (!isBoardCopy) return `Apply: ${job.url}`;
-
-    const board = boardRootUrl(job.company.atsProvider, job.company.atsIdentifier);
-    if (board) return `Apply (official board): ${board}`;
-
-    const career = job.company.careerPageUrl;
-    if (career && !career.toLowerCase().includes('remoteok')) {
-      return `Apply (official careers page): ${career}`;
-    }
-    return `Apply (via RemoteOK — no official page found yet): ${job.url}`;
-  }
-
-  /**
-   * Records the alert in-app and pushes it, at most once per alert.
-   *
-   * One notification row per alert, created before the first send: its id is
-   * what the "Applied" button carries back (callback_data is capped at 64 bytes,
-   * so it holds this row, which resolves server-side to the user and the job —
-   * see telegram-callback.ts), and its `payload.delivery` is the alert's
-   * delivery record (alert-delivery.ts). A retry reuses the row, so the in-app
-   * list shows each alert once and a later button still resolves.
-   *
-   *   'sent'          Telegram confirmed it now (or there is no channel: in-app only);
-   *   'already-sent'  the record says it arrived earlier; nothing was sent now;
-   *   'held'          nothing was sent now: refused for good, possibly arrived,
-   *                   not yet due, in flight elsewhere, sending is held, or the
-   *                   record is malformed.
-   */
   private async deliver(
     matchId: string,
     userId: string,
