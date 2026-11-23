@@ -100,6 +100,7 @@ export class DailyBriefService {
     });
 
     let sent = 0;
+    let retryable = 0;
     for (const user of users) {
       const jobs = await this.prisma.$queryRaw<
         { matchId: string; score: number; title: string; company: string; jobId: string }[]
@@ -134,7 +135,18 @@ export class DailyBriefService {
         : undefined;
 
       if (this.telegram.isConfigured()) {
-        await this.telegram.send(lines.join('\n'), { buttons });
+        try {
+          await this.telegram.send(lines.join('\n'), { buttons });
+        } catch (err) {
+          // Same rule as the brief: retry now only what certainly did not arrive. Anything else
+          // (a timeout may have delivered it) is left unmarked, so tomorrow's digest has it again.
+          const again = briefFailureIsRetryable(err, true);
+          if (again) retryable++;
+          this.logger.error(
+            `consider digest failed for ${user.id}${again ? ' (will retry)' : ' (tomorrow)'}: ${err instanceof Error ? err.message : err}`,
+          );
+          continue;
+        }
       } else {
         this.logger.log(`[consider-digest]\n${lines.join('\n').replace(/<[^>]+>/g, '')}`);
       }
@@ -144,6 +156,11 @@ export class DailyBriefService {
         data: { notifiedAt: new Date() },
       });
       sent++;
+    }
+    if (retryable > 0) {
+      throw new ServiceUnavailableException(
+        `consider digest not delivered to ${retryable} user(s); sent ${sent}: retry`,
+      );
     }
     return { sent };
   }

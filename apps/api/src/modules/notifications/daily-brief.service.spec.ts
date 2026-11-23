@@ -4,7 +4,9 @@ import { DailyBriefService, istDay } from './daily-brief.service';
 const LOCAL = 'http://localhost:3000';
 const PUBLIC = 'https://careeros.example.com';
 
-function build(opts: { dashboard?: string; sendThrows?: boolean } = {}) {
+function build(
+  opts: { dashboard?: string; sendThrows?: boolean; sendError?: Error } = {},
+) {
   const calls = { sends: [] as { buttons?: unknown[][] }[], marked: 0 };
   const prisma = {
     user: { findMany: () => Promise.resolve([{ id: 'user-1' }]) },
@@ -28,6 +30,7 @@ function build(opts: { dashboard?: string; sendThrows?: boolean } = {}) {
   const telegram = {
     isConfigured: () => true,
     send: (_text: string, sendOpts: { buttons?: unknown[][] }) => {
+      if (opts.sendError) return Promise.reject(opts.sendError);
       if (opts.sendThrows)
         return Promise.reject(
           new Error('Telegram sendMessage -> 400: rejected'),
@@ -86,8 +89,33 @@ describe('CONSIDER digest', () => {
   it('marks nothing when the send fails, so tomorrow retries them', async () => {
     const { service, calls } = build({ sendThrows: true });
 
-    await expect(service.sendConsiderDigest()).rejects.toThrow('rejected');
+    // An unclassified failure may have delivered: no immediate retry (no duplicate), nothing marked.
+    await expect(service.sendConsiderDigest()).resolves.toEqual({ sent: 0 });
 
+    expect(calls.marked).toBe(0);
+  });
+
+  it('fails the job, so BullMQ retries it, only when the digest certainly did not arrive', async () => {
+    const { service, calls } = build({
+      sendError: new TelegramSendError(
+        'not-sent',
+        'Telegram not reached: EAI_AGAIN',
+      ),
+    });
+    await expect(service.sendConsiderDigest()).rejects.toThrow(
+      /consider digest not delivered.*retry/,
+    );
+    expect(calls.marked).toBe(0);
+  });
+
+  it('does not retry a digest that may have arrived (a timeout)', async () => {
+    const { service, calls } = build({
+      sendError: new TelegramSendError(
+        'ambiguous',
+        'Telegram request timed out',
+      ),
+    });
+    await expect(service.sendConsiderDigest()).resolves.toEqual({ sent: 0 });
     expect(calls.marked).toBe(0);
   });
 });
